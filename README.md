@@ -17,12 +17,8 @@
 To get started with the project and configure the environment, please follow these simple steps:
 
 * 📦 **Step 1:** Open and configure the **`setup.py`** file to match your project dependencies and package settings.
-* ⚙️ **Step 2:** Install the required dependencies using your terminal:
-  ```bash
-  pip install -e .
-  🔑 Step 3: Set up your environment variables (.env) for secure API integration.
 
-▶️ Step 4: Run the application and enjoy seamless automation!
+▶️ Step 2: Run the application and enjoy seamless automation!
 
 ✨ Features
 💎 Modern & Clean UI — Designed for a smooth user experience.
