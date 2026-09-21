@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="theme-color" content="#05070c"/>
+<title>Jarvis App</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #05070c;
+    color: #e8f4ff;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+  }
+  .top {
+    padding: 16px 18px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .brand { font-weight: 700; letter-spacing: 2px; font-size: 15px; }
+  .status {
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.06);
+    color: #9ab4c8;
+  }
+  .status.on { background: rgba(55,255,139,0.15); color: #37ff8b; }
+  .status.off { background: rgba(255,77,109,0.12); color: #ff4d6d; }
+  .main {
+    flex: 1;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+  }
+  .card {
+    background: #0e131c;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    padding: 14px;
+  }
+  .card h3 {
+    font-size: 12px;
+    letter-spacing: 1px;
+    color: #6a8499;
+    margin-bottom: 10px;
+  }
+  input, button, select {
+    font: inherit;
+    border: none;
+    outline: none;
+  }
+  input {
+    width: 100%;
+    background: #1a1c20;
+    color: #fff;
+    border-radius: 12px;
+    padding: 12px 14px;
+    border: 1px solid rgba(255,255,255,0.08);
+    margin-bottom: 8px;
+  }
+  .btn {
+    width: 100%;
+    padding: 13px;
+    border-radius: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn-primary {
+    background: linear-gradient(90deg, #ffb428, #ff8c14);
+    color: #1a1000;
+  }
+  .btn-ghost {
+    background: rgba(255,255,255,0.06);
+    color: #e8f4ff;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .btn-danger {
+    background: rgba(255,77,109,0.15);
+    color: #ff4d6d;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .log {
+    flex: 1;
+    min-height: 140px;
+    max-height: 40vh;
+    overflow-y: auto;
+    font-size: 13px;
+    line-height: 1.45;
+    color: #9ab4c8;
+    white-space: pre-wrap;
+  }
+  .ask {
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px 20px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+  .ask input { margin: 0; flex: 1; }
+  .ask button {
+    width: 48px;
+    border-radius: 14px;
+    background: #0a84ff;
+    color: #fff;
+    font-size: 18px;
+  }
+  .hint { font-size: 12px; color: #6a8499; margin-top: 6px; line-height: 1.4; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="brand">JARVIS APP</div>
+    <div id="st" class="status off">Offline</div>
+  </div>
+
+  <div class="main">
+    <div class="card" id="connectCard">
+      <h3>CONNECT TO PC</h3>
+      <input id="host" placeholder="PC IP  e.g. 192.168.1.10" autocomplete="off"/>
+      <input id="key" placeholder="Pairing key (from Jarvis Dashboard)" autocomplete="off"/>
+      <button class="btn btn-primary" onclick="connect()">Connect (reverse)</button>
+      <p class="hint">
+        Phone opens an outbound connection to your PC — no ADB required.
+        PC and phone must be on the same Wi‑Fi. Open Jarvis → Dashboard to get the key.
+      </p>
+    </div>
+
+    <div class="card" id="ctrlCard" style="display:none">
+      <h3>QUICK ACTIONS</h3>
+      <div class="grid">
+        <button class="btn btn-ghost" onclick="sendCmd('status')">Status</button>
+        <button class="btn btn-ghost" onclick="sendCmd('what can you do')">Help</button>
+        <button class="btn btn-ghost" onclick="sendCmd('mute')">Mute</button>
+        <button class="btn btn-ghost" onclick="sendCmd('unmute')">Unmute</button>
+      </div>
+      <button class="btn btn-danger" style="margin-top:10px" onclick="disconnect()">Disconnect</button>
+    </div>
+
+    <div class="card" style="flex:1; display:flex; flex-direction:column">
+      <h3>LIVE LOG</h3>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+
+  <div class="ask">
+    <input id="msg" placeholder="Ask anything…" onkeydown="if(event.key==='Enter')sendMsg()"/>
+    <button onclick="sendMsg()">✦</button>
+  </div>
+
+<script>
+let ws = null;
+let token = localStorage.getItem('jarvis_token') || '';
+let host = localStorage.getItem('jarvis_host') || '';
+
+const $ = (id) => document.getElementById(id);
+if (host) $('host').value = host;
+if (token) $('key').value = token;
+
+function log(line) {
+  const el = $('log');
+  el.textContent += line + '\n';
+  el.scrollTop = el.scrollHeight;
+}
+
+function setOnline(on) {
+  const st = $('st');
+  st.textContent = on ? 'Online' : 'Offline';
+  st.className = 'status ' + (on ? 'on' : 'off');
+  $('connectCard').style.display = on ? 'none' : 'block';
+  $('ctrlCard').style.display = on ? 'block' : 'none';
+}
+
+async function connect() {
+  host = $('host').value.trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
+  token = $('key').value.trim();
+  if (!host || !token) {
+    alert('Enter PC IP and pairing key');
+    return;
+  }
+  localStorage.setItem('jarvis_host', host);
+  localStorage.setItem('jarvis_token', token);
+
+  // Reverse connection: phone → PC (outbound WebSocket)
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  // If opened from the PC dashboard itself, use same origin
+  const base = host.includes(':') ? host : (host + ':8000');
+  const url = `${proto}://${base}/ws?token=${encodeURIComponent(token)}`;
+  log('Connecting to ' + base + ' …');
+  try {
+    if (ws) try { ws.close(); } catch(e) {}
+    ws = new WebSocket(url);
+    ws.onopen = () => {
+      setOnline(true);
+      log('Connected (reverse link).');
+      ws.send(JSON.stringify({ type: 'hello', client: 'jarvis_app', device: navigator.userAgent }));
+    };
+    ws.onclose = () => {
+      setOnline(false);
+      log('Disconnected.');
+    };
+    ws.onerror = () => log('Connection error — check IP, key, same Wi‑Fi.');
+    ws.onmessage = (ev) => {
+      try {
+        const m = JSON.parse(ev.data);
+        if (m.type === 'sys' || m.type === 'log') log(m.text || JSON.stringify(m));
+        else if (m.type === 'reply') log('Jarvis: ' + (m.text || ''));
+        else log(JSON.stringify(m));
+      } catch {
+        log(ev.data);
+      }
+    };
+  } catch (e) {
+    log('Failed: ' + e);
+  }
+}
+
+function disconnect() {
+  if (ws) ws.close();
+  setOnline(false);
+}
+
+function sendCmd(text) {
+  if (!ws || ws.readyState !== 1) { log('Not connected'); return; }
+  ws.send(JSON.stringify({ type: 'command', text }));
+  log('You: ' + text);
+}
+
+function sendMsg() {
+  const t = $('msg').value.trim();
+  if (!t) return;
+  $('msg').value = '';
+  sendCmd(t);
+}
+
+// Auto-reconnect if opened from dashboard with token in query
+(function() {
+  const q = new URLSearchParams(location.search);
+  if (q.get('host')) $('host').value = q.get('host');
+  if (q.get('key')) $('key').value = q.get('key');
+  if (q.get('autostart') === '1' && $('host').value && $('key').value) connect();
+})();
+</script>
+</body>
+</html>
