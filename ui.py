@@ -4070,6 +4070,26 @@ class MainWindow(QMainWindow):
         )
         lay = QHBoxLayout(w)
         lay.setContentsMargins(16, 0, 16, 0)
+        lay.setSpacing(12)
+
+        # Top-left: live clock + date
+        clock_box = QVBoxLayout()
+        clock_box.setContentsMargins(0, 4, 0, 4)
+        clock_box.setSpacing(0)
+        self._clock_lbl = QLabel("--:--:--")
+        self._clock_lbl.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+        self._clock_lbl.setStyleSheet(
+            f"color: {C.PRI}; background: transparent; letter-spacing: 1px;"
+        )
+        self._date_lbl = QLabel("---")
+        self._date_lbl.setFont(QFont("Segoe UI", 9))
+        self._date_lbl.setStyleSheet(
+            f"color: {C.TEXT_MED}; background: transparent;"
+        )
+        clock_box.addWidget(self._clock_lbl)
+        clock_box.addWidget(self._date_lbl)
+        lay.addLayout(clock_box)
+
         lay.addStretch()
 
         # Pill tab group
@@ -4128,11 +4148,6 @@ class MainWindow(QMainWindow):
         self._title_lbl.setVisible(False)
         self._sub_lbl = QLabel("")
         self._sub_lbl.setVisible(False)
-        self._clock_lbl = QLabel("")
-        self._clock_lbl.setVisible(False)
-        self._date_lbl = QLabel("")
-        self._date_lbl.setVisible(False)
-
         # Default: dashboard (HUD) active
         self._tab_dashboard.setChecked(True)
         self._active_nav = "dashboard"
@@ -4280,6 +4295,7 @@ class MainWindow(QMainWindow):
 
         try:
             self._clock_lbl.setText(time.strftime("%H:%M:%S"))
+            # e.g. Tue 22 Sep 2026
             self._date_lbl.setText(time.strftime("%a %d %b %Y"))
         except Exception:
             pass
