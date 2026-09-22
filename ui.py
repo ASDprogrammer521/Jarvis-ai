@@ -1223,14 +1223,14 @@ class MetricBar(QWidget):
             bar_col = qcol(self._color)
 
         # Label
-        p.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        p.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
         p.setPen(QPen(qcol(C.TEXT_DIM), 1))
         p.drawText(QRectF(8, 4, 48, 14),
                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                    self._label)
 
         # Value text
-        p.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        p.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
         p.setPen(QPen(bar_col if self._text != "--" else qcol(C.TEXT_DIM), 1))
         p.drawText(QRectF(0, 3, W - 8, 16),
                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
@@ -3283,7 +3283,13 @@ class MainWindow(QMainWindow):
         body.setSpacing(0)
 
         self._left_panel = self._build_left_panel()
-        self._left_panel.setVisible(False)  # clean UI — metrics available in Settings
+        _sys_vis = False
+        try:
+            from memory.config_manager import load_api_keys
+            _sys_vis = bool(load_api_keys().get("sys_monitor_visible", False))
+        except Exception:
+            _sys_vis = False
+        self._left_panel.setVisible(_sys_vis)
         body.addWidget(self._left_panel, stretch=0)
 
         # Center column: HUD + resizable content panel via QSplitter
@@ -3965,9 +3971,9 @@ class MainWindow(QMainWindow):
     def _build_header(self) -> QWidget:
         """Top navigation: Dashboard | Chat | Settings (clean pill tabs)."""
         w = QWidget()
-        w.setFixedHeight(56)
+        w.setFixedHeight(58)
         w.setStyleSheet(
-            f"background: {C.DARK}; border-bottom: 1px solid rgba(255,255,255,0.05);"
+            f"background: {C.DARK}; border-bottom: 1px solid rgba(255,255,255,0.06);"
         )
         lay = QHBoxLayout(w)
         lay.setContentsMargins(16, 0, 16, 0)
@@ -4040,7 +4046,16 @@ class MainWindow(QMainWindow):
         return w
 
     def _on_nav_tab(self, key: str) -> None:
-        """Dashboard = HUD · Chat = message history · Settings = full-screen page."""
+        """Dashboard = HUD · Chat = message history · Settings = full-screen page.
+        Clicking the active Chat/Settings tab again returns to Dashboard."""
+        prev = getattr(self, "_active_nav", "dashboard")
+
+        # Toggle off: same tab pressed again
+        if key == "chat" and prev == "chat":
+            key = "dashboard"
+        elif key == "settings" and prev == "settings":
+            key = "dashboard"
+
         self._active_nav = key
         for btn, k in (
             (self._tab_dashboard, "dashboard"),
@@ -4049,9 +4064,16 @@ class MainWindow(QMainWindow):
         ):
             btn.setChecked(k == key)
 
-        # Chat history panel (right) only when Chat is selected
+        # Chat panel with smooth show/hide
         if hasattr(self, "_right_panel"):
-            self._right_panel.setVisible(key == "chat")
+            show_chat = (key == "chat")
+            if show_chat and not self._right_panel.isVisible():
+                self._right_panel.setVisible(True)
+                self._animate_panel(self._right_panel, True)
+            elif not show_chat and self._right_panel.isVisible():
+                self._animate_panel(self._right_panel, False)
+            else:
+                self._right_panel.setVisible(show_chat)
 
         # Full-screen settings
         if hasattr(self, "_settings_page"):
@@ -4106,7 +4128,63 @@ class MainWindow(QMainWindow):
                     pass
         self._prev_nav = key
 
+    def _animate_panel(self, widget, show: bool) -> None:
+        """Fade + light width animation for side panels."""
+        try:
+            from PyQt6.QtWidgets import QGraphicsOpacityEffect
+            from PyQt6.QtCore import QPropertyAnimation, QEasingCurve
+            if not hasattr(widget, "_opacity_fx"):
+                fx = QGraphicsOpacityEffect(widget)
+                widget.setGraphicsEffect(fx)
+                widget._opacity_fx = fx
+            fx = widget._opacity_fx
+            anim = QPropertyAnimation(fx, b"opacity", widget)
+            anim.setDuration(220)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            if show:
+                widget.setVisible(True)
+                anim.setStartValue(0.0)
+                anim.setEndValue(1.0)
+            else:
+                anim.setStartValue(1.0)
+                anim.setEndValue(0.0)
+                anim.finished.connect(lambda: widget.setVisible(False))
+            anim.start()
+            widget._fade_anim = anim  # keep ref
+        except Exception:
+            widget.setVisible(show)
+
+    def _toggle_sys_monitor(self) -> None:
+        """Show / hide the left system metrics panel (CPU, RAM, GPU, temp)."""
+        if not hasattr(self, "_left_panel"):
+            return
+        vis = not self._left_panel.isVisible()
+        self._left_panel.setVisible(vis)
+        try:
+            from memory.config_manager import load_api_keys, ensure_config_dir, CONFIG_FILE
+            import json
+            ensure_config_dir()
+            data = load_api_keys()
+            data["sys_monitor_visible"] = vis
+            CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        try:
+            self._refresh_sys_monitor_btn()
+        except Exception:
+            pass
+
+    def _refresh_sys_monitor_btn(self) -> None:
+        if not hasattr(self, "_sys_mon_btn"):
+            return
+        vis = getattr(self, "_left_panel", None) is not None and self._left_panel.isVisible()
+        self._sys_mon_btn.setText(
+            "📊  SYSTEM INFO: ON" if vis else "📊  SYSTEM INFO: OFF"
+        )
+        self._sys_mon_btn.setStyleSheet(self._sys_mon_btn_style_on if vis else self._sys_mon_btn_style_off)
+
     def _tick_clock(self):
+
         try:
             self._clock_lbl.setText(time.strftime("%H:%M:%S"))
             self._date_lbl.setText(time.strftime("%a %d %b %Y"))
@@ -4205,7 +4283,7 @@ class MainWindow(QMainWindow):
         pulse.setStyleSheet(f"color: {C.GREEN}; background: transparent;")
         chat_hdr.addWidget(pulse)
         title = QLabel("CHAT")
-        title.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
         title.setStyleSheet(
             f"color: {C.WHITE}; background: transparent; letter-spacing: 2px;"
         )
@@ -4347,19 +4425,29 @@ class MainWindow(QMainWindow):
         """Floating overlay panel shown when the ⚙ header button is toggled."""
         _BTN_STYLE_PRI = f"""
             QPushButton {{
-                background: #00091a; color: {C.PRI};
-                border: 1px solid {C.PRI_DIM}; border-radius: 3px;
-                text-align: left; padding: 0 8px;
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                    stop:0 rgba(0,180,220,0.25), stop:1 rgba(0,100,140,0.35));
+                color: {C.WHITE};
+                border: 1px solid {C.PRI_DIM}; border-radius: 10px;
+                text-align: left; padding: 0 14px;
             }}
-            QPushButton:hover {{ background: {C.PRI_GHO}; border-color: {C.PRI}; }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                    stop:0 rgba(0,212,255,0.35), stop:1 rgba(0,140,180,0.45));
+                border-color: {C.PRI};
+            }}
         """
         _BTN_STYLE_DIM = f"""
             QPushButton {{
-                background: transparent; color: {C.TEXT_MED};
-                border: 1px solid {C.BORDER}; border-radius: 3px;
-                text-align: left; padding: 0 8px;
+                background: rgba(255,255,255,0.03); color: {C.TEXT_MED};
+                border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;
+                text-align: left; padding: 0 14px;
             }}
-            QPushButton:hover {{ color: {C.PRI}; border-color: {C.BORDER_B}; }}
+            QPushButton:hover {{
+                color: {C.WHITE};
+                background: rgba(255,255,255,0.07);
+                border-color: rgba(0,212,255,0.35);
+            }}
         """
 
         w = QWidget(self.centralWidget())
@@ -4379,68 +4467,68 @@ class MainWindow(QMainWindow):
         lay.setSpacing(5)
 
         hdr = QLabel("◈ CONTROLS")
-        hdr.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        hdr.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
         hdr.setStyleSheet(f"color: {C.PRI_DIM}; background: transparent; "
                           f"border-bottom: 1px solid {C.BORDER}; padding-bottom: 4px;")
         lay.addWidget(hdr)
 
         remote_btn = QPushButton("◉  REMOTE CONTROL")
-        remote_btn.setFixedHeight(30)
-        remote_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        remote_btn.setFixedHeight(34)
+        remote_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         remote_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         remote_btn.setStyleSheet(_BTN_STYLE_PRI)
         remote_btn.clicked.connect(self._open_remote)
         lay.addWidget(remote_btn)
 
         fs_btn = QPushButton("⛶  FULLSCREEN  [F11]")
-        fs_btn.setFixedHeight(26)
-        fs_btn.setFont(QFont("Courier New", 7))
+        fs_btn.setFixedHeight(32)
+        fs_btn.setFont(QFont("Segoe UI", 9))
         fs_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         fs_btn.setStyleSheet(_BTN_STYLE_DIM)
         fs_btn.clicked.connect(self._toggle_fullscreen)
         lay.addWidget(fs_btn)
 
         sc_btn = QPushButton("⊞  CREATE DESKTOP SHORTCUT")
-        sc_btn.setFixedHeight(26)
-        sc_btn.setFont(QFont("Courier New", 7))
+        sc_btn.setFixedHeight(32)
+        sc_btn.setFont(QFont("Segoe UI", 9))
         sc_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         sc_btn.setStyleSheet(_BTN_STYLE_DIM)
         sc_btn.clicked.connect(self._create_desktop_shortcut)
         lay.addWidget(sc_btn)
 
         self._autostart_btn = QPushButton("◉  AUTO-START: OFF")
-        self._autostart_btn.setFixedHeight(26)
-        self._autostart_btn.setFont(QFont("Courier New", 7))
+        self._autostart_btn.setFixedHeight(32)
+        self._autostart_btn.setFont(QFont("Segoe UI", 9))
         self._autostart_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._autostart_btn.clicked.connect(self._toggle_autostart)
         lay.addWidget(self._autostart_btn)
 
         cust_btn = QPushButton("⚙  CUSTOMISE ASSISTANT")
-        cust_btn.setFixedHeight(26)
-        cust_btn.setFont(QFont("Courier New", 7))
+        cust_btn.setFixedHeight(32)
+        cust_btn.setFont(QFont("Segoe UI", 9))
         cust_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         cust_btn.setStyleSheet(_BTN_STYLE_DIM)
         cust_btn.clicked.connect(self._open_customize)
         lay.addWidget(cust_btn)
 
         self._brief_btn = QPushButton()
-        self._brief_btn.setFixedHeight(26)
-        self._brief_btn.setFont(QFont("Courier New", 7))
+        self._brief_btn.setFixedHeight(32)
+        self._brief_btn.setFont(QFont("Segoe UI", 9))
         self._brief_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._brief_btn.clicked.connect(self._toggle_brief)
         lay.addWidget(self._brief_btn)
 
         # ── Wake word ──────────────────────────────────────────────────────────
         self._wake_btn = QPushButton()
-        self._wake_btn.setFixedHeight(26)
-        self._wake_btn.setFont(QFont("Courier New", 7))
+        self._wake_btn.setFixedHeight(32)
+        self._wake_btn.setFont(QFont("Segoe UI", 9))
         self._wake_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._wake_btn.clicked.connect(self._toggle_wake_word)
         lay.addWidget(self._wake_btn)
 
         self._wake_sleep_btn = QPushButton()
-        self._wake_sleep_btn.setFixedHeight(26)
-        self._wake_sleep_btn.setFont(QFont("Courier New", 7))
+        self._wake_sleep_btn.setFixedHeight(32)
+        self._wake_sleep_btn.setFont(QFont("Segoe UI", 9))
         self._wake_sleep_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._wake_sleep_btn.clicked.connect(self._tap_wake_manual)
         lay.addWidget(self._wake_sleep_btn)
@@ -4451,8 +4539,8 @@ class MainWindow(QMainWindow):
         self._wake_sleep_btn.hide()
 
         self._ptt_btn = QPushButton()
-        self._ptt_btn.setFixedHeight(26)
-        self._ptt_btn.setFont(QFont("Courier New", 7))
+        self._ptt_btn.setFixedHeight(32)
+        self._ptt_btn.setFont(QFont("Segoe UI", 9))
         self._ptt_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._ptt_btn.clicked.connect(self._toggle_ptt)
         lay.addWidget(self._ptt_btn)
@@ -4460,16 +4548,16 @@ class MainWindow(QMainWindow):
         self._refresh_talk_btns()
 
         self._hud_btn = QPushButton()
-        self._hud_btn.setFixedHeight(26)
-        self._hud_btn.setFont(QFont("Courier New", 7))
+        self._hud_btn.setFixedHeight(32)
+        self._hud_btn.setFont(QFont("Segoe UI", 9))
         self._hud_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._hud_btn.clicked.connect(self._toggle_hud_style)
         lay.addWidget(self._hud_btn)
         self._refresh_hud_btn()
 
         compact_btn = QPushButton("📍  COMPACT MODE")
-        compact_btn.setFixedHeight(26)
-        compact_btn.setFont(QFont("Courier New", 7))
+        compact_btn.setFixedHeight(32)
+        compact_btn.setFont(QFont("Segoe UI", 9))
         compact_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         compact_btn.setStyleSheet(_BTN_STYLE_DIM)
         compact_btn.setToolTip(
@@ -4479,45 +4567,69 @@ class MainWindow(QMainWindow):
         lay.addWidget(compact_btn)
 
         audio_btn = QPushButton("🎧  AUDIO DEVICES")
-        audio_btn.setFixedHeight(26)
-        audio_btn.setFont(QFont("Courier New", 7))
+        audio_btn.setFixedHeight(32)
+        audio_btn.setFont(QFont("Segoe UI", 9))
         audio_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         audio_btn.setStyleSheet(_BTN_STYLE_DIM)
         audio_btn.clicked.connect(self._open_audio_devices)
         lay.addWidget(audio_btn)
 
         mem_btn = QPushButton("🧠  MEMORY")
-        mem_btn.setFixedHeight(26)
-        mem_btn.setFont(QFont("Courier New", 7))
+        mem_btn.setFixedHeight(32)
+        mem_btn.setFont(QFont("Segoe UI", 9))
         mem_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         mem_btn.setStyleSheet(_BTN_STYLE_DIM)
         mem_btn.clicked.connect(self._open_memory_panel)
         lay.addWidget(mem_btn)
 
         plugin_btn = QPushButton("🧩  PLUGINS")
-        plugin_btn.setFixedHeight(26)
-        plugin_btn.setFont(QFont("Courier New", 7))
+        plugin_btn.setFixedHeight(32)
+        plugin_btn.setFont(QFont("Segoe UI", 9))
         plugin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         plugin_btn.setStyleSheet(_BTN_STYLE_DIM)
         plugin_btn.clicked.connect(self._open_plugin_manager)
         lay.addWidget(plugin_btn)
 
         settings_btn = QPushButton("⚙  PLUGIN SETTINGS")
-        settings_btn.setFixedHeight(26)
-        settings_btn.setFont(QFont("Courier New", 7))
+        settings_btn.setFixedHeight(32)
+        settings_btn.setFont(QFont("Segoe UI", 9))
         settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         settings_btn.setStyleSheet(_BTN_STYLE_DIM)
         settings_btn.clicked.connect(self._open_plugin_settings)
         lay.addWidget(settings_btn)
 
         upd_btn = QPushButton("☁  CHECK FOR UPDATES")
-        upd_btn.setFixedHeight(26)
-        upd_btn.setFont(QFont("Courier New", 7))
+        upd_btn.setFixedHeight(32)
+        upd_btn.setFont(QFont("Segoe UI", 9))
         upd_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         upd_btn.setStyleSheet(_BTN_STYLE_DIM)
         upd_btn.setToolTip("Check GitHub for a newer Jarvis version and install it.")
         upd_btn.clicked.connect(self._check_for_updates_ui)
         lay.addWidget(upd_btn)
+
+        # System info (CPU / RAM / GPU / temp) toggle
+        self._sys_mon_btn_style_on = f"""
+            QPushButton {{
+                background: rgba(0,212,255,0.12); color: {C.PRI};
+                border: 1px solid {C.PRI_DIM}; border-radius: 10px;
+                text-align: left; padding: 0 12px;
+            }}
+            QPushButton:hover {{ background: rgba(0,212,255,0.22); }}
+        """
+        self._sys_mon_btn_style_off = _BTN_STYLE_DIM
+        self._sys_mon_btn = QPushButton("📊  SYSTEM INFO: OFF")
+        self._sys_mon_btn.setFixedHeight(32)
+        self._sys_mon_btn.setFont(QFont("Segoe UI", 9))
+        self._sys_mon_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._sys_mon_btn.setToolTip(
+            "Show CPU, RAM, GPU, network and temperature on the left side."
+        )
+        self._sys_mon_btn.clicked.connect(self._toggle_sys_monitor)
+        lay.addWidget(self._sys_mon_btn)
+        try:
+            self._refresh_sys_monitor_btn()
+        except Exception:
+            pass
 
         w.adjustSize()
         return w
