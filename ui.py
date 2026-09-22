@@ -961,6 +961,99 @@ class HudCanvas(QWidget):
             p.drawText(QRectF(cx - r, cy - fsz * 0.6, r * 2, fsz * 1.4),
                        Qt.AlignmentFlag.AlignCenter, name)
 
+
+    def _paint_armor(self, p: QPainter, cx: float, cy: float, r: float) -> None:
+        """Iron Man-style holographic upper-body wireframe + arc reactor."""
+        import math
+        t = self._core_phase
+        if self.muted:
+            col = qcol(C.MUTED_C)
+        else:
+            col = qcol(C.PRI)
+        accent = qcol(C.ACC) if self.speaking else col
+
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Soft background glow
+        g = QRadialGradient(cx, cy + r * 0.15, r * 1.4)
+        g.setColorAt(0.0, QColor(col.red(), col.green(), col.blue(), 40))
+        g.setColorAt(1.0, QColor(0, 0, 0, 0))
+        p.setBrush(QBrush(g))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(QRectF(cx - r * 1.4, cy - r * 1.1, r * 2.8, r * 2.5))
+
+        pen = QPen(col, 1.6)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+
+        # Helmet oval
+        helmet = QRectF(cx - r * 0.28, cy - r * 0.95, r * 0.56, r * 0.70)
+        p.drawEllipse(helmet)
+        # Face plate line
+        p.drawLine(QPointF(cx - r * 0.18, cy - r * 0.55),
+                   QPointF(cx + r * 0.18, cy - r * 0.55))
+        # Eyes
+        eye_y = cy - r * 0.72
+        for ex in (-0.12, 0.12):
+            p.setBrush(QBrush(accent))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawRoundedRect(QRectF(cx + r * ex - r * 0.06, eye_y - r * 0.025,
+                                     r * 0.12, r * 0.05), 2, 2)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+
+        # Neck
+        p.drawLine(QPointF(cx - r * 0.08, cy - r * 0.28),
+                   QPointF(cx - r * 0.14, cy - r * 0.12))
+        p.drawLine(QPointF(cx + r * 0.08, cy - r * 0.28),
+                   QPointF(cx + r * 0.14, cy - r * 0.12))
+
+        # Shoulders / chest plate paths
+        chest_top = cy - r * 0.10
+        path = QPainterPath()
+        path.moveTo(cx - r * 0.55, chest_top)
+        path.quadTo(cx - r * 0.70, cy + r * 0.05, cx - r * 0.50, cy + r * 0.35)
+        path.lineTo(cx - r * 0.22, cy + r * 0.55)
+        path.lineTo(cx + r * 0.22, cy + r * 0.55)
+        path.lineTo(cx + r * 0.50, cy + r * 0.35)
+        path.quadTo(cx + r * 0.70, cy + r * 0.05, cx + r * 0.55, chest_top)
+        path.quadTo(cx, chest_top - r * 0.08, cx - r * 0.55, chest_top)
+        p.drawPath(path)
+
+        # Armor panel lines
+        for frac in (0.15, 0.30, 0.45):
+            y = cy + r * frac
+            w = r * (0.45 - frac * 0.35)
+            p.setPen(QPen(col, 1.0))
+            p.drawLine(QPointF(cx - w, y), QPointF(cx + w, y))
+
+        # Arc reactor (center chest)
+        rr = r * 0.16
+        rcx, rcy = cx, cy + r * 0.12
+        # rotating rings
+        for i, rad in enumerate((rr * 1.35, rr, rr * 0.55)):
+            ang = (t * 40 * (1 if i % 2 == 0 else -1)) % 360
+            p.setPen(QPen(accent if i == 1 else col, 2.0 if i == 1 else 1.2))
+            p.drawArc(QRectF(rcx - rad, rcy - rad, rad * 2, rad * 2),
+                      int(ang * 16), int(270 * 16))
+        # Core fill
+        cg = QRadialGradient(rcx, rcy, rr * 0.5)
+        cg.setColorAt(0.0, QColor(255, 255, 255, 200))
+        cg.setColorAt(0.4, QColor(accent.red(), accent.green(), accent.blue(), 180))
+        cg.setColorAt(1.0, QColor(0, 0, 0, 0))
+        p.setBrush(QBrush(cg))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(QRectF(rcx - rr * 0.45, rcy - rr * 0.45, rr * 0.9, rr * 0.9))
+
+        # Orbiting particles
+        p.setBrush(QBrush(col))
+        for k in range(8):
+            a = t * 1.2 + k * (math.pi * 2 / 8)
+            px = cx + math.cos(a) * r * 0.85
+            py = cy + math.sin(a * 0.9) * r * 0.55
+            p.drawEllipse(QRectF(px - 2, py - 2, 4, 4))
+
+
     def paintEvent(self, _):
         p = QPainter(self)
         if not p.isActive():      # device not ready (e.g. 0-size during layout) — skip cleanly
@@ -1009,6 +1102,10 @@ class HudCanvas(QWidget):
         elif self.hud_style == "sphere":
             _r = min(W * 0.44, _band_h / 2.0)
             self._paint_sphere(p, cx, _band_t + _band_h / 2.0, _r)
+
+        elif self.hud_style == "armor":
+            _r = min(W * 0.42, _band_h / 2.0)
+            self._paint_armor(p, cx, _band_t + _band_h / 2.0, _r)
 
         else:
             # reactor core — fallback and the classic look
@@ -1184,23 +1281,33 @@ class CompactMicWindow(QWidget):
 
 
 class MetricBar(QWidget):
-    """Compact system metric with glowing progress track and status colour."""
+    """Circular holographic gauge — Iron Man / JARVIS style."""
 
     def __init__(self, label: str, color: str = C.PRI, parent=None):
         super().__init__(parent)
         self._label = label
         self._color = color
-        self._value = 0.0       # 0–100
+        self._value = 0.0
         self._text  = "--"
-        self.setFixedHeight(44)
-        self.setMinimumWidth(80)
+        self._display = 0.0  # smoothed for animation
+        self.setFixedHeight(88)
+        self.setMinimumWidth(100)
+        self._anim_timer = QTimer(self)
+        self._anim_timer.setInterval(33)
+        self._anim_timer.timeout.connect(self._tick_anim)
+        self._anim_timer.start()
 
     def set_value(self, pct: float, text: str):
-        v = max(0.0, min(100.0, pct))
-        if v == self._value and text == self._text:
-            return
-        self._value = v
+        self._value = max(0.0, min(100.0, pct))
         self._text  = text
+
+    def _tick_anim(self):
+        # ease toward target
+        d = self._value - self._display
+        if abs(d) < 0.15:
+            self._display = self._value
+        else:
+            self._display += d * 0.18
         self.update()
 
     def paintEvent(self, _):
@@ -1209,69 +1316,53 @@ class MetricBar(QWidget):
             return
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         W, H = self.width(), self.height()
+        cx, cy = W / 2.0, H / 2.0 - 4
+        R = min(W, H) * 0.38
 
-        # Card background with subtle border glow
-        p.setBrush(QBrush(qcol(C.PANEL2)))
-        p.setPen(QPen(qcol(C.BORDER_A), 1))
-        p.drawRoundedRect(QRectF(1, 1, W - 2, H - 2), 6, 6)
-
-        if self._value > 85:
-            bar_col = qcol(C.RED)
-        elif self._value > 65:
-            bar_col = qcol(C.ACC)
+        if self._display > 85:
+            col = qcol(C.RED)
+        elif self._display > 65:
+            col = qcol(C.ACC)
         else:
-            bar_col = qcol(self._color)
+            col = qcol(self._color)
 
-        # Label
+        # Outer faint ring
+        p.setPen(QPen(qcol(C.BORDER_A), 2))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(QRectF(cx - R - 4, cy - R - 4, (R + 4) * 2, (R + 4) * 2))
+
+        # Track arc (270°)
+        start_angle = 225 * 16
+        span_full = -270 * 16
+        p.setPen(QPen(qcol(C.BAR_BG), 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.drawArc(QRectF(cx - R, cy - R, R * 2, R * 2), start_angle, span_full)
+
+        # Value arc
+        span_val = int(-270 * 16 * (self._display / 100.0))
+        pen = QPen(col, 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+        p.drawArc(QRectF(cx - R, cy - R, R * 2, R * 2), start_angle, span_val)
+
+        # Glow dot at tip
+        import math
+        ang = math.radians(225 - 270 * (self._display / 100.0))
+        dx = cx + R * math.cos(ang)
+        dy = cy - R * math.sin(ang)
+        p.setBrush(QBrush(col))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(QRectF(dx - 3, dy - 3, 6, 6))
+
+        # Center value
+        p.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        p.setPen(QPen(col, 1))
+        p.drawText(QRectF(cx - R, cy - 10, R * 2, 20),
+                   Qt.AlignmentFlag.AlignCenter, self._text)
+
+        # Label under
         p.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
         p.setPen(QPen(qcol(C.TEXT_DIM), 1))
-        p.drawText(QRectF(8, 4, 48, 14),
-                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                   self._label)
-
-        # Value text
-        p.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        p.setPen(QPen(bar_col if self._text != "--" else qcol(C.TEXT_DIM), 1))
-        p.drawText(QRectF(0, 3, W - 8, 16),
-                   Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                   self._text)
-
-        # Track
-        bar_h  = 5
-        bar_y  = H - bar_h - 7
-        bar_w  = W - 14
-        bar_x  = 7
-        fill_w = max(0, int(bar_w * self._value / 100))
-
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(qcol(C.BAR_BG)))
-        p.drawRoundedRect(QRectF(bar_x, bar_y, bar_w, bar_h), 2.5, 2.5)
-
-        if fill_w > 0:
-            # Soft glow behind the fill
-            glow = QColor(bar_col)
-            glow.setAlpha(55)
-            p.setBrush(QBrush(glow))
-            p.drawRoundedRect(QRectF(bar_x - 1, bar_y - 1.5, fill_w + 2, bar_h + 3), 3, 3)
-
-            # Gradient fill
-            grad = QLinearGradient(bar_x, 0, bar_x + fill_w, 0)
-            c_hi = QColor(bar_col)
-            c_hi.setAlpha(255)
-            c_lo = QColor(bar_col)
-            c_lo = c_lo.lighter(130)
-            grad.setColorAt(0.0, c_lo)
-            grad.setColorAt(1.0, c_hi)
-            p.setBrush(QBrush(grad))
-            p.drawRoundedRect(QRectF(bar_x, bar_y, fill_w, bar_h), 2.5, 2.5)
-
-            # Bright tip cap
-            if fill_w > 4:
-                tip = QColor(255, 255, 255, 90)
-                p.setBrush(QBrush(tip))
-                p.drawEllipse(QRectF(bar_x + fill_w - 4, bar_y - 0.5, 5, bar_h + 1))
-
-        p.end()
+        p.drawText(QRectF(0, H - 16, W, 14),
+                   Qt.AlignmentFlag.AlignCenter, self._label)
 
 class LogWidget(QTextEdit):
     _sig = pyqtSignal(str)
@@ -3431,6 +3522,8 @@ class MainWindow(QMainWindow):
         sc_mute.activated.connect(self._toggle_mute)
         sc_full = QShortcut(QKeySequence("F11"), self)
         sc_full.activated.connect(self._toggle_fullscreen)
+        sc_compact = QShortcut(QKeySequence("F12"), self)
+        sc_compact.activated.connect(self._enter_compact_mode)
         sc_intr = QShortcut(QKeySequence("Escape"), self)
         sc_intr.activated.connect(self._do_interrupt)
 
@@ -4251,20 +4344,6 @@ class MainWindow(QMainWindow):
 
         lay.addStretch()
 
-        for txt, col in [
-            ("◆ AI CORE\nACTIVE",  C.GREEN),
-            ("◈ SEC\nCLEARED",     C.PRI),
-            ("◇ PROTOCOL\n" + APP_PROTOCOL,   C.TEXT_DIM),
-        ]:
-            lbl = QLabel(txt)
-            lbl.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setStyleSheet(
-                f"color: {col}; background: {C.PANEL2};"
-                f"border: 1px solid {C.BORDER_A}; border-radius: 12px; padding: 8px 4px;"
-            )
-            lay.addWidget(lbl)
-
         return w
     def _build_right_panel(self) -> QWidget:
         """Chat history only — command bar lives at the bottom of the main window."""
@@ -4465,12 +4544,6 @@ class MainWindow(QMainWindow):
         lay = QVBoxLayout(w)
         lay.setContentsMargins(10, 8, 10, 10)
         lay.setSpacing(5)
-
-        hdr = QLabel("◈ CONTROLS")
-        hdr.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        hdr.setStyleSheet(f"color: {C.PRI_DIM}; background: transparent; "
-                          f"border-bottom: 1px solid {C.BORDER}; padding-bottom: 4px;")
-        lay.addWidget(hdr)
 
         remote_btn = QPushButton("◉  REMOTE CONTROL")
         remote_btn.setFixedHeight(34)
@@ -5213,7 +5286,7 @@ class MainWindow(QMainWindow):
             l.setStyleSheet(f"color: {color}; background: transparent;")
             return l
 
-        lay.addWidget(_fl("[F4] Mute  ·  [F11] Fullscreen"))
+        lay.addWidget(_fl("[F4] Mute  ·  [F11] Fullscreen  ·  [F12] Compact"))
         lay.addStretch()
         lay.addWidget(_fl("ASDcuber", C.TEXT_DIM))
         return w
@@ -5469,11 +5542,13 @@ class MainWindow(QMainWindow):
             QPushButton:hover {{ color: {C.WHITE}; border: 1px solid {C.BORDER_B}; }}"""
         labels = {
             "face":   ("🧑  HUD: ANIMATED FACE",
-                       "Animated head with lip-sync. Tap for reactor core."),
+                       "Animated head with lip-sync."),
             "core":   ("◉  HUD: REACTOR CORE",
-                       "Reactor core that reacts to voice. Tap for holographic sphere."),
+                       "Reactor core that reacts to voice."),
             "sphere": ("🌐  HUD: HOLO SPHERE",
-                       "Iron-Man style golden holographic sphere. Tap for animated face."),
+                       "Golden holographic sphere."),
+            "armor":  ("🦾  HUD: IRON MAN ARMOR",
+                       "Holographic Iron Man suit + arc reactor."),
         }
         text, tip = labels.get(style_name, labels["face"])
         self._hud_btn.setText(text)
@@ -5483,7 +5558,7 @@ class MainWindow(QMainWindow):
     def _toggle_hud_style(self):
         """Cycle face → core → sphere → face. Instant, no reload."""
         from memory.config_manager import get_hud_style, save_hud_style
-        order = ("face", "core", "sphere")
+        order = ("face", "core", "sphere", "armor")
         cur = get_hud_style()
         try:
             idx = order.index(cur)
@@ -5497,7 +5572,7 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         self._refresh_hud_btn()
-        names = {"face": "animated face", "core": "reactor core", "sphere": "holographic sphere"}
+        names = {"face": "animated face", "core": "reactor core", "sphere": "holographic sphere", "armor": "Iron Man armor"}
         self._log.append_log(f"SYS: HUD switched to the {names.get(want, want)}.")
 
     def _enter_compact_mode(self) -> None:

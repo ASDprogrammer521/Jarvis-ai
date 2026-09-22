@@ -130,7 +130,7 @@ def save_push_to_talk_enabled(enabled: bool) -> None:
     _save_flag("push_to_talk_enabled", enabled)
 
 
-HUD_STYLES = ("face", "core", "sphere")
+HUD_STYLES = ("face", "core", "sphere", "armor")
 
 
 def get_hud_style() -> str:
