@@ -818,149 +818,185 @@ class HudCanvas(QWidget):
                        Qt.AlignmentFlag.AlignCenter, name)
 
     def _paint_sphere(self, p: QPainter, cx: float, cy: float, r: float) -> None:
-        """Iron-Man style golden holographic sphere — wireframe globe with
-        rotating energy arcs, particle streams and a bright core. Colours
-        lean warm (gold / amber) to match the classic HUD look while still
-        reacting to the live accent palette."""
+        """Golden holographic network sphere — matches the viral JARVIS short:
+        dense wire mesh, blazing core, orbital rings with particle trails."""
+        import math
         amp = self._amp_disp
         t = self._core_phase
         live = (self.speaking or amp > 0.04) and not self.muted
         muted = self.muted
 
-        # Warm gold family derived from the current accent so re-theming still works.
         if muted:
-            gold = qcol(C.MUTED_C)
-            bright = qcol(C.MUTED_C)
-            dim = qcol(C.MUTED_C)
+            gold = QColor(180, 90, 90)
+            bright = QColor(220, 120, 100)
+            white = QColor(255, 200, 180)
         else:
-            gold = qcol(C.ACC2)          # #ffcc00-ish
-            bright = qcol(C.ACC)         # #ff6b00-ish
-            dim = qcol(C.PRI_DIM)
-            # Prefer a stronger gold when the accent is cold cyan.
+            gold = QColor(255, 170, 30)
+            bright = QColor(255, 210, 60)
+            white = QColor(255, 245, 200)
             try:
-                if QColor(C.PRI).hue() > 160:   # cyan/blue range
-                    gold = QColor(255, 200, 40)
-                    bright = QColor(255, 140, 20)
+                if QColor(C.PRI).hue() > 160:
+                    pass  # keep warm gold for this style
             except Exception:
                 pass
 
-        bg = qcol(C.BG)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        lift = 1.0 + 0.5 * amp + (0.25 if self.speaking else 0.0)
+        rot_y = t * (0.55 + (0.35 if live else 0.0))   # yaw
+        rot_x = 0.35 + 0.08 * math.sin(t * 0.4)         # slight pitch
 
-        def blend(col: QColor, a: float) -> QColor:
-            k = max(0.0, min(1.0, a))
-            return QColor(int(bg.red()   + (col.red()   - bg.red())   * k),
-                          int(bg.green() + (col.green() - bg.green()) * k),
-                          int(bg.blue()  + (col.blue()  - bg.blue())  * k))
+        def project(lat, lon):
+            # lat [-pi/2,pi/2], lon [0,2pi] → screen after rotation
+            x = math.cos(lat) * math.sin(lon)
+            y = math.sin(lat)
+            z = math.cos(lat) * math.cos(lon)
+            # rotate Y
+            c, s = math.cos(rot_y), math.sin(rot_y)
+            x, z = x * c + z * s, -x * s + z * c
+            # rotate X
+            c, s = math.cos(rot_x), math.sin(rot_x)
+            y, z = y * c - z * s, y * s + z * c
+            # perspective
+            sc = r * 0.92 / (1.35 + z * 0.55)
+            return cx + x * sc, cy - y * sc, z
 
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        lift = 1.0 + 0.6 * amp + (0.2 if self.speaking else 0.0)
-
-        # 1. Soft golden atmosphere
+        # ── Soft outer glow ──────────────────────────────────────────────
         p.setPen(Qt.PenStyle.NoPen)
-        for gr, a0 in ((r * 0.92, 0.22 * lift), (r * 0.55, 0.32 * lift), (r * 0.22, 0.45 * lift)):
+        for gr, a in ((r * 1.15, 18), (r * 0.85, 35), (r * 0.45, 55)):
             g = QRadialGradient(cx, cy, gr)
-            g.setColorAt(0.0, blend(gold, min(0.9, a0)))
-            g.setColorAt(0.55, blend(gold, min(0.9, a0 * 0.4)))
-            g.setColorAt(1.0, blend(gold, 0.0))
+            g.setColorAt(0.0, QColor(gold.red(), gold.green(), gold.blue(), int(a * lift)))
+            g.setColorAt(1.0, QColor(0, 0, 0, 0))
             p.setBrush(QBrush(g))
             p.drawEllipse(QRectF(cx - gr, cy - gr, gr * 2, gr * 2))
-        p.setBrush(Qt.BrushStyle.NoBrush)
 
-        # 2. Latitude / longitude wireframe (perspective-ish sphere)
-        rate = 0.35 + (0.55 if self.state in ("THINKING", "PROCESSING") else 0.0) \
-                   + (0.4 if self.speaking else 0.0)
-        rot = t * rate * 18.0
+        # ── Dense geodesic-style mesh (lat/lon grid + diagonals) ─────────
+        n_lat = 14
+        n_lon = 20
+        pts = []
+        for i in range(n_lat + 1):
+            lat = -math.pi / 2 + math.pi * i / n_lat
+            row = []
+            for j in range(n_lon):
+                lon = 2 * math.pi * j / n_lon
+                row.append(project(lat, lon))
+            pts.append(row)
 
-        # Meridians
-        for m in range(12):
-            a0 = math.radians(m * 15.0 + rot * 0.4)
-            pts = []
-            for lat in range(-90, 91, 6):
-                la = math.radians(lat)
-                x = cx + r * 0.88 * math.cos(la) * math.sin(a0)
-                y = cy + r * 0.88 * math.sin(la)
-                # simple depth fade
-                z = math.cos(la) * math.cos(a0)
-                if z > -0.15:
-                    pts.append((x, y, max(0.12, 0.55 + 0.45 * z)))
-            for i in range(len(pts) - 1):
-                x1, y1, a1 = pts[i]
-                x2, y2, a2 = pts[i + 1]
-                p.setPen(QPen(blend(gold, 0.18 + 0.35 * min(a1, a2)), 1.0))
+        # Longitude curves
+        for j in range(n_lon):
+            for i in range(n_lat):
+                x1, y1, z1 = pts[i][j]
+                x2, y2, z2 = pts[i + 1][j]
+                depth = (z1 + z2) * 0.5
+                alpha = int(max(25, min(200, 70 + depth * 90)) * (0.55 + 0.45 * lift))
+                w = 1.0 + (0.6 if depth > 0 else 0.0)
+                p.setPen(QPen(QColor(gold.red(), gold.green(), gold.blue(), alpha), w))
                 p.drawLine(QPointF(x1, y1), QPointF(x2, y2))
 
-        # Parallels
-        for lat in (-60, -30, 0, 30, 60):
-            la = math.radians(lat)
-            rr = r * 0.88 * math.cos(la)
-            yy = cy + r * 0.88 * math.sin(la)
-            segs = 48
-            for i in range(segs):
-                a1 = math.radians(i * (360.0 / segs) + rot * 0.25)
-                a2 = math.radians((i + 1) * (360.0 / segs) + rot * 0.25)
-                z1 = math.cos(la) * math.cos(a1)
-                if z1 < -0.1:
+        # Latitude rings
+        for i in range(1, n_lat):
+            for j in range(n_lon):
+                j2 = (j + 1) % n_lon
+                x1, y1, z1 = pts[i][j]
+                x2, y2, z2 = pts[i][j2]
+                depth = (z1 + z2) * 0.5
+                alpha = int(max(20, min(180, 55 + depth * 85)) * (0.5 + 0.5 * lift))
+                p.setPen(QPen(QColor(bright.red(), bright.green(), bright.blue(), alpha), 1.0))
+                p.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+
+        # Diagonal web (network look like the short)
+        for i in range(0, n_lat, 2):
+            for j in range(0, n_lon, 2):
+                j2 = (j + 1) % n_lon
+                if i + 1 <= n_lat:
+                    x1, y1, z1 = pts[i][j]
+                    x2, y2, z2 = pts[i + 1][j2]
+                    depth = (z1 + z2) * 0.5
+                    if depth < -0.2:
+                        continue
+                    alpha = int(40 + 80 * max(0, depth) * lift)
+                    p.setPen(QPen(QColor(gold.red(), gold.green(), gold.blue(), alpha), 0.8))
+                    p.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+
+        # Nodes at intersections (front hemisphere)
+        p.setPen(Qt.PenStyle.NoPen)
+        for i in range(0, n_lat + 1, 2):
+            for j in range(0, n_lon, 2):
+                x, y, z = pts[i][j]
+                if z < -0.15:
                     continue
-                x1 = cx + rr * math.sin(a1)
-                x2 = cx + rr * math.sin(a2)
-                p.setPen(QPen(blend(gold, 0.15 + 0.3 * max(0.0, z1)), 1.0))
-                p.drawLine(QPointF(x1, yy), QPointF(x2, yy))
+                sz = 1.4 + 1.2 * max(0, z) + amp * 1.5
+                alpha = int(90 + 120 * max(0, z))
+                p.setBrush(QColor(bright.red(), bright.green(), bright.blue(), alpha))
+                p.drawEllipse(QPointF(x, y), sz, sz)
 
-        # 3. Outer energy rings / arcs (rotating)
-        for k, (rr, span, count, dirn, wid, a) in enumerate((
-                (0.98, 70, 3, +1, 2.0, 0.70),
-                (0.90, 110, 2, -1, 1.6, 0.45),
-                (0.78, 55, 4, +1, 1.3, 0.35),
-                (0.62, 95, 2, -1, 1.8, 0.55),
+        # ── Orbital rings (like the short) ───────────────────────────────
+        for ri, (rr, tilt, speed, thick) in enumerate((
+            (1.05, 0.55, 0.9, 1.6),
+            (1.22, 1.15, -0.65, 1.2),
+            (1.38, 0.25, 0.45, 1.0),
         )):
-            rad = r * rr
-            col = bright if k % 2 == 0 else gold
-            p.setPen(QPen(blend(col, a * lift), wid))
-            box = QRectF(cx - rad, cy - rad, rad * 2, rad * 2)
-            base = (t * rate * (12 + k * 7) * dirn) % 360.0
-            for sgm in range(count):
-                p.drawArc(box, int((base + sgm * (360.0 / count)) * 16),
-                          int(span * 16))
+            path_pts = []
+            for k in range(72):
+                a = 2 * math.pi * k / 72 + t * speed
+                # ellipse tilted
+                ex = math.cos(a) * r * rr
+                ey = math.sin(a) * r * rr * 0.32
+                # tilt rotate
+                c, s = math.cos(tilt + ri * 0.4), math.sin(tilt + ri * 0.4)
+                rx = ex * c - ey * s
+                ry = ex * s + ey * c
+                path_pts.append((cx + rx, cy + ry * 0.85))
+            for k in range(72):
+                x1, y1 = path_pts[k]
+                x2, y2 = path_pts[(k + 1) % 72]
+                alpha = 90 + int(50 * abs(math.sin(k * 0.2 + t)))
+                p.setPen(QPen(QColor(gold.red(), gold.green(), gold.blue(), alpha), thick))
+                p.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+            # particles on ring
+            for k in range(0, 72, 3):
+                x, y = path_pts[(k + int(t * 8 * (1 if speed > 0 else -1))) % 72]
+                sz = 1.5 + 1.5 * abs(math.sin(t * 2 + k * 0.3))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QColor(bright.red(), bright.green(), bright.blue(), 180))
+                p.drawEllipse(QPointF(x, y), sz, sz)
 
-        # 4. Particle stream (orbiting dots)
-        n_part = 48
-        for i in range(n_part):
-            ang = math.radians(i * (360.0 / n_part) + t * 40.0 + (i % 5) * 8)
-            tilt = 0.55 + 0.45 * math.sin(t * 1.3 + i * 0.3)
-            px = cx + r * 0.72 * math.cos(ang) * tilt
-            py = cy + r * 0.72 * math.sin(ang) * 0.85
-            sz = 1.2 + 1.8 * abs(math.sin(t * 2.1 + i * 0.5)) + amp * 2.5
-            alpha = 0.25 + 0.55 * abs(math.sin(t * 1.7 + i * 0.4))
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(blend(bright if live else gold, alpha))
-            p.drawEllipse(QPointF(px, py), sz, sz)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-
-        # 5. Inner bright core + name ring
-        inner = r * 0.28
-        g = QRadialGradient(cx, cy, inner)
-        g.setColorAt(0.0, blend(gold, 0.85 * lift))
-        g.setColorAt(0.5, blend(bright, 0.45 * lift))
-        g.setColorAt(1.0, blend(gold, 0.0))
+        # ── Blazing core (sun) ───────────────────────────────────────────
+        core_r = r * (0.18 + 0.04 * amp + (0.03 if self.speaking else 0))
+        g = QRadialGradient(cx, cy, core_r * 2.2)
+        g.setColorAt(0.0, QColor(255, 255, 255, int(230 * lift)))
+        g.setColorAt(0.25, QColor(bright.red(), bright.green(), bright.blue(), int(200 * lift)))
+        g.setColorAt(0.55, QColor(gold.red(), gold.green(), gold.blue(), int(120 * lift)))
+        g.setColorAt(1.0, QColor(0, 0, 0, 0))
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(g))
-        p.drawEllipse(QRectF(cx - inner, cy - inner, inner * 2, inner * 2))
-        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(QRectF(cx - core_r * 2.2, cy - core_r * 2.2, core_r * 4.4, core_r * 4.4))
 
-        p.setPen(QPen(blend(bright, 0.55 + 0.4 * amp), 1.8))
-        p.drawEllipse(QRectF(cx - inner * 1.15, cy - inner * 1.15,
-                             inner * 2.3, inner * 2.3))
+        # sharp core disk
+        g2 = QRadialGradient(cx, cy, core_r)
+        g2.setColorAt(0.0, white)
+        g2.setColorAt(0.5, bright)
+        g2.setColorAt(1.0, gold)
+        p.setBrush(QBrush(g2))
+        p.drawEllipse(QRectF(cx - core_r, cy - core_r, core_r * 2, core_r * 2))
 
-        # Name in the centre
-        name = self._assistant_name or ""
-        if name:
-            fsz = max(9, int(min(r * 0.09, 22)))
-            f = QFont("Courier New", fsz, QFont.Weight.Bold)
-            p.setFont(f)
-            p.setPen(QPen(blend(qcol("#ffffff"), 0.75 + 0.25 * min(1.0, amp * 2)), 1))
-            p.drawText(QRectF(cx - r, cy - fsz * 0.6, r * 2, fsz * 1.4),
-                       Qt.AlignmentFlag.AlignCenter, name)
+        # Core pulse rings
+        for i in range(3):
+            pr = core_r * (1.4 + i * 0.45 + 0.15 * math.sin(t * 3 + i))
+            alpha = int(100 - i * 25)
+            p.setPen(QPen(QColor(bright.red(), bright.green(), bright.blue(), alpha), 1.5))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawEllipse(QRectF(cx - pr, cy - pr, pr * 2, pr * 2))
 
+        # Floating sparkles
+        p.setPen(Qt.PenStyle.NoPen)
+        for i in range(24):
+            a = t * 0.7 + i * (math.pi * 2 / 24)
+            rr = r * (0.95 + 0.35 * math.sin(t * 1.1 + i))
+            px = cx + math.cos(a * 1.3) * rr
+            py = cy + math.sin(a) * rr * 0.7
+            sz = 1.0 + 1.5 * abs(math.sin(t * 2.5 + i))
+            p.setBrush(QColor(255, 230, 120, 100 + int(80 * abs(math.sin(t + i)))))
+            p.drawEllipse(QPointF(px, py), sz, sz)
 
     def _paint_armor(self, p: QPainter, cx: float, cy: float, r: float) -> None:
         """Iron Man-style holographic upper-body wireframe + arc reactor."""
@@ -4175,15 +4211,33 @@ class MainWindow(QMainWindow):
         return w
 
     def _on_nav_tab(self, key: str) -> None:
-        """Dashboard = HUD · Chat = message history · Settings = full-screen page.
-        Clicking the active Chat/Settings tab again returns to Dashboard."""
+        """Dashboard = HUD · Chat = history · Settings = full page.
+        Chat/Settings second click only closes that panel — does NOT switch to Dashboard."""
         prev = getattr(self, "_active_nav", "dashboard")
 
-        # Toggle off: same tab pressed again
+        # ── Close Chat only (no Dashboard switch) ──────────────────────────
         if key == "chat" and prev == "chat":
-            key = "dashboard"
-        elif key == "settings" and prev == "settings":
-            key = "dashboard"
+            self._active_nav = "none"
+            self._tab_chat.setChecked(False)
+            self._tab_dashboard.setChecked(False)
+            self._tab_settings.setChecked(False)
+            if hasattr(self, "_right_panel") and self._right_panel.isVisible():
+                self._animate_panel(self._right_panel, False)
+            self._prev_nav = "none"
+            return
+
+        # ── Close Settings only (no Dashboard switch) ─────────────────────
+        if key == "settings" and prev == "settings":
+            self._active_nav = "none"
+            self._tab_settings.setChecked(False)
+            self._tab_dashboard.setChecked(False)
+            self._tab_chat.setChecked(False)
+            if hasattr(self, "_settings_page"):
+                self._settings_page.hide()
+            if hasattr(self, "_quick_drawer"):
+                self._quick_drawer.hide()
+            self._prev_nav = "none"
+            return
 
         self._active_nav = key
         for btn, k in (
@@ -4472,7 +4526,7 @@ class MainWindow(QMainWindow):
             }}
             QPushButton:hover {{ color: {C.WHITE}; border-color: {C.PRI}; }}
         """)
-        close_btn.clicked.connect(lambda: self._on_nav_tab("dashboard"))
+        close_btn.clicked.connect(lambda: self._on_nav_tab("settings"))  # second click path closes only
         hdr.addWidget(close_btn)
         lay.addLayout(hdr)
 
