@@ -489,8 +489,8 @@ class DashboardServer:
         return (certs / "jarvis.key").exists() and (certs / "jarvis.crt").exists()
 
     def get_url(self) -> str:
-        proto = "https" if self._ssl_enabled() else "http"
-        return f"{proto}://{self._ip}:{PORT}"
+        # Always advertise HTTP for LAN phone companion reliability
+        return f"http://{self._ip}:{PORT}"
 
     def get_manual_url(self) -> str:
         """URL for manual browser entry. When HTTPS active, points to alias port (also HTTPS)."""
@@ -816,7 +816,29 @@ class DashboardServer:
 
         @app.websocket("/ws")
         async def ws_ep(websocket: WebSocket, token: str = ""):
-            tok = token.strip()
+            tok = (token or "").strip()
+            # Accept existing session token
+            if tok and tok not in self._tokens:
+                # Allow one-time pairing PIN as WebSocket auth (phone-friendly)
+                pin = tok.upper()
+                now = time.time()
+                if pin in self._pending_keys and self._pending_keys[pin] > now:
+                    del self._pending_keys[pin]
+                    session = secrets.token_urlsafe(32)
+                    self._tokens.add(session)
+                    self._token_keys[session] = pin
+                    tok = session
+                    if self._connect_callback:
+                        try:
+                            self._connect_callback()
+                        except Exception:
+                            pass
+                    asyncio.create_task(self.broadcast(
+                        {"type": "sys", "text": "Phone connected via Jarvis App."}
+                    ))
+                else:
+                    await websocket.close(code=4001)
+                    return
             if not tok or tok not in self._tokens:
                 await websocket.close(code=4001)
                 return
@@ -870,22 +892,15 @@ class DashboardServer:
         # no waiting for UAC dialogs or subprocess timeouts.
         asyncio.get_event_loop().run_in_executor(None, _ensure_network_access, PORT)
 
-        # Generate the TLS pair on first run so no private key ships in the repo.
-        _ensure_certs()
-
-        use_ssl  = self._ssl_enabled()
-        ssl_key  = BASE_DIR / "config" / "certs" / "jarvis.key"
-        ssl_cert = BASE_DIR / "config" / "certs" / "jarvis.crt"
-
-        if use_ssl:
-            asyncio.create_task(self._serve_alias())
+        # Plain HTTP on 8000 — most reliable for phone browsers on LAN.
+        # Self-signed HTTPS breaks WebSocket on many mobile browsers.
+        _ensure_certs()  # still generate certs for optional alias
 
         cfg = uvicorn.Config(
             self.app, host="0.0.0.0", port=PORT, log_level="warning",
-            **({"ssl_keyfile": str(ssl_key), "ssl_certfile": str(ssl_cert)} if use_ssl else {}),
         )
 
-        proto = "https" if use_ssl else "http"
-        print(f"[Dashboard] {proto}://{self._ip}:{PORT}")
-        print("[Dashboard] Press 'Remote Control' in JARVIS UI to get the QR code.")
+        print(f"[Dashboard] http://{self._ip}:{PORT}")
+        print(f"[Dashboard] Jarvis App:  http://{self._ip}:{PORT}/jarvis-app")
+        print("[Dashboard] Press 'Remote Control' in JARVIS UI to get the pairing key.")
         await uvicorn.Server(cfg).serve()

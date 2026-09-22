@@ -3871,6 +3871,10 @@ class MainWindow(QMainWindow):
         cw = self.centralWidget()
         if hasattr(self, "_settings_page") and self._settings_page.isVisible():
             self._settings_page.setGeometry(cw.rect())
+            if hasattr(self, "_quick_drawer") and self._quick_drawer.isVisible():
+                self._quick_drawer.setGeometry(
+                    20, 56, max(280, cw.width() - 40), max(200, cw.height() - 80)
+                )
         if self._overlay and self._overlay.isVisible():
             ow, oh = 460, 390
             self._overlay.setGeometry(
@@ -4061,21 +4065,35 @@ class MainWindow(QMainWindow):
                     self._refresh_talk_btns()
                 except Exception:
                     pass
-                # Ensure original settings controls are visible inside the page
+                cw = self.centralWidget()
+                # Full-screen settings page frame
+                if hasattr(self, "_settings_page"):
+                    self._settings_page.setGeometry(cw.rect())
+                    self._settings_page.show()
+                    self._settings_page.raise_()
+                # Put the real controls on top, full width, scrollable area host
                 if hasattr(self, "_quick_drawer") and self._quick_drawer is not None:
-                    self._quick_drawer.show()
-                    self._quick_drawer.setVisible(True)
-                    for child in self._quick_drawer.findChildren(QWidget):
-                        # don't force-show intentionally hidden nested panels
-                        pass
-                self._settings_page.setGeometry(self.centralWidget().rect())
-                self._settings_page.show()
-                self._settings_page.raise_()
+                    d = self._quick_drawer
+                    d.setParent(self._settings_page if hasattr(self, "_settings_page") else cw)
+                    d.setMinimumSize(0, 0)
+                    d.setMaximumSize(16777215, 16777215)
+                    # Leave room for SETTINGS header (~56px)
+                    d.setGeometry(20, 56, max(280, cw.width() - 40), max(200, cw.height() - 80))
+                    d.setStyleSheet(f"""
+                        QWidget#QuickDrawer {{
+                            background: {C.PANEL};
+                            border: 1px solid {C.BORDER_A};
+                            border-radius: 16px;
+                        }}
+                    """)
+                    d.show()
+                    d.raise_()
+                    d.setVisible(True)
             else:
-                self._settings_page.hide()
-                if hasattr(self, "_quick_drawer") and self._quick_drawer.isVisible():
+                if hasattr(self, "_settings_page"):
+                    self._settings_page.hide()
+                if hasattr(self, "_quick_drawer"):
                     self._quick_drawer.hide()
-
 
         if key == "dashboard":
             if hasattr(self, "_hud_cam_stack"):
@@ -4491,6 +4509,15 @@ class MainWindow(QMainWindow):
         settings_btn.setStyleSheet(_BTN_STYLE_DIM)
         settings_btn.clicked.connect(self._open_plugin_settings)
         lay.addWidget(settings_btn)
+
+        upd_btn = QPushButton("☁  CHECK FOR UPDATES")
+        upd_btn.setFixedHeight(26)
+        upd_btn.setFont(QFont("Courier New", 7))
+        upd_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        upd_btn.setStyleSheet(_BTN_STYLE_DIM)
+        upd_btn.setToolTip("Check GitHub for a newer Jarvis version and install it.")
+        upd_btn.clicked.connect(self._check_for_updates_ui)
+        lay.addWidget(upd_btn)
 
         w.adjustSize()
         return w
@@ -5692,6 +5719,63 @@ class MainWindow(QMainWindow):
         ov.show()
         ov.raise_()
         self._plugin_manager_overlay = ov   # keep a reference so it isn't GC'd
+
+    def _check_for_updates_ui(self):
+        """Settings → Check GitHub for updates; offer to install."""
+        from PyQt6.QtWidgets import QMessageBox, QInputDialog
+        try:
+            from core.updater import check_for_updates, apply_update, get_repo, save_repo
+        except Exception as e:
+            QMessageBox.warning(self, "Updates", f"Updater unavailable: {e}")
+            return
+
+        # Allow setting repo if still default / user wants
+        info = check_for_updates()
+        if not info.get("ok"):
+            # Offer to set repo
+            repo, ok = QInputDialog.getText(
+                self, "GitHub repo",
+                "Could not check updates.\n"
+                f"Current repo: {get_repo()}\n"
+                "Enter GitHub repo as owner/name:",
+                text=get_repo(),
+            )
+            if ok and repo.strip():
+                save_repo(repo.strip())
+                info = check_for_updates()
+            if not info.get("ok"):
+                QMessageBox.warning(self, "Updates", info.get("message") or "Check failed.")
+                return
+
+        msg = (
+            f"{info.get('message')}\n\n"
+            f"Repo: {info.get('repo')}\n"
+            f"Local: {info.get('local_version')}\n"
+            f"Remote: {info.get('remote_version')}"
+        )
+        if not info.get("update_available"):
+            QMessageBox.information(self, "Updates", msg)
+            return
+
+        reply = QMessageBox.question(
+            self, "Updates",
+            msg + "\n\nDownload and install the update now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        result = apply_update(info.get("zip_url"))
+        if result.get("ok"):
+            QMessageBox.information(
+                self, "Updates",
+                (result.get("message") or "Updated.") + "\nPlease restart Jarvis.",
+            )
+            try:
+                self.write_log("SYS: " + (result.get("message") or "Updated from GitHub."))
+            except Exception:
+                pass
+        else:
+            QMessageBox.warning(self, "Updates", result.get("message") or "Update failed.")
 
     def _open_plugin_settings(self):
         sections = self.get_plugin_settings() if self.get_plugin_settings else []
