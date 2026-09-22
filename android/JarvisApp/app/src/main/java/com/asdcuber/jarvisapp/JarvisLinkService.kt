@@ -14,7 +14,10 @@ import androidx.core.app.NotificationCompat
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.handshake.ServerHandshake
 import org.json.JSONObject
+import java.net.HttpURLConnection
 import java.net.URI
+import java.net.URL
+import java.util.concurrent.Executors
 
 class JarvisLinkService : Service() {
 
@@ -24,10 +27,14 @@ class JarvisLinkService : Service() {
         const val EXTRA_KEY = "key"
         @Volatile var connected: Boolean = false
         @Volatile var lastLog: String = ""
+        @Volatile var statusLine: String = "Offline"
     }
 
     private var client: WebSocketClient? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val io = Executors.newSingleThreadExecutor()
+    private var hostRaw: String = ""
+    private var keyRaw: String = ""
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -39,23 +46,77 @@ class JarvisLinkService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val host = intent?.getStringExtra(EXTRA_HOST) ?: return START_NOT_STICKY
         val key = intent?.getStringExtra(EXTRA_KEY) ?: return START_NOT_STICKY
+        hostRaw = host
+        keyRaw = key
         startForeground(1, buildNotification("Connecting…"))
-        connect(host, key)
+        statusLine = "Connecting…"
+        lastLog = "Connecting to $host"
+        io.execute { connectPipeline(host, key) }
         return START_STICKY
     }
 
-    private fun connect(hostRaw: String, key: String) {
+    private fun connectPipeline(hostRaw: String, key: String) {
+        try {
+            var host = hostRaw.removePrefix("http://").removePrefix("https://").trimEnd('/')
+            if (!host.contains(":")) host = "$host:8000"
+            val base = "http://$host"
+
+            // 1) Prefer HTTP login → token (same as web app)
+            var token = key.trim().uppercase()
+            try {
+                val url = URL("$base/login")
+                val conn = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    setRequestProperty("Content-Type", "application/json")
+                    doOutput = true
+                    connectTimeout = 8000
+                    readTimeout = 8000
+                }
+                conn.outputStream.use { os ->
+                    os.write("""{"key":"$token"}""".toByteArray(Charsets.UTF_8))
+                }
+                val code = conn.responseCode
+                val body = try {
+                    (if (code in 200..299) conn.inputStream else conn.errorStream)
+                        ?.bufferedReader()?.readText().orEmpty()
+                } catch (_: Exception) { "" }
+                if (code in 200..299 && body.contains("token")) {
+                    val t = JSONObject(body).optString("token", "")
+                    if (t.isNotBlank()) {
+                        token = t
+                        lastLog = "Login OK — opening socket…"
+                        statusLine = "Login OK…"
+                    }
+                } else {
+                    lastLog = "Login $code — trying pairing key on socket…"
+                }
+            } catch (e: Exception) {
+                lastLog = "Login skip: ${e.message}"
+            }
+
+            // 2) WebSocket
+            val uri = URI("ws://$host/ws?token=${java.net.URLEncoder.encode(token, "UTF-8")}")
+            mainHandler.post { openSocket(uri) }
+        } catch (e: Exception) {
+            connected = false
+            statusLine = "Error"
+            lastLog = "Connect failed: ${e.message}"
+            updateNotification("Error")
+        }
+    }
+
+    private fun openSocket(uri: URI) {
         client?.close()
-        var host = hostRaw.removePrefix("http://").removePrefix("https://").trimEnd('/')
-        if (!host.contains(":")) host = "$host:8000"
-        val uri = URI("ws://$host/ws?token=${key.trim().uppercase()}")
-        lastLog = "Connecting $uri"
+        lastLog = "WS ${uri.host}…"
         client = object : WebSocketClient(uri) {
             override fun onOpen(handshakedata: ServerHandshake?) {
                 connected = true
-                lastLog = "Connected"
-                send(JSONObject(mapOf("type" to "hello", "client" to "jarvis_android")).toString())
-                updateNotification("Online")
+                statusLine = "Connected"
+                lastLog = "Connected ✓"
+                try {
+                    send(JSONObject(mapOf("type" to "hello", "client" to "jarvis_android")).toString())
+                } catch (_: Exception) {}
+                updateNotification("Connected")
             }
 
             override fun onMessage(message: String?) {
@@ -77,22 +138,24 @@ class JarvisLinkService : Service() {
                                 )
                             } catch (_: Exception) {}
                         }
-                    } else {
-                        lastLog = message
+                    } else if (obj.optString("type") == "sys") {
+                        lastLog = obj.optString("text", message)
                     }
                 } catch (_: Exception) {
-                    lastLog = message
+                    lastLog = message.take(120)
                 }
             }
 
             override fun onClose(code: Int, reason: String?, remote: Boolean) {
                 connected = false
-                lastLog = "Disconnected ($code)"
+                statusLine = "Disconnected"
+                lastLog = "Disconnected ($code) ${reason ?: ""}"
                 updateNotification("Offline")
             }
 
             override fun onError(ex: Exception?) {
                 connected = false
+                statusLine = "Error"
                 lastLog = "Error: ${ex?.message}"
                 updateNotification("Error")
             }
@@ -104,6 +167,7 @@ class JarvisLinkService : Service() {
     override fun onDestroy() {
         client?.close()
         connected = false
+        statusLine = "Offline"
         super.onDestroy()
     }
 

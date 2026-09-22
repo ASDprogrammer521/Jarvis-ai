@@ -120,7 +120,7 @@ def run(action: str = "status", value: str = "", **kwargs) -> str:
                 n = dash.phone_count()
             except Exception:
                 n = 1
-            parts.append(f"Jarvis App linked ({n} client(s)) — remote chat/control channel is live.")
+            parts.append(f"Jarvis App CONNECTED ({n} client(s)) — phone control is live.")
         else:
             parts.append("Jarvis App: not linked. Open http://<PC-IP>:8000/jarvis-app on the phone and Connect.")
         if adb_ok:
@@ -145,19 +145,20 @@ def run(action: str = "status", value: str = "", **kwargs) -> str:
             return f"Asked phone to open URL ({n}): {value}"
 
         if action in ("open_app", "app"):
-            # Browser cannot open arbitrary apps — try URL scheme hints
-            app = (value or "").lower()
-            schemes = {
-                "chrome": "https://",
-                "youtube": "https://youtube.com",
-                "maps": "geo:0,0",
-                "phone": "tel:",
-                "sms": "sms:",
-                "settings": "https://",
-            }
-            url = schemes.get(app, value if value.startswith("http") else f"https://play.google.com/store/search?q={value}")
-            n = _push_phone(dash, {"type": "phone_cmd", "action": "open_url", "url": url})
-            return f"Sent open request for '{value}' to phone ({n}). Deep app control needs ADB."
+            app = (value or "").strip()
+            # Native app command — Android Jarvis App opens by package/name
+            n = _push_phone(dash, {
+                "type": "phone_cmd",
+                "action": "open_app",
+                "value": app,
+                "text": app,
+            })
+            if n <= 0:
+                return (
+                    "Phone not linked right now. Open Jarvis App on the phone, "
+                    "enter IP + pairing key, wait for Connected, then try again."
+                )
+            return f"Sent open-app '{app}' to phone ({n} client(s))."
 
         if action in ("type_text", "type", "text"):
             if not value:

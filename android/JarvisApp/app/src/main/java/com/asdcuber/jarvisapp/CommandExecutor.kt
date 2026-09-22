@@ -81,6 +81,34 @@ object CommandExecutor {
     private fun openApp(context: Context, name: String): String {
         if (name.isBlank()) return "No app name"
         val pm = context.packageManager
+        val aliases = mapOf(
+            "youtube" to "com.google.android.youtube",
+            "chrome" to "com.android.chrome",
+            "maps" to "com.google.android.apps.maps",
+            "whatsapp" to "com.whatsapp",
+            "telegram" to "org.telegram.messenger",
+            "instagram" to "com.instagram.android",
+            "spotify" to "com.spotify.music",
+            "settings" to "com.android.settings",
+        )
+        val lower = name.lowercase().trim()
+        val pkgHint = aliases[lower]
+        if (pkgHint != null) {
+            val launch = pm.getLaunchIntentForPackage(pkgHint)
+            if (launch != null) {
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(launch)
+                return "Opened $name"
+            }
+            // fallback URL for youtube
+            if (lower == "youtube") {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://youtube.com"))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+                return "Opened YouTube in browser"
+            }
+        }
         // Package id?
         if (name.contains(".")) {
             val launch = pm.getLaunchIntentForPackage(name)

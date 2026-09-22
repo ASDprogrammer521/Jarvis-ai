@@ -17,6 +17,7 @@ class MainActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var statusText: TextView
     private lateinit var logView: TextView
+    private var lastSeenLog: String = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,6 +47,8 @@ class MainActivity : AppCompatActivity() {
             i.putExtra(JarvisLinkService.EXTRA_KEY, key)
             startForegroundService(i)
             appendLog("Starting link…")
+            statusText.text = "Connecting…"
+            statusText.setTextColor(0xFFFFB428.toInt())
         }
 
         adminBtn.setOnClickListener {
@@ -63,14 +66,26 @@ class MainActivity : AppCompatActivity() {
 
         handler.post(object : Runnable {
             override fun run() {
-                statusText.text = if (JarvisLinkService.connected) "Online" else "Offline"
-                statusText.setTextColor(
-                    if (JarvisLinkService.connected) 0xFF37FF8B.toInt() else 0xFFFF4D6D.toInt()
-                )
-                if (JarvisLinkService.lastLog.isNotBlank()) {
-                    // refresh last line only when changed
+                val online = JarvisLinkService.connected
+                val line = JarvisLinkService.statusLine
+                statusText.text = when {
+                    online -> "Connected"
+                    line.isNotBlank() -> line
+                    else -> "Offline"
                 }
-                handler.postDelayed(this, 1000)
+                statusText.setTextColor(
+                    when {
+                        online -> 0xFF37FF8B.toInt()
+                        line.startsWith("Connect") || line.startsWith("Login") -> 0xFFFFB428.toInt()
+                        else -> 0xFFFF4D6D.toInt()
+                    }
+                )
+                val lg = JarvisLinkService.lastLog
+                if (lg.isNotBlank() && lg != lastSeenLog) {
+                    lastSeenLog = lg
+                    appendLog(lg)
+                }
+                handler.postDelayed(this, 500)
             }
         })
     }
