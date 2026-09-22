@@ -3,67 +3,143 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-<meta name="theme-color" content="#05070c"/>
+<meta name="theme-color" content="#05070b"/>
 <title>Jarvis App</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:      #05070b;
+    --surface: rgba(255,255,255,0.04);
+    --border:  rgba(99,102,241,0.15);
+    --accent:  #6366f1;
+    --accent-glow: rgba(99,102,241,0.35);
+    --text:    #f1f5f9;
+    --muted:   #64748b;
+    --green:   #22c55e;
+    --gdim:    rgba(34,197,94,0.15);
+    --red:     #ef4444;
+  }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: #05070c; color: #e8f4ff;
-    min-height: 100dvh; display: flex; flex-direction: column;
+    background: var(--bg); color: var(--text);
+    min-height: 100dvh; display: flex; flex-direction: column; overflow: hidden;
+    background-image: radial-gradient(circle at 50% 0%, rgba(99,102,241,0.08) 0%, transparent 60%);
   }
+  
+  /* Top Bar */
   .top {
-    padding: 16px 18px 10px; display: flex; align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    padding: 16px 20px; display: flex; align-items: center;
+    justify-content: space-between; flex-shrink: 0;
+    background: rgba(5,7,11,0.85); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    animation: slideDown 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 10;
   }
-  .brand { font-weight: 700; letter-spacing: 2px; font-size: 15px; }
+  @keyframes slideDown { from { transform: translateY(-100%); opacity: 0; } }
+
+  .brand { font-size: 16px; font-weight: 800; letter-spacing: 4px; text-shadow: 0 0 15px var(--accent-glow); }
+  .brand em { color: var(--accent); font-style: normal; }
+
   .status {
-    font-size: 12px; padding: 4px 10px; border-radius: 12px;
-    background: rgba(255,255,255,0.06); color: #9ab4c8;
+    display: flex; align-items: center; gap: 7px; padding: 5px 12px;
+    border-radius: 99px; background: var(--surface); border: 1px solid var(--border);
+    font-size: 10px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+    color: var(--muted); transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   }
-  .status.on { background: rgba(55,255,139,0.15); color: #37ff8b; }
-  .status.off { background: rgba(255,77,109,0.12); color: #ff4d6d; }
-  .main { flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+  .status.on { background: var(--gdim); border-color: rgba(34,197,94,0.4); color: var(--green); box-shadow: 0 0 15px rgba(34,197,94,0.2); }
+  .status.off { background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.3); color: var(--red); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); transition: background 0.3s; }
+  .status.on .dot { background: var(--green); animation: pulseDot 2s infinite; }
+  @keyframes pulseDot { 0%,100%{transform: scale(1); opacity:1} 50%{transform: scale(1.4); opacity:0.5} }
+
+  /* Main Container */
+  .main { 
+    flex: 1; padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; 
+    overflow-y: auto; scroll-behavior: smooth; 
+  }
+  .main::-webkit-scrollbar { width: 4px; }
+  .main::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  /* Cards */
   .card {
-    background: #0e131c; border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 16px; padding: 14px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 16px; backdrop-filter: blur(10px);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    animation: popUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
   }
-  .card h3 { font-size: 12px; letter-spacing: 1px; color: #6a8499; margin-bottom: 10px; }
+  @keyframes popUp { from { opacity:0; transform:translateY(10px) scale(0.97); } }
+  
+  .card h3 { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 12px; font-weight: 700; }
+
+  /* Inputs & Buttons */
   input, button { font: inherit; border: none; outline: none; }
   input {
-    width: 100%; background: #1a1c20; color: #fff; border-radius: 12px;
-    padding: 12px 14px; border: 1px solid rgba(255,255,255,0.08); margin-bottom: 8px;
+    width: 100%; background: rgba(255,255,255,0.03); color: var(--text); border-radius: 12px;
+    padding: 12px 16px; border: 1.5px solid var(--border); margin-bottom: 10px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
-  .btn { width: 100%; padding: 13px; border-radius: 14px; font-weight: 600; cursor: pointer; }
-  .btn-primary { background: linear-gradient(90deg, #ffb428, #ff8c14); color: #1a1000; }
-  .btn-ghost { background: rgba(255,255,255,0.06); color: #e8f4ff; border: 1px solid rgba(255,255,255,0.1); }
-  .btn-danger { background: rgba(255,77,109,0.15); color: #ff4d6d; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  input:focus { border-color: var(--accent); box-shadow: 0 0 20px var(--accent-glow); background: rgba(255,255,255,0.06); }
+  input::placeholder { color: var(--muted); }
+
+  .btn { 
+    width: 100%; padding: 12px 18px; border-radius: 12px; font-size: 11px; font-weight: 700; 
+    letter-spacing: 1.5px; cursor: pointer; transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); 
+  }
+  .btn:active { transform: scale(0.96); }
+  .btn:hover  { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+
+  .btn-primary { background: var(--accent); color: #fff; box-shadow: 0 0 15px var(--accent-glow); }
+  .btn-primary:hover { background: #4f46e5; box-shadow: 0 0 25px var(--accent-glow); }
+
+  .btn-ghost { background: rgba(255,255,255,0.04); color: var(--text); border: 1px solid var(--border); }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); background: rgba(99,102,241,0.08); }
+
+  .btn-danger { background: rgba(239,68,68,0.12); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+  .btn-danger:hover { background: rgba(239,68,68,0.2); box-shadow: 0 0 15px rgba(239,68,68,0.3); }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  
+  /* Log Box */
   .log {
-    flex: 1; min-height: 140px; max-height: 40vh; overflow-y: auto;
-    font-size: 13px; line-height: 1.45; color: #9ab4c8; white-space: pre-wrap;
+    flex: 1; min-height: 120px; max-height: 40vh; overflow-y: auto;
+    font-size: 13px; line-height: 1.6; color: var(--muted); white-space: pre-wrap;
+    font-family: monospace;
   }
+
+  /* Footer Ask Bar */
   .ask {
-    display: flex; gap: 8px; padding: 12px 16px 20px;
-    border-top: 1px solid rgba(255,255,255,0.06);
+    display: flex; gap: 10px; padding: 14px 20px 20px; flex-shrink: 0;
+    background: rgba(5,7,11,0.85); backdrop-filter: blur(12px);
+    border-top: 1px solid var(--border); box-shadow: 0 -4px 20px rgba(0,0,0,0.4);
+    animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 10;
   }
+  @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } }
+
   .ask input { margin: 0; flex: 1; }
-  .ask button { width: 48px; border-radius: 14px; background: #0a84ff; color: #fff; font-size: 18px; }
-  .hint { font-size: 12px; color: #6a8499; margin-top: 6px; line-height: 1.4; }
+  .ask button { 
+    width: 48px; height: 48px; border-radius: 12px; background: var(--accent); color: #fff; 
+    font-size: 18px; display: flex; align-items: center; justify-content: center; cursor: pointer;
+    box-shadow: 0 0 15px var(--accent-glow); flex-shrink: 0; transition: all 0.25s;
+  }
+  .ask button:hover { background: #4f46e5; box-shadow: 0 0 25px var(--accent-glow); transform: translateY(-2px); }
+  .ask button:active { transform: scale(0.94); }
+
+  .hint { font-size: 11px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
 </style>
 </head>
 <body>
   <div class="top">
-    <div class="brand">JARVIS APP</div>
-    <div id="st" class="status off">Offline</div>
+    <div class="brand"><em>J</em>ARVIS</div>
+    <div id="st" class="status off"><span class="dot"></span>Offline</div>
   </div>
   <div class="main">
     <div class="card" id="connectCard">
       <h3>CONNECT TO PC</h3>
-      <input id="host" placeholder="PC IP  e.g. 192.168.35.70" autocomplete="off"/>
+      <input id="host" placeholder="PC IP e.g. 192.168.35.70" autocomplete="off"/>
       <input id="key" placeholder="Pairing key from Dashboard" autocomplete="off"/>
-      <button class="btn btn-primary" id="connectBtn" onclick="connect()">Connect</button>
+      <button class="btn btn-primary" id="connectBtn" onclick="connect()">CONNECT</button>
       <p class="hint">
         Use <b>http</b> (not https). Same Wi‑Fi required.<br/>
         Get a <b>fresh</b> key from Jarvis → Remote Control each time.
@@ -77,7 +153,7 @@
         <button class="btn btn-ghost" onclick="sendCmd('mute')">Mute</button>
         <button class="btn btn-ghost" onclick="sendCmd('unmute')">Unmute</button>
       </div>
-      <button class="btn btn-danger" style="margin-top:10px" onclick="disconnect()">Disconnect</button>
+      <button class="btn btn-danger" style="margin-top:10px" onclick="disconnect()">DISCONNECT</button>
     </div>
     <div class="card" style="flex:1; display:flex; flex-direction:column">
       <h3>LIVE LOG</h3>
@@ -103,14 +179,13 @@ function log(line) {
   el.scrollTop = el.scrollHeight;
 }
 function setOnline(on) {
-  $('st').textContent = on ? 'Online' : 'Offline';
+  $('st').innerHTML = `<span class="dot"></span>${on ? 'Online' : 'Offline'}`;
   $('st').className = 'status ' + (on ? 'on' : 'off');
   $('connectCard').style.display = on ? 'none' : 'block';
   $('ctrlCard').style.display = on ? 'block' : 'none';
 }
 
 function resolveOrigin(hostVal) {
-  // Prefer current page origin if already on the dashboard
   if (location.protocol === 'http:' && location.port === '8000') {
     return location.origin;
   }
@@ -146,26 +221,24 @@ async function connect() {
   if (!hostVal || !pin) { alert('Enter PC IP and pairing key'); return; }
 
   $('connectBtn').disabled = true;
-  $('connectBtn').textContent = 'Connecting…';
+  $('connectBtn').textContent = 'CONNECTING…';
   const origin = resolveOrigin(hostVal);
   localStorage.setItem('jarvis_host', hostVal);
   log('Target: ' + origin);
 
   try {
-    // Path A: direct WS with pairing key (server accepts PIN once)
     try {
       ws = await openWs(origin, pin);
       wireWs(ws);
       setOnline(true);
       log('Connected (direct key).');
       $('connectBtn').disabled = false;
-      $('connectBtn').textContent = 'Connect';
+      $('connectBtn').textContent = 'CONNECT';
       return;
     } catch (e1) {
       log('Direct key failed: ' + e1.message);
     }
 
-    // Path B: /login → session token → WS
     log('Trying /login …');
     const res = await fetch(origin + '/login', {
       method: 'POST',
@@ -187,7 +260,7 @@ async function connect() {
     setOnline(false);
   }
   $('connectBtn').disabled = false;
-  $('connectBtn').textContent = 'Connect';
+  $('connectBtn').textContent = 'CONNECT';
 }
 
 function wireWs(socket) {
