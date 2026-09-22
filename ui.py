@@ -72,12 +72,12 @@ _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
 class C:
     # Modern cinematic palette (Brahma Echo–inspired glass dark)
-    BG        = "#05070c"
-    PANEL     = "#0a0e16"
-    PANEL2    = "#0e131c"
-    BORDER    = "#1a2433"
-    BORDER_B  = "#2a3a4f"
-    BORDER_A  = "#1e2c3d"
+    BG        = "#03060b"
+    PANEL     = "#080d16"
+    PANEL2    = "#0c121c"
+    BORDER    = "#162032"
+    BORDER_B  = "#2a3f58"
+    BORDER_A  = "#1a2a3e"
     PRI       = "#00d4ff"
     PRI_DIM   = "#0088aa"
     PRI_GHO   = "#002a38"
@@ -1374,25 +1374,29 @@ class LogWidget(QTextEdit):
         # without bound — keeps memory flat and every insert cheap. Oldest
         # lines drop off the top automatically.
         self.document().setMaximumBlockCount(600)
-        self.setFont(QFont("Courier New", 9))
+        self.setFont(QFont("Segoe UI", 10))
         self.setStyleSheet(f"""
             QTextEdit {{
-                background: {C.PANEL};
+                background: rgba(8, 12, 20, 0.92);
                 color: {C.TEXT};
-                border: 1px solid {C.BORDER};
-                border-radius: 4px;
-                padding: 6px;
+                border: 1px solid rgba(0, 212, 255, 0.18);
+                border-radius: 14px;
+                padding: 12px 14px;
                 selection-background-color: {C.PRI_GHO};
             }}
             QScrollBar:vertical {{
-                background: {C.BG};
+                background: transparent;
                 width: 8px;
                 border: none;
+                margin: 4px 2px;
             }}
             QScrollBar::handle:vertical {{
-                background: {C.BORDER_B};
+                background: rgba(0, 212, 255, 0.35);
                 border-radius: 4px;
-                min-height: 20px;
+                min-height: 28px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: rgba(0, 212, 255, 0.55);
             }}
         """)
         self._queue: list[str] = []
@@ -2736,62 +2740,79 @@ class ClipboardPanel(QWidget):
     """Floating panel shown when text is copied — offers quick Jarvis actions."""
 
     action_requested = pyqtSignal(str)
-    _W, _H = 326, 112
+    _W, _H = 360, 130
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"""
             ClipboardPanel {{
-                background: rgba(0, 8, 14, 248);
-                border: 1px solid {C.BORDER_B};
-                border-radius: 6px;
+                background: rgba(8, 14, 24, 245);
+                border: 1px solid rgba(0, 212, 255, 0.35);
+                border-radius: 16px;
             }}
         """)
         self.setFixedWidth(self._W)
         self._clip_text = ""
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(8, 6, 8, 7)
-        lay.setSpacing(4)
+        lay.setContentsMargins(14, 10, 14, 12)
+        lay.setSpacing(8)
 
-        hdr = QHBoxLayout(); hdr.setSpacing(4)
-        icon_lbl = QLabel("◈  CLIPBOARD DETECTED")
-        icon_lbl.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
-        icon_lbl.setStyleSheet(f"color: {C.ACC2}; background: transparent;")
+        hdr = QHBoxLayout(); hdr.setSpacing(6)
+        icon_lbl = QLabel("CLIPBOARD")
+        icon_lbl.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        icon_lbl.setStyleSheet(
+            f"color: {C.PRI}; background: transparent; letter-spacing: 2px;"
+        )
         hdr.addWidget(icon_lbl); hdr.addStretch()
         x_btn = QPushButton("✕")
-        x_btn.setFixedSize(16, 16)
-        x_btn.setFont(QFont("Courier New", 8))
-        x_btn.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent; border: none;")
+        x_btn.setFixedSize(24, 24)
+        x_btn.setFont(QFont("Segoe UI", 10))
+        x_btn.setStyleSheet(f"""
+            QPushButton {{
+                color: {C.TEXT_DIM}; background: rgba(255,255,255,0.04);
+                border: 1px solid rgba(255,255,255,0.08); border-radius: 12px;
+            }}
+            QPushButton:hover {{ color: {C.WHITE}; border-color: {C.PRI}; }}
+        """)
         x_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         x_btn.clicked.connect(self.hide)
         hdr.addWidget(x_btn)
         lay.addLayout(hdr)
 
         self._preview = QLabel()
-        self._preview.setFont(QFont("Courier New", 8))
+        self._preview.setFont(QFont("Segoe UI", 10))
         self._preview.setStyleSheet(f"""
-            color: {C.TEXT}; background: {C.PANEL2};
-            border: 1px solid {C.BORDER}; border-radius: 3px; padding: 4px 6px;
+            color: {C.TEXT}; background: rgba(0, 212, 255, 0.06);
+            border: 1px solid rgba(0, 212, 255, 0.15);
+            border-radius: 10px; padding: 8px 10px;
         """)
         self._preview.setWordWrap(False)
-        self._preview.setFixedHeight(28)
+        self._preview.setFixedHeight(36)
         lay.addWidget(self._preview)
 
-        btn_row = QHBoxLayout(); btn_row.setSpacing(4)
-        _bs = (f"QPushButton {{ background: {C.PANEL2}; color: {C.TEXT_MED}; "
-               f"border: 1px solid {C.BORDER}; border-radius: 2px; }}"
-               f"QPushButton:hover {{ color: {C.PRI}; border-color: {C.BORDER_B}; }}")
+        btn_row = QHBoxLayout(); btn_row.setSpacing(6)
+        _bs = f"""
+            QPushButton {{
+                background: rgba(255,255,255,0.04); color: {C.TEXT_MED};
+                border: 1px solid rgba(255,255,255,0.10); border-radius: 10px;
+                padding: 0 6px;
+            }}
+            QPushButton:hover {{
+                color: {C.WHITE}; background: rgba(0, 212, 255, 0.15);
+                border-color: rgba(0, 212, 255, 0.45);
+            }}
+        """
         for label, cmd_fmt in [
-            ("TRANSLATE", "Translate this text to English: {text}"),
-            ("SUMMARISE", "Summarise this: {text}"),
-            ("EXPLAIN",   "Explain this: {text}"),
-            ("FIX",       "Fix grammar and spelling: {text}"),
+            ("Translate", "Translate this text to English: {text}"),
+            ("Summarise", "Summarise this: {text}"),
+            ("Explain",   "Explain this: {text}"),
+            ("Fix",       "Fix grammar and spelling: {text}"),
         ]:
             b = QPushButton(label)
-            b.setFixedHeight(22)
-            b.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+            b.setFixedHeight(28)
+            b.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setStyleSheet(_bs)
             b.clicked.connect(lambda _, c=cmd_fmt: self._trigger(c))
@@ -3456,8 +3477,8 @@ class MainWindow(QMainWindow):
         self._cmd_bar_host = QWidget()
         self._cmd_bar_host.setObjectName("CmdBarHost")
         self._cmd_bar_host.setStyleSheet(
-            f"QWidget#CmdBarHost {{ background: {C.DARK}; "
-            f"border-top: 1px solid rgba(255,255,255,0.06); }}"
+            f"QWidget#CmdBarHost {{ background: rgba(3, 6, 11, 0.98); "
+            f"border-top: 1px solid rgba(0,212,255,0.12); }}"
         )
         _cmd_lay = QVBoxLayout(self._cmd_bar_host)
         _cmd_lay.setContentsMargins(20, 10, 20, 10)
@@ -4304,7 +4325,7 @@ class MainWindow(QMainWindow):
         w = QWidget()
         w.setFixedWidth(_LEFT_W)
         w.setStyleSheet(
-            f"background: {C.DARK}; border-right: 1px solid rgba(255,255,255,0.06);"
+            f"background: rgba(5, 10, 18, 0.96); border-right: 1px solid rgba(0,212,255,0.12);"
         )
         lay = QVBoxLayout(w)
         lay.setContentsMargins(10, 12, 10, 12)
@@ -4366,7 +4387,7 @@ class MainWindow(QMainWindow):
         w = QWidget()
         w.setFixedWidth(_RIGHT_W)
         w.setStyleSheet(
-            f"background: {C.DARK}; border-left: 1px solid rgba(255,255,255,0.06);"
+            f"background: rgba(5, 10, 18, 0.96); border-left: 1px solid rgba(0,212,255,0.15);"
         )
         lay = QVBoxLayout(w)
         lay.setContentsMargins(12, 12, 12, 12)
@@ -4435,8 +4456,10 @@ class MainWindow(QMainWindow):
 
         hdr = QHBoxLayout()
         title = QLabel("SETTINGS")
-        title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
-        title.setStyleSheet(f"color: {C.WHITE}; letter-spacing: 2px; background: transparent;")
+        title.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
+        title.setStyleSheet(
+            f"color: {C.WHITE}; letter-spacing: 3px; background: transparent;"
+        )
         hdr.addWidget(title)
         hdr.addStretch()
         close_btn = QPushButton("✕  Close")
@@ -4756,8 +4779,8 @@ class MainWindow(QMainWindow):
         bar.setFixedHeight(48)
         bar.setStyleSheet(f"""
             QFrame#AskBar {{
-                background: #1a1c20;
-                border: 1px solid rgba(255,255,255,0.08);
+                background: rgba(12, 18, 28, 0.95);
+                border: 1px solid rgba(0, 212, 255, 0.22);
                 border-radius: 24px;
             }}
         """)
@@ -5291,14 +5314,14 @@ class MainWindow(QMainWindow):
 
     def _build_footer(self) -> QWidget:
         w = QWidget()
-        w.setFixedHeight(24)
+        w.setFixedHeight(28)
         w.setStyleSheet(
-            f"background: {C.DARK}; border-top: 1px solid rgba(255,255,255,0.06);"
+            f"background: {C.DARK}; border-top: 1px solid rgba(0,212,255,0.12);"
         )
-        lay = QHBoxLayout(w); lay.setContentsMargins(16, 0, 16, 0)
+        lay = QHBoxLayout(w); lay.setContentsMargins(18, 0, 18, 0)
 
         def _fl(txt, color=C.TEXT_MED):
-            l = QLabel(txt); l.setFont(QFont("Segoe UI", 8))
+            l = QLabel(txt); l.setFont(QFont("Segoe UI", 9))
             l.setStyleSheet(f"color: {color}; background: transparent;")
             return l
 
