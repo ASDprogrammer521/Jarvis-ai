@@ -38,6 +38,11 @@ except Exception:
 BASE_DIR    = Path(__file__).resolve().parent.parent
 STATIC_DIR  = Path(__file__).parent / "static"
 PORT        = 8000
+_ACTIVE_DASHBOARD = None  # set when DashboardServer starts
+
+
+def get_active_dashboard():
+    return _ACTIVE_DASHBOARD
 MAX_UPLOAD_MB = 500
 
 
@@ -473,6 +478,8 @@ class DashboardServer:
         self._app_html                    = _read("app.html")
         self._jarvis_app_html             = _read("jarvis_app.html")
         self.app                          = self._build_app()
+        global _ACTIVE_DASHBOARD
+        _ACTIVE_DASHBOARD = self
 
     # ── one-time key management ───────────────────────────────────────────
 
@@ -533,6 +540,28 @@ class DashboardServer:
             except Exception:
                 dead.add(ws)
         self._clients -= dead
+
+    def phone_linked(self) -> bool:
+        """True when at least one dashboard/Jarvis App client is connected."""
+        return len(self._clients) > 0
+
+    def phone_count(self) -> int:
+        return len(self._clients)
+
+    async def send_to_phones(self, msg: dict) -> int:
+        """Push a command/message to all connected phone/dashboard clients."""
+        if not self._clients:
+            return 0
+        dead: set[WebSocket] = set()
+        n = 0
+        for ws in list(self._clients):
+            try:
+                await ws.send_json(msg)
+                n += 1
+            except Exception:
+                dead.add(ws)
+        self._clients -= dead
+        return n
 
     # ── FastAPI app ───────────────────────────────────────────────────────
 
@@ -844,6 +873,14 @@ class DashboardServer:
                 return
             await websocket.accept()
             self._clients.add(websocket)
+            if self._connect_callback:
+                try:
+                    self._connect_callback()
+                except Exception:
+                    pass
+            asyncio.create_task(self.broadcast(
+                {"type": "sys", "text": f"Remote client online ({len(self._clients)})."}
+            ))
             for entry in self._history[-50:]:
                 try:
                     await websocket.send_json(entry)
@@ -859,10 +896,17 @@ class DashboardServer:
                             await self._command_queue.put(t)
                             if self._wake_callback:
                                 self._wake_callback()
+                    elif data.get("type") == "hello":
+                        asyncio.create_task(self.broadcast(
+                            {"type": "sys", "text": "Jarvis App linked and ready."}
+                        ))
             except WebSocketDisconnect:
                 pass
             finally:
                 self._clients.discard(websocket)
+                asyncio.create_task(self.broadcast(
+                    {"type": "sys", "text": f"Remote client offline ({len(self._clients)} left)."}
+                ))
 
         return app
 

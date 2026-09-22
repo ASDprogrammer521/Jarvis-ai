@@ -194,6 +194,10 @@ function wireWs(socket) {
   socket.onmessage = (ev) => {
     try {
       const m = JSON.parse(ev.data);
+      if (m.type === 'phone_cmd') {
+        handlePhoneCmd(m);
+        return;
+      }
       if (m.type === 'sys' || m.type === 'log' || m.type === 'status') log(m.text || m.state || JSON.stringify(m));
       else if (m.type === 'reply') log('Jarvis: ' + (m.text || ''));
       else log(JSON.stringify(m));
@@ -201,6 +205,23 @@ function wireWs(socket) {
   };
   socket.onclose = () => { setOnline(false); log('Disconnected.'); };
   socket.onerror = () => log('Socket error.');
+}
+
+function handlePhoneCmd(m) {
+  const act = (m.action || '').toLowerCase();
+  if (act === 'notify' || act === 'message' || act === 'alert') {
+    const t = m.text || 'Jarvis';
+    log('Jarvis → ' + t);
+    try { if (navigator.vibrate) navigator.vibrate(80); } catch (e) {}
+    alert(t);
+    return;
+  }
+  if (act === 'open_url' && m.url) {
+    log('Open URL: ' + m.url);
+    try { window.open(m.url, '_blank'); } catch (e) { location.href = m.url; }
+    return;
+  }
+  log('Phone cmd: ' + JSON.stringify(m));
 }
 
 function disconnect() { if (ws) ws.close(); setOnline(false); }

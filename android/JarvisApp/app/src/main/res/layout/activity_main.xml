@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="20dp"
+    android:background="#05070C">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="JARVIS APP"
+        android:textColor="#FFE9A8"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:letterSpacing="0.12" />
+
+    <TextView
+        android:id="@+id/statusText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Offline"
+        android:textColor="#FF4D6D"
+        android:textSize="14sp" />
+
+    <EditText
+        android:id="@+id/hostInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:hint="PC IP (e.g. 192.168.35.70)"
+        android:inputType="text"
+        android:padding="14dp"
+        android:background="#1A1C20"
+        android:textColor="#FFFFFF"
+        android:textColorHint="#6A8499" />
+
+    <EditText
+        android:id="@+id/keyInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:hint="Pairing key"
+        android:inputType="textCapCharacters"
+        android:padding="14dp"
+        android:background="#1A1C20"
+        android:textColor="#FFFFFF"
+        android:textColorHint="#6A8499" />
+
+    <Button
+        android:id="@+id/connectBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:text="Connect"
+        android:textColor="#1A1000"
+        android:backgroundTint="#FFB428" />
+
+    <Button
+        android:id="@+id/adminBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Enable lock permission"
+        android:textColor="#E8F4FF"
+        android:backgroundTint="#1A1C20" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="16dp">
+        <TextView
+            android:id="@+id/logView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#9AB4C8"
+            android:textSize="12sp"
+            android:lineSpacingExtra="3dp" />
+    </ScrollView>
+</LinearLayout>
