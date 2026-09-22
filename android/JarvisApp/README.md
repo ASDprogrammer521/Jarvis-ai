@@ -33,3 +33,15 @@ Native Android companion. Connects **out** to your PC Jarvis dashboard (reverse 
 - “send a message to my phone: hello”
 
 By ASDcuber
+
+---
+
+## GitHub Actions (no Android Studio needed)
+
+1. Push this repo to GitHub (e.g. `ASDcuber/Jarvis-ai`)
+2. Open **Actions** tab → **Build Jarvis App APK**
+3. Wait for the green check
+4. Open the run → **Artifacts** → download **JarvisApp-debug**
+5. Unzip → install `app-debug.apk` on your phone
+
+You can also click **Run workflow** manually under Actions.
