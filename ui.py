@@ -1202,9 +1202,6 @@ class CompactMicWindow(QWidget):
     • Left-click  → toggle mute / listen
     • Double-click → restore the full JARVIS window
     • Drag        → move the button around the screen
-
-    On Windows we periodically re-assert HWND_TOPMOST so the button stays
-    above most fullscreen apps (exclusive fullscreen games may still cover it).
     """
     restore_requested = pyqtSignal()
     toggle_requested  = pyqtSignal()
@@ -1215,10 +1212,8 @@ class CompactMicWindow(QWidget):
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
-            | Qt.WindowType.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setFixedSize(56, 56)
         self._muted = False
         self._listening = False
@@ -1230,38 +1225,9 @@ class CompactMicWindow(QWidget):
         self._tmr.timeout.connect(self._tick)
         self._tmr.start(33)
 
-        # Re-assert topmost every 2s (helps over borderless fullscreen apps)
-        self._top_tmr = QTimer(self)
-        self._top_tmr.timeout.connect(self._force_topmost)
-        self._top_tmr.start(2000)
-
         # Place bottom-right of primary screen
         screen = QApplication.primaryScreen().availableGeometry()
         self.move(screen.right() - 72, screen.bottom() - 72)
-
-    def showEvent(self, e) -> None:
-        super().showEvent(e)
-        self._force_topmost()
-
-    def _force_topmost(self) -> None:
-        """Keep the floating mic above other windows when possible."""
-        try:
-            self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-            self.raise_()
-            if _OS == "Windows":
-                import ctypes
-                hwnd = int(self.winId())
-                HWND_TOPMOST = -1
-                SWP_NOMOVE = 0x0002
-                SWP_NOSIZE = 0x0001
-                SWP_NOACTIVATE = 0x0010
-                SWP_SHOWWINDOW = 0x0040
-                ctypes.windll.user32.SetWindowPos(
-                    hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-                )
-        except Exception:
-            pass
 
     def set_state(self, muted: bool, listening: bool, amp: float = 0.0) -> None:
         self._muted = muted
