@@ -29,6 +29,18 @@ class JarvisLinkService : Service() {
         @Volatile var connected: Boolean = false
         @Volatile var lastLog: String = ""
         @Volatile var statusLine: String = "Offline"
+        @Volatile private var activeClient: WebSocketClient? = null
+
+        fun sendCommand(text: String): Boolean {
+            val c = activeClient ?: return false
+            if (!connected) return false
+            return try {
+                c.send(JSONObject(mapOf("type" to "command", "text" to text)).toString())
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
     }
 
     private var client: WebSocketClient? = null
@@ -111,6 +123,7 @@ class JarvisLinkService : Service() {
         lastLog = "WS ${uri.host}…"
         client = object : WebSocketClient(uri) {
             override fun onOpen(handshakedata: ServerHandshake?) {
+                activeClient = this
                 connected = true
                 statusLine = "Connected"
                 lastLog = "Connected ✓"
@@ -149,6 +162,7 @@ class JarvisLinkService : Service() {
             }
 
             override fun onClose(code: Int, reason: String?, remote: Boolean) {
+                activeClient = null
                 connected = false
                 statusLine = "Disconnected"
                 lastLog = "Disconnected ($code) ${reason ?: ""}"
@@ -168,6 +182,7 @@ class JarvisLinkService : Service() {
 
     override fun onDestroy() {
         client?.close()
+        activeClient = null
         connected = false
         statusLine = "Offline"
         try {
