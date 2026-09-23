@@ -4306,6 +4306,10 @@ class MainWindow(QMainWindow):
                         self._refresh_profile_btns()
                     except Exception:
                         pass
+                    try:
+                        self._refresh_sys_monitor_btn()
+                    except Exception:
+                        pass
                 except Exception:
                     pass
                 cw = self.centralWidget()
@@ -4398,11 +4402,21 @@ class MainWindow(QMainWindow):
     def _refresh_sys_monitor_btn(self) -> None:
         if not hasattr(self, "_sys_mon_btn"):
             return
-        vis = getattr(self, "_left_panel", None) is not None and self._left_panel.isVisible()
+        vis = False
+        try:
+            if getattr(self, "_left_panel", None) is not None:
+                vis = bool(self._left_panel.isVisible())
+            else:
+                from memory.config_manager import load_api_keys
+                vis = bool(load_api_keys().get("sys_monitor_visible", False))
+        except Exception:
+            vis = False
         self._sys_mon_btn.setText(
             "📊  SYSTEM INFO: ON" if vis else "📊  SYSTEM INFO: OFF"
         )
-        self._sys_mon_btn.setStyleSheet(self._sys_mon_btn_style_on if vis else self._sys_mon_btn_style_off)
+        on = getattr(self, "_sys_mon_btn_style_on", "")
+        off = getattr(self, "_sys_mon_btn_style_off", "")
+        self._sys_mon_btn.setStyleSheet(on if vis else off)
 
     def _tick_clock(self):
 
@@ -4676,6 +4690,16 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(10, 8, 10, 10)
         lay.setSpacing(5)
 
+        def _add_section(title: str):
+            lab = QLabel(title)
+            lab.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+            lab.setStyleSheet(
+                f"color: {C.PRI}; background: transparent; letter-spacing: 1.5px; margin-top: 6px;"
+            )
+            lay.addWidget(lab)
+
+        _add_section("CONNECT")
+
         remote_btn = QPushButton("◉  REMOTE CONTROL")
         remote_btn.setFixedHeight(34)
         remote_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
@@ -4722,7 +4746,7 @@ class MainWindow(QMainWindow):
         self._brief_btn.clicked.connect(self._toggle_brief)
         lay.addWidget(self._brief_btn)
 
-        # ── Wake word ──────────────────────────────────────────────────────────
+        _add_section("VOICE")
         self._wake_btn = QPushButton()
         self._wake_btn.setFixedHeight(32)
         self._wake_btn.setFont(QFont("Segoe UI", 9))
@@ -4751,6 +4775,7 @@ class MainWindow(QMainWindow):
 
         self._refresh_talk_btns()
 
+        _add_section("DISPLAY")
         self._hud_btn = QPushButton()
         self._hud_btn.setFixedHeight(32)
         self._hud_btn.setFont(QFont("Segoe UI", 9))
@@ -4759,11 +4784,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._hud_btn)
         self._refresh_hud_btn()
 
-        # ── Profiles: Home / Work / Game ───────────────────────────────────
-        prof_lbl = QLabel("PROFILE")
-        prof_lbl.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        prof_lbl.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent; letter-spacing: 1px;")
-        lay.addWidget(prof_lbl)
+        _add_section("PROFILE")
 
         prof_row = QHBoxLayout()
         prof_row.setSpacing(6)
@@ -4773,7 +4794,7 @@ class MainWindow(QMainWindow):
             b.setFixedHeight(32)
             b.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
             b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setCheckable(True)
+            b.setCheckable(False)
             b.clicked.connect(lambda _=False, k=key: self._apply_profile(k))
             prof_row.addWidget(b)
             self._profile_btns[key] = b
@@ -4832,6 +4853,7 @@ class MainWindow(QMainWindow):
         upd_btn.clicked.connect(self._check_for_updates_ui)
         lay.addWidget(upd_btn)
 
+        _add_section("SYSTEM")
         # System info (CPU / RAM / GPU / temp) toggle
         self._sys_mon_btn_style_on = f"""
             QPushButton {{
@@ -5754,34 +5776,49 @@ class MainWindow(QMainWindow):
             btn.setStyleSheet(on if key == active else off)
 
     def _apply_profile(self, name: str) -> None:
-        """Switch profile and apply its HUD (and related) preferences."""
+        """Switch profile and apply its HUD + system-info preferences."""
         name = (name or "home").lower()
         try:
             from memory.config_manager import (
-                set_active_profile, get_profile, save_hud_style,
+                set_active_profile, get_profile, save_hud_style, HUD_STYLES,
+                load_api_keys, ensure_config_dir, CONFIG_FILE,
             )
+            import json as _json
             set_active_profile(name)
             prof = get_profile(name)
             hud = str(prof.get("hud") or "sphere").lower()
-            if hud in ("face", "core", "sphere", "armor"):
-                save_hud_style(hud)
-                try:
-                    self.hud.hud_style = hud
-                    self.hud.update()
-                except Exception:
-                    pass
-                self._refresh_hud_btn()
-            # Optional: sys monitor visibility
-            show_mon = bool(prof.get("sys_monitor", True))
+            if hud not in HUD_STYLES:
+                hud = "sphere"
+            save_hud_style(hud)
             try:
-                if hasattr(self, "_left_panel") and self._left_panel is not None:
-                    # keep panel; metrics may already be toggled elsewhere
-                    pass
+                self.hud.hud_style = hud
+                self.hud.update()
             except Exception:
                 pass
+            try:
+                self._refresh_hud_btn()
+            except Exception:
+                pass
+
+            # Apply system monitor visibility from profile
+            show_mon = bool(prof.get("sys_monitor", True))
+            if hasattr(self, "_left_panel") and self._left_panel is not None:
+                self._left_panel.setVisible(show_mon)
+                try:
+                    ensure_config_dir()
+                    data = load_api_keys()
+                    data["sys_monitor_visible"] = show_mon
+                    CONFIG_FILE.write_text(_json.dumps(data, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
+            try:
+                self._refresh_sys_monitor_btn()
+            except Exception:
+                pass
+
             self._refresh_profile_btns()
             self._log.append_log(
-                f"SYS: Profile → {name.upper()} (HUD: {hud})"
+                f"SYS: Profile → {name.upper()} · HUD: {hud} · SysInfo: {'ON' if show_mon else 'OFF'}"
             )
         except Exception as e:
             try:

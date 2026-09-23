@@ -406,11 +406,21 @@ def get_profile(name: str | None = None) -> dict:
     return base
 
 def set_active_profile(name: str) -> None:
-    data = load_api_keys()
-    data["active_profile"] = name
-    if "profiles" not in data or not isinstance(data["profiles"], dict):
+    """Persist active profile name (home/work/game) without wiping other keys."""
+    n = str(name or "home").strip().lower()
+    if n not in ("home", "work", "game"):
+        n = "home"
+    ensure_config_dir()
+    data: dict = {}
+    if CONFIG_FILE.exists():
+        try:
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    data["active_profile"] = n
+    if "profiles" not in data or not isinstance(data.get("profiles"), dict):
         data["profiles"] = dict(_DEFAULT_PROFILES)
-    save_api_keys(data)
+    CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
 
 def list_profiles() -> list[str]:
     data = load_api_keys()
