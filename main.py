@@ -2068,9 +2068,15 @@ class JarvisLive:
 
         # Start dashboard (optional — needs: pip install fastapi "uvicorn[standard]" cryptography)
         try:
-            from dashboard.server import DashboardServer
+            from dashboard.server import DashboardServer, get_active_dashboard
+            import dashboard.server as _dash_mod
             self._dashboard = DashboardServer()
             self._dashboard.set_connect_callback(self._on_phone_connected)
+            try:
+                self._dashboard._loop = asyncio.get_running_loop()
+            except Exception:
+                pass
+            _dash_mod._ACTIVE_DASHBOARD = self._dashboard
             asyncio.create_task(self._dashboard.serve())
             # Runs for the whole lifetime, not just inside an active session
             asyncio.create_task(self._process_dashboard_commands())

@@ -59,13 +59,21 @@ def _get_dashboard():
             return d
     except Exception:
         pass
+    # Fallback: walk loaded modules for Jarvis engine
     try:
-        import main as _main
-        for name in dir(_main):
-            obj = getattr(_main, name, None)
-            dash = getattr(obj, "_dashboard", None) if obj is not None else None
-            if dash is not None:
-                return dash
+        import sys
+        for mod in list(sys.modules.values()):
+            if mod is None:
+                continue
+            for attr in ("_dashboard", "dashboard"):
+                d = getattr(mod, attr, None)
+                if d is not None and hasattr(d, "send_to_phones_sync"):
+                    return d
+            eng = getattr(mod, "engine", None) or getattr(mod, "app", None)
+            if eng is not None:
+                d = getattr(eng, "_dashboard", None)
+                if d is not None:
+                    return d
     except Exception:
         pass
     return None
@@ -79,20 +87,26 @@ def _phone_web_linked(dash) -> bool:
 
 
 def _push_phone(dash, payload: dict) -> int:
-    """Send JSON to all linked phones; works from sync tool context."""
+    """Send JSON to all linked phones; works from Gemini tool thread."""
+    if dash is None:
+        return 0
+    # Preferred: thread-safe helper on DashboardServer
+    if hasattr(dash, "send_to_phones_sync"):
+        try:
+            n = int(dash.send_to_phones_sync(payload) or 0)
+            if n > 0:
+                return n
+        except Exception as e:
+            print(f"[phone_control] sync push failed: {e}")
+    # Fallback async bridge
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
+        loop = getattr(dash, "_loop", None)
+        if loop is not None and loop.is_running():
             fut = asyncio.run_coroutine_threadsafe(dash.send_to_phones(payload), loop)
             return int(fut.result(timeout=5) or 0)
-        return int(loop.run_until_complete(dash.send_to_phones(payload)) or 0)
-    except Exception:
-        # Last resort: schedule and hope
-        try:
-            asyncio.ensure_future(dash.send_to_phones(payload))
-            return 1
-        except Exception:
-            return 0
+    except Exception as e:
+        print(f"[phone_control] loop push failed: {e}")
+    return 0
 
 
 def run(action: str = "status", value: str = "", **kwargs) -> str:
