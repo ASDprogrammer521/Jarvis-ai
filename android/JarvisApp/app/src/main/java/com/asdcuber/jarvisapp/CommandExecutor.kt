@@ -8,14 +8,20 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.media.AudioManager
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
+import android.os.Environment
 import android.provider.Settings
+import android.telephony.SmsManager
+import android.util.Base64
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
 
 object CommandExecutor {
 
@@ -35,20 +41,20 @@ object CommandExecutor {
             "open_url" -> {
                 val url = value.ifBlank { return "No URL" }
                 val fixed = if (url.startsWith("http")) url else "http://$url"
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(fixed))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                launchFromBackground(context, intent, "Open link")
+                launchFromBackground(
+                    context,
+                    Intent(Intent.ACTION_VIEW, Uri.parse(fixed)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    "Open link"
+                )
             }
             "open_app", "app" -> openApp(context, value)
-            "home" -> {
-                val intent = Intent(Intent.ACTION_MAIN)
-                    .addCategory(Intent.CATEGORY_HOME)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                launchFromBackground(context, intent, "Home")
-            }
-            "back" -> "Back requires accessibility service."
+            "home" -> launchFromBackground(
+                context,
+                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                "Home"
+            )
             "lock" -> lockScreen(context)
-            "unlock" -> "Unlock must be done on the device (security restriction)."
             "volume", "volume_up" -> {
                 val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
                 am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
@@ -61,28 +67,70 @@ object CommandExecutor {
             }
             "battery" -> {
                 val bm = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
-                val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-                "Battery $level%"
+                "Battery ${bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)}%"
             }
-            "status" -> {
-                "Jarvis App online · ${Build.MODEL} · Android ${Build.VERSION.RELEASE}"
+            "status" -> "Jarvis App online · ${Build.MODEL} · Android ${Build.VERSION.RELEASE}"
+            "settings" -> launchFromBackground(
+                context,
+                Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                "Settings"
+            )
+            "notifications", "read_notifications" -> JarvisNotificationListener.snapshot()
+            "location", "where" -> readLocation(context)
+            "call" -> {
+                val num = value.filter { it.isDigit() || it == '+' }
+                if (num.isBlank()) return "No number"
+                val i = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$num")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                launchFromBackground(context, i, "Dial $num")
             }
-            "settings" -> {
-                val intent = Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                launchFromBackground(context, intent, "Settings")
+            "sms" -> {
+                // value format: number|message
+                val parts = value.split("|", limit = 2)
+                if (parts.size < 2) return "Use: number|message"
+                val i = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:${parts[0].trim()}"))
+                    .putExtra("sms_body", parts[1].trim())
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                launchFromBackground(context, i, "SMS")
             }
-            "screenshot" -> {
-                "Screenshot needs on-screen MediaProjection consent."
-            }
+            "save_file", "receive_file" -> saveFileFromPc(context, msg)
+            "screenshot" -> "Screenshot needs MediaProjection consent."
             else -> "Unknown action: $action"
         }
     }
 
-    /**
-     * Android 10+ blocks startActivity from background.
-     * Try direct start first; on failure post a high-priority notification
-     * with full-screen intent so the user (or system) opens the target.
-     */
+    private fun saveFileFromPc(context: Context, msg: JSONObject): String {
+        val name = msg.optString("filename", "jarvis_file.bin").replace("..", "")
+        val b64 = msg.optString("data", "")
+        if (b64.isBlank()) return "No file data"
+        return try {
+            val bytes = Base64.decode(b64, Base64.DEFAULT)
+            val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                ?: context.filesDir
+            val out = File(dir, name)
+            FileOutputStream(out).use { it.write(bytes) }
+            postNotice(context, "File received", name, null)
+            "Saved ${out.absolutePath}"
+        } catch (e: Exception) {
+            "Save failed: ${e.message}"
+        }
+    }
+
+    private fun readLocation(context: Context): String {
+        return try {
+            val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+            for (p in providers) {
+                if (!lm.isProviderEnabled(p)) continue
+                @Suppress("MissingPermission")
+                val loc = lm.getLastKnownLocation(p) ?: continue
+                return "Lat ${loc.latitude}, Lon ${loc.longitude} (±${loc.accuracy}m)"
+            }
+            "Location unavailable. Enable GPS and grant location permission."
+        } catch (e: Exception) {
+            "Location error: ${e.message}"
+        }
+    }
+
     private fun launchFromBackground(context: Context, intent: Intent, label: String): String {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         return try {
@@ -90,7 +138,7 @@ object CommandExecutor {
             "Opened $label"
         } catch (e: Exception) {
             postNotice(context, "Jarvis", "Tap to open $label", intent)
-            "Queued $label (app was in background — check notification)"
+            "Queued $label (background)"
         }
     }
 
@@ -136,59 +184,40 @@ object CommandExecutor {
         )
         val lower = name.lowercase().trim()
         val pkgHint = aliases[lower]
-
-        fun tryPkg(pkg: String): Intent? = pm.getLaunchIntentForPackage(pkg)
-
         if (pkgHint != null) {
-            val launch = tryPkg(pkgHint)
-            if (launch != null) {
-                return launchFromBackground(context, launch, name)
-            }
+            val launch = pm.getLaunchIntentForPackage(pkgHint)
+            if (launch != null) return launchFromBackground(context, launch, name)
             if (lower == "youtube") {
-                val web = Intent(Intent.ACTION_VIEW, Uri.parse("https://youtube.com"))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                return launchFromBackground(context, web, "YouTube")
+                return launchFromBackground(
+                    context,
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://youtube.com"))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    "YouTube"
+                )
             }
         }
         if (name.contains(".")) {
-            val launch = tryPkg(name)
-            if (launch != null) {
-                return launchFromBackground(context, launch, name)
-            }
+            val launch = pm.getLaunchIntentForPackage(name)
+            if (launch != null) return launchFromBackground(context, launch, name)
         }
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         val apps = pm.queryIntentActivities(intent, PackageManager.MATCH_ALL)
         val match = apps.firstOrNull {
             val label = it.loadLabel(pm).toString()
-            label.equals(name, true) || label.contains(name, true) ||
-                it.activityInfo.packageName.contains(name.replace(" ", "").lowercase())
+            label.equals(name, true) || label.contains(name, true)
         }
         return if (match != null) {
             val launch = pm.getLaunchIntentForPackage(match.activityInfo.packageName)
             if (launch != null) launchFromBackground(context, launch, match.loadLabel(pm).toString())
-            else "Cannot launch ${match.activityInfo.packageName}"
-        } else {
-            val q = Uri.parse("market://search?q=${Uri.encode(name)}")
-            try {
-                launchFromBackground(
-                    context,
-                    Intent(Intent.ACTION_VIEW, q).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                    "Play Store: $name"
-                )
-            } catch (e: Exception) {
-                "App not found: $name"
-            }
-        }
+            else "Cannot launch"
+        } else "App not found: $name"
     }
 
     private fun lockScreen(context: Context): String {
         val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         val admin = ComponentName(context, JarvisDeviceAdmin::class.java)
         return if (dpm.isAdminActive(admin)) {
-            dpm.lockNow()
-            "Locked"
-        } else {
-            "Lock permission not enabled. Open Jarvis App → Enable lock permission."
-        }
+            dpm.lockNow(); "Locked"
+        } else "Enable lock permission in Jarvis App first."
     }
 }

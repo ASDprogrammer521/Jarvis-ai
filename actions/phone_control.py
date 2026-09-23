@@ -196,7 +196,38 @@ def run(action: str = "status", value: str = "", **kwargs) -> str:
     if not adb_ok:
         if web_ok:
             return "Phone is linked (Jarvis App). Use notify/message/open_url, or enable ADB for system actions."
-        return (
+    
+        if action in ("send_file", "file_to_phone"):
+            # value = path on PC
+            path = (value or "").strip().strip('"')
+            from pathlib import Path as _P
+            fp = _P(path)
+            if not fp.is_file():
+                return f"File not found: {path}"
+            import base64
+            data = fp.read_bytes()
+            if len(data) > 2_000_000:
+                return "File too large (max ~2MB over WebSocket)."
+            n = _push_phone(dash, {
+                "type": "phone_cmd",
+                "action": "save_file",
+                "filename": fp.name,
+                "data": base64.b64encode(data).decode("ascii"),
+            })
+            return f"Sent {fp.name} to phone ({n} client(s))." if n else "Phone not linked."
+
+        if action in ("notifications", "read_notifications"):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "notifications"})
+            return (
+                f"Asked phone for notifications ({n}). "
+                "Enable Notification access for Jarvis App on the phone."
+            ) if n else "Phone not linked."
+
+        if action in ("location", "where"):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "location"})
+            return f"Asked phone for location ({n})." if n else "Phone not linked."
+
+    return (
             "No phone linked. On the phone open http://<PC-IP>:8000/jarvis-app, "
             "enter the pairing key, tap Connect. Optional: enable USB debugging for ADB."
         )

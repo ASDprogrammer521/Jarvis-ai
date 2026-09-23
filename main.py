@@ -2017,6 +2017,30 @@ class JarvisLive:
                 )
                 if not text:
                     continue
+                # Phone → PC system controls (lock / shutdown)
+                if isinstance(text, str) and text.strip().upper().startswith("[PC_CONTROL]"):
+                    cmd = text.split("]", 1)[-1].strip().lower()
+                    try:
+                        import subprocess, sys
+                        if cmd in ("lock", "pc lock", "lock pc"):
+                            if sys.platform == "win32":
+                                subprocess.Popen(["rundll32.exe", "user32.dll,LockWorkStation"])
+                            elif sys.platform == "darwin":
+                                subprocess.Popen(["pmset", "displaysleepnow"])
+                            else:
+                                subprocess.Popen(["loginctl", "lock-session"])
+                            self.ui.write_log("[Phone] PC locked")
+                        elif cmd in ("shutdown", "off", "poweroff", "pc off"):
+                            if sys.platform == "win32":
+                                subprocess.Popen(["shutdown", "/s", "/t", "15"])
+                            else:
+                                subprocess.Popen(["shutdown", "-h", "+1"])
+                            self.ui.write_log("[Phone] PC shutdown scheduled")
+                        else:
+                            self.ui.write_log(f"[Phone] Unknown PC control: {cmd}")
+                    except Exception as e:
+                        self.ui.write_log(f"[Phone] PC control error: {e}")
+                    continue
                 # Wait up to 8s for session to become ready after a wake
                 for _ in range(80):
                     if self.session:

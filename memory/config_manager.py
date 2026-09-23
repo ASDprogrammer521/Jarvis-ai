@@ -382,3 +382,39 @@ def save_plugin_enabled(plugin_name: str, enabled: bool) -> None:
     plugins_cfg[plugin_name] = enabled
     data["plugins_enabled"] = plugins_cfg
     CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
+
+# ── Profiles (home / work / game) ─────────────────────────────────────────────
+_DEFAULT_PROFILES = {
+    "home": {"hud": "sphere", "talk_mode": "push", "sys_monitor": True},
+    "work": {"hud": "core", "talk_mode": "open", "sys_monitor": True},
+    "game": {"hud": "armor", "talk_mode": "push", "sys_monitor": False},
+}
+
+def get_active_profile_name() -> str:
+    data = load_api_keys()
+    return str(data.get("active_profile") or "home")
+
+def get_profile(name: str | None = None) -> dict:
+    data = load_api_keys()
+    profiles = data.get("profiles")
+    if not isinstance(profiles, dict):
+        profiles = dict(_DEFAULT_PROFILES)
+    n = name or get_active_profile_name()
+    base = dict(_DEFAULT_PROFILES.get(n, _DEFAULT_PROFILES["home"]))
+    custom = profiles.get(n) if isinstance(profiles.get(n), dict) else {}
+    base.update(custom)
+    return base
+
+def set_active_profile(name: str) -> None:
+    data = load_api_keys()
+    data["active_profile"] = name
+    if "profiles" not in data or not isinstance(data["profiles"], dict):
+        data["profiles"] = dict(_DEFAULT_PROFILES)
+    save_api_keys(data)
+
+def list_profiles() -> list[str]:
+    data = load_api_keys()
+    profiles = data.get("profiles")
+    if not isinstance(profiles, dict) or not profiles:
+        return list(_DEFAULT_PROFILES.keys())
+    return list(profiles.keys())

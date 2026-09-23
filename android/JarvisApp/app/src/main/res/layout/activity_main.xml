@@ -127,6 +127,30 @@
                     android:stateListAnimator="@null" />
             </LinearLayout>
 
+
+            <!-- Quick actions -->
+            <HorizontalScrollView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:scrollbars="none">
+                <LinearLayout
+                    android:id="@+id/quickRow"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+                    <Button android:id="@+id/qYoutube" android:layout_width="wrap_content" android:layout_height="40dp" android:text="YouTube" android:textSize="11sp" android:textColor="#E8F4FF" android:background="@drawable/bg_btn_ghost" android:layout_marginEnd="8dp" android:stateListAnimator="@null"/>
+                    <Button android:id="@+id/qLock" android:layout_width="wrap_content" android:layout_height="40dp" android:text="Lock" android:textSize="11sp" android:textColor="#E8F4FF" android:background="@drawable/bg_btn_ghost" android:layout_marginEnd="8dp" android:stateListAnimator="@null"/>
+                    <Button android:id="@+id/qHome" android:layout_width="wrap_content" android:layout_height="40dp" android:text="Home" android:textSize="11sp" android:textColor="#E8F4FF" android:background="@drawable/bg_btn_ghost" android:layout_marginEnd="8dp" android:stateListAnimator="@null"/>
+                    <Button android:id="@+id/qNotif" android:layout_width="wrap_content" android:layout_height="40dp" android:text="Notifs" android:textSize="11sp" android:textColor="#E8F4FF" android:background="@drawable/bg_btn_ghost" android:layout_marginEnd="8dp" android:stateListAnimator="@null"/>
+                    <Button android:id="@+id/qLoc" android:layout_width="wrap_content" android:layout_height="40dp" android:text="Location" android:textSize="11sp" android:textColor="#E8F4FF" android:background="@drawable/bg_btn_ghost" android:layout_marginEnd="8dp" android:stateListAnimator="@null"/>
+                    <Button android:id="@+id/qCam" android:layout_width="wrap_content" android:layout_height="40dp" android:text="Camera" android:textSize="11sp" android:textColor="#E8F4FF" android:background="@drawable/bg_btn_ghost" android:layout_marginEnd="8dp" android:stateListAnimator="@null"/>
+                    <Button android:id="@+id/qMic" android:layout_width="wrap_content" android:layout_height="40dp" android:text="Voice" android:textSize="11sp" android:textColor="#E8F4FF" android:background="@drawable/bg_btn_ghost" android:layout_marginEnd="8dp" android:stateListAnimator="@null"/>
+                    <Button android:id="@+id/qPcLock" android:layout_width="wrap_content" android:layout_height="40dp" android:text="PC Lock" android:textSize="11sp" android:textColor="#E8F4FF" android:background="@drawable/bg_btn_ghost" android:layout_marginEnd="8dp" android:stateListAnimator="@null"/>
+                    <Button android:id="@+id/qPcOff" android:layout_width="wrap_content" android:layout_height="40dp" android:text="PC Off" android:textSize="11sp" android:textColor="#FF8A9A" android:background="@drawable/bg_btn_ghost" android:stateListAnimator="@null"/>
+                </LinearLayout>
+            </HorizontalScrollView>
+
             <!-- Live log -->
             <LinearLayout
                 android:layout_width="match_parent"

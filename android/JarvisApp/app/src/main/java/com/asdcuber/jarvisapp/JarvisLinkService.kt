@@ -48,6 +48,8 @@ class JarvisLinkService : Service() {
     private val io = Executors.newSingleThreadExecutor()
     private var hostRaw: String = ""
     private var keyRaw: String = ""
+    private var reconnectAttempts = 0
+    private val maxReconnect = 50
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -125,6 +127,7 @@ class JarvisLinkService : Service() {
             override fun onOpen(handshakedata: ServerHandshake?) {
                 activeClient = this
                 connected = true
+                reconnectAttempts = 0
                 statusLine = "Connected"
                 lastLog = "Connected ✓"
                 try {
@@ -167,6 +170,14 @@ class JarvisLinkService : Service() {
                 statusLine = "Disconnected"
                 lastLog = "Disconnected ($code) ${reason ?: ""}"
                 updateNotification("Disconnected", false)
+                // Auto-reconnect
+                if (hostRaw.isNotBlank() && keyRaw.isNotBlank() && reconnectAttempts < maxReconnect) {
+                    reconnectAttempts++
+                    lastLog = "Reconnecting in 3s… ($reconnectAttempts)"
+                    mainHandler.postDelayed({
+                        io.execute { connectPipeline(hostRaw, keyRaw) }
+                    }, 3000)
+                }
             }
 
             override fun onError(ex: Exception?) {
