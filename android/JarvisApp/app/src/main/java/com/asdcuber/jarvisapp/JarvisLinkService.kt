@@ -23,6 +23,7 @@ class JarvisLinkService : Service() {
 
     companion object {
         const val CHANNEL_ID = "jarvis_link"
+        const val NOTIF_ID = 1
         const val EXTRA_HOST = "host"
         const val EXTRA_KEY = "key"
         @Volatile var connected: Boolean = false
@@ -48,7 +49,8 @@ class JarvisLinkService : Service() {
         val key = intent?.getStringExtra(EXTRA_KEY) ?: return START_NOT_STICKY
         hostRaw = host
         keyRaw = key
-        startForeground(1, buildNotification("Connecting…"))
+        // Persistent notification — keeps service alive in background
+        startForeground(NOTIF_ID, buildNotification("Connecting…", connected = false))
         statusLine = "Connecting…"
         lastLog = "Connecting to $host"
         io.execute { connectPipeline(host, key) }
@@ -61,7 +63,6 @@ class JarvisLinkService : Service() {
             if (!host.contains(":")) host = "$host:8000"
             val base = "http://$host"
 
-            // 1) Prefer HTTP login → token (same as web app)
             var token = key.trim().uppercase()
             try {
                 val url = URL("$base/login")
@@ -86,6 +87,7 @@ class JarvisLinkService : Service() {
                         token = t
                         lastLog = "Login OK — opening socket…"
                         statusLine = "Login OK…"
+                        updateNotification("Login OK…", false)
                     }
                 } else {
                     lastLog = "Login $code — trying pairing key on socket…"
@@ -94,14 +96,13 @@ class JarvisLinkService : Service() {
                 lastLog = "Login skip: ${e.message}"
             }
 
-            // 2) WebSocket
             val uri = URI("ws://$host/ws?token=${java.net.URLEncoder.encode(token, "UTF-8")}")
             mainHandler.post { openSocket(uri) }
         } catch (e: Exception) {
             connected = false
-            statusLine = "Error"
+            statusLine = "Disconnected"
             lastLog = "Connect failed: ${e.message}"
-            updateNotification("Error")
+            updateNotification("Disconnected", false)
         }
     }
 
@@ -116,7 +117,8 @@ class JarvisLinkService : Service() {
                 try {
                     send(JSONObject(mapOf("type" to "hello", "client" to "jarvis_android")).toString())
                 } catch (_: Exception) {}
-                updateNotification("Connected")
+                // Persistent: Jarvis Connected — stays in notification shade
+                updateNotification("Jarvis Connected", true)
             }
 
             override fun onMessage(message: String?) {
@@ -150,14 +152,14 @@ class JarvisLinkService : Service() {
                 connected = false
                 statusLine = "Disconnected"
                 lastLog = "Disconnected ($code) ${reason ?: ""}"
-                updateNotification("Offline")
+                updateNotification("Disconnected", false)
             }
 
             override fun onError(ex: Exception?) {
                 connected = false
-                statusLine = "Error"
+                statusLine = "Disconnected"
                 lastLog = "Error: ${ex?.message}"
-                updateNotification("Error")
+                updateNotification("Disconnected", false)
             }
         }
         client?.connectionLostTimeout = 30
@@ -168,35 +170,52 @@ class JarvisLinkService : Service() {
         client?.close()
         connected = false
         statusLine = "Offline"
+        try {
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.cancel(NOTIF_ID)
+        } catch (_: Exception) {}
         super.onDestroy()
     }
 
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "Jarvis Link", NotificationManager.IMPORTANCE_LOW)
+            // LOW importance = ongoing, less noisy, but always visible
+            val ch = NotificationChannel(
+                CHANNEL_ID,
+                "Jarvis Link",
+                NotificationManager.IMPORTANCE_LOW
             )
+            ch.description = "Shows while Jarvis is connected to your PC"
+            ch.setShowBadge(false)
+            nm.createNotificationChannel(ch)
         }
     }
 
-    private fun buildNotification(text: String): Notification {
+    private fun buildNotification(text: String, connected: Boolean): Notification {
         val open = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val title = if (connected) "Jarvis Connected" else "Jarvis"
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Jarvis App")
+            .setContentTitle(title)
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentIntent(open)
-            .setOngoing(true)
+            .setOngoing(connected)           // cannot swipe away while linked
+            .setOnlyAlertOnce(true)
+            .setPriority(
+                if (connected) NotificationCompat.PRIORITY_LOW
+                else NotificationCompat.PRIORITY_DEFAULT
+            )
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
     }
 
-    private fun updateNotification(text: String) {
+    private fun updateNotification(text: String, connected: Boolean) {
         val nm = getSystemService(NotificationManager::class.java)
-        nm.notify(1, buildNotification(text))
+        nm.notify(NOTIF_ID, buildNotification(text, connected))
     }
 }
