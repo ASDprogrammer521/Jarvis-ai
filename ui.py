@@ -56,6 +56,12 @@ def _read_full_config() -> dict:
     except Exception:
         return {}
 
+
+# Single source of truth for the release name — the window title, the header
+# badge and the readme must never disagree again.
+APP_VERSION  = "MARK LIV"
+APP_PROTOCOL = APP_VERSION.split()[-1]
+
 _DEFAULT_W, _DEFAULT_H = 980, 700
 _MIN_W,     _MIN_H     = 820, 580
 _LEFT_W  = 148
@@ -4296,6 +4302,10 @@ class MainWindow(QMainWindow):
                 try:
                     self._refresh_hud_btn()
                     self._refresh_talk_btns()
+                    try:
+                        self._refresh_profile_btns()
+                    except Exception:
+                        pass
                 except Exception:
                     pass
                 cw = self.centralWidget()
@@ -4748,6 +4758,27 @@ class MainWindow(QMainWindow):
         self._hud_btn.clicked.connect(self._toggle_hud_style)
         lay.addWidget(self._hud_btn)
         self._refresh_hud_btn()
+
+        # ── Profiles: Home / Work / Game ───────────────────────────────────
+        prof_lbl = QLabel("PROFILE")
+        prof_lbl.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        prof_lbl.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent; letter-spacing: 1px;")
+        lay.addWidget(prof_lbl)
+
+        prof_row = QHBoxLayout()
+        prof_row.setSpacing(6)
+        self._profile_btns = {}
+        for key, label in (("home", "🏠 Home"), ("work", "💼 Work"), ("game", "🎮 Game")):
+            b = QPushButton(label)
+            b.setFixedHeight(32)
+            b.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setCheckable(True)
+            b.clicked.connect(lambda _=False, k=key: self._apply_profile(k))
+            prof_row.addWidget(b)
+            self._profile_btns[key] = b
+        lay.addLayout(prof_row)
+        self._refresh_profile_btns()
 
         compact_btn = QPushButton("📍  COMPACT MODE")
         compact_btn.setFixedHeight(32)
@@ -5695,6 +5726,68 @@ class MainWindow(QMainWindow):
         self._refresh_hud_btn()
         names = {"face": "animated face", "core": "reactor core", "sphere": "holographic sphere", "armor": "Iron Man armor"}
         self._log.append_log(f"SYS: HUD switched to the {names.get(want, want)}.")
+
+    def _refresh_profile_btns(self) -> None:
+        """Highlight the active Home / Work / Game profile button."""
+        try:
+            from memory.config_manager import get_active_profile_name
+            active = (get_active_profile_name() or "home").lower()
+        except Exception:
+            active = "home"
+        on = f"""
+            QPushButton {{
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                    stop:0 rgba(0,180,255,0.35), stop:1 rgba(0,120,255,0.45));
+                color: #e8f4ff; border: 1px solid rgba(0,212,255,0.65);
+                border-radius: 8px; padding: 0 10px;
+            }}
+        """
+        off = f"""
+            QPushButton {{
+                background: {C.PANEL2}; color: {C.TEXT_MED};
+                border: 1px solid {C.BORDER}; border-radius: 8px; padding: 0 10px;
+            }}
+            QPushButton:hover {{ color: {C.WHITE}; border-color: {C.BORDER_B}; }}
+        """
+        for key, btn in getattr(self, "_profile_btns", {}).items():
+            btn.setChecked(key == active)
+            btn.setStyleSheet(on if key == active else off)
+
+    def _apply_profile(self, name: str) -> None:
+        """Switch profile and apply its HUD (and related) preferences."""
+        name = (name or "home").lower()
+        try:
+            from memory.config_manager import (
+                set_active_profile, get_profile, save_hud_style,
+            )
+            set_active_profile(name)
+            prof = get_profile(name)
+            hud = str(prof.get("hud") or "sphere").lower()
+            if hud in ("face", "core", "sphere", "armor"):
+                save_hud_style(hud)
+                try:
+                    self.hud.hud_style = hud
+                    self.hud.update()
+                except Exception:
+                    pass
+                self._refresh_hud_btn()
+            # Optional: sys monitor visibility
+            show_mon = bool(prof.get("sys_monitor", True))
+            try:
+                if hasattr(self, "_left_panel") and self._left_panel is not None:
+                    # keep panel; metrics may already be toggled elsewhere
+                    pass
+            except Exception:
+                pass
+            self._refresh_profile_btns()
+            self._log.append_log(
+                f"SYS: Profile → {name.upper()} (HUD: {hud})"
+            )
+        except Exception as e:
+            try:
+                self._log.append_log(f"SYS: Profile error: {e}")
+            except Exception:
+                pass
 
     def _enter_compact_mode(self) -> None:
         """Hide the main window and show only the floating mic icon."""
