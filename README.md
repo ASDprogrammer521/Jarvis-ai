@@ -1,17 +1,19 @@
 # Jarvis-ai
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.11%2B-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python">
-  <img src="https://img.shields.io/badge/Status-Active-success?style=for-the-badge" alt="Status">
-  <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License">
-  <img src="https://img.shields.io/badge/By-ASDcuber-orange?style=for-the-badge" alt="ASDcuber">
+<img src="https://img.shields.io/badge/Python-3.11%2B-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python">
+<img src="https://img.shields.io/badge/Status-Active-success?style=for-the-badge" alt="Status">
+<img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License">
+<img src="https://img.shields.io/badge/By-ASDcuber-orange?style=for-the-badge" alt="ASDcuber">
 </p>
 
 ---
 
 ## 🌟 Overview
 
-**Jarvis AI** is an advanced intelligent assistant built to automate workflows and simplify everyday computer tasks. It combines a clean modern interface with powerful tools: voice control, screen awareness, desktop automation, a holographic HUD, and a phone companion — all in one system.
+**Jarvis AI** is an advanced intelligent assistant built to automate workflows and simplify everyday computer tasks. It combines a clean modern interface with powerful tools: voice control, screen awareness, desktop automation, a holographic HUD, profiles, plugins, and a full phone companion — all in one system.
+
+Voice, vision, desktop control, holographic HUD, and phone companion — one system.
 
 ---
 
@@ -39,97 +41,113 @@ python main.py
 ## ✨ Features
 
 | Feature | Description |
-| --- | --- |
+| ------- | ----------- |
 | 💎 **Modern & Clean UI** | Dashboard · Chat · Settings tabs with a cinematic HUD |
-|  🧑‍🎤 **3 HUD modes** | Animated face · Reactor core · Holo sphere |
-| 📊 **Admin Dashboard** | Remote control via QR code or pairing key |
+| 🧑‍🚀 **HUD modes** | Animated face · Reactor core · Holo sphere · Iron Man armor |
+| 📊 **Admin Dashboard** | Remote control via pairing key / browser |
 | ⚡ **Fast Automation** | Apps, files, browser, system controls, messaging |
-| 📱 **Jarvis App (phone)** | Reverse connection — no ADB required |
+| 📱 **Jarvis App (phone)** | Native Android app + web companion — no ADB required |
 | 🎙️ **Voice + Wake word** | Push-to-talk, mute, local wake-word detection |
 | 🧠 **Memory** | Long-term facts you can view and delete |
-| 🔌 **Plugins** | Drop-in tools in the `plugins/` folder |
+| 🔌 **Plugins + store** | Drop-in tools in `plugins/`; list / enable / disable |
+| 👤 **Profiles** | `home` · `work` · `game` presets |
+| 🔄 **Self-update** | Check GitHub (`ASDcuber/Jarvis-ai`) for updates |
+| 🖥️ **Compact mode** | Floating always-on-top mic (F12) |
 
 ---
 
-## 📱 Phone connection (Jarvis App)
+## 📱 Phone connection
 
-Connect your phone **without ADB**. The phone opens an outbound (reverse) link to the PC.
+### Option A — Android APK (recommended)
 
-### Requirements
-- PC and phone on the **same Wi‑Fi** network  
-- Jarvis running (dashboard server active)  
-- Optional but recommended:
+<p align="center">
+<a href="https://github.com/ASDprogrammer521/Jarvis-ai/raw/main/app-debug.apk">
+<img src="https://img.shields.io/badge/Download-Jarvis%20APK-brightgreen?style=for-the-badge&logo=android&logoColor=white" alt="Download APK">
+</a>
+</p>
 
-```bash
-pip install fastapi "uvicorn[standard]" cryptography
-```
+1. Install the APK on your phone (allow install from unknown sources if needed).
+2. On first open, allow **notifications**, **files**, **location**, **mic**, **camera** as prompted.
+3. Start Jarvis on the PC and get a **fresh pairing key** (Remote Control / Dashboard).
+4. In the app: enter **PC IP** + **key** → **Connect**.
+5. Status should show **● ONLINE** and a persistent **Jarvis Connected** notification.
 
-### Steps
-1. Start Jarvis on the PC.
-2. Get the **IP address** and **pairing key** from the console or the Dashboard tab.
-3. On the phone, open a browser and go to:
+**Build APK yourself (GitHub Actions):** push the repo → **Actions** → **Build Jarvis App APK** → download artifact `JarvisApp-debug`.
+
+### Option B — Browser companion
 
 ```text
 http://<PC-IP>:8000/jarvis-app
 ```
 
-Example:
+Example: `http://192.168.35.70:8000/jarvis-app`
 
-```text
-http://192.168.35.70:8000/jarvis-app
-```
+Same Wi‑Fi required. Use **http** (not https) unless you configured certificates.
 
-If HTTPS is enabled:
+### Phone capabilities
 
-```text
-https://192.168.35.70:8000/jarvis-app
-```
+| Capability | Notes |
+| ---------- | ----- |
+| Chat with Jarvis | Type in the bottom bar and send |
+| Attach files | **+** button — text files inline; small binaries as base64 |
+| Quick actions | YouTube, Lock, Home, Notifs, Location, Camera, Voice |
+| Read notifications | Enable **Notification access** for Jarvis App |
+| Location | Grant location permission |
+| Voice to PC | **Voice** uses on-device speech recognition |
+| PC Lock / Shutdown | Quick buttons send secure control commands to the PC |
+| Auto-reconnect | Service retries the link if the socket drops |
+| Background link | Foreground notification keeps the connection alive |
 
-(If the browser warns about the certificate → **Advanced → Proceed**.)
+### PC → phone commands (examples)
 
-4. Enter the **PC IP** and **pairing key**, then tap **Connect**.
-5. You can now send commands from the phone.
+- Open YouTube / Chrome / apps on the phone  
+- Send a file to the phone (`send_file`)  
+- Ask for notifications or location  
+- Notify / toast on the phone  
 
 ### Quick URLs
 
 | URL | Purpose |
-| --- | --- |
-| `/jarvis-app` or `/app` | Jarvis App (phone companion) |
+| --- | ------- |
+| `/jarvis-app` or `/app` | Web phone companion |
 | `/` | Main remote dashboard |
-| `/login` | Pairing login page |
+| `/login` | Pairing login |
 
 ### Troubleshooting
-- Test on the PC first: `http://127.0.0.1:8000/jarvis-app`
-- Allow port **8000** in Windows Firewall
-- Do not use a guest Wi‑Fi network — both devices must be on the same network
-- **ADB is optional** (for direct Android control). The main method is the Jarvis App reverse link
+
+- Test on the PC: `http://127.0.0.1:8000/jarvis-app`
+- Allow port **8000** in Windows Firewall  
+- Same Wi‑Fi (not guest isolation)  
+- **ADB is optional** — main path is Jarvis App reverse WebSocket  
+- Phone battery: set Jarvis App to **Unrestricted** so background link stays alive  
+
+```bash
+pip install fastapi "uvicorn[standard]" cryptography
+```
 
 ---
----
 
-## 📱 Android Application (APK)
-
-You can download the latest pre-built **Jarvis App** for Android directly from the repository:
-
-<p align="center">
-  <a href="https://github.com/ASDprogrammer521/Jarvis-ai/raw/main/app-debug.apk">
-    <img src="https://img.shields.io/badge/Download-Jarvis%20APK-brightgreen?style=for-the-badge&logo=android&logoColor=white" alt="Download APK">
-  </a>
-</p>
-
-**How to install:**
-1. Click the green **Download Jarvis APK** button above to download the `app-debug.apk` file directly.
-2. Transfer or open the downloaded APK file on your Android phone.
-3. Install the application and connect it to your PC using your local IP and pairing key.
 ## 🖥️ UI navigation
 
 | Tab | What it does |
-| --- | --- |
+| --- | ------------ |
 | **Dashboard** | Main holographic HUD |
-| **Chat** | Conversation history |
-| **Settings** | All options (full-screen) |
+| **Chat** | Conversation history (toggle open/close) |
+| **Settings** | Full-screen options |
 
-The **Ask anything** command bar stays visible at the bottom at all times.
+The **Ask anything** command bar stays visible at the bottom.
+
+**Shortcuts:** `F4` mute · `F11` fullscreen · `F12` compact mode  
+
+Top-left shows the live clock and date.
+
+---
+
+## 👤 Profiles & plugins
+
+**Profiles** (`home` / `work` / `game`) store preferred HUD and talk-mode style. Ask Jarvis to list or switch profiles, or use the `profile_switch` tool.
+
+**Plugin store:** drop a `.py` file into `plugins/`, then list / enable / disable via the `plugin_store` tool (or Settings plugins UI where available).
 
 ---
 
@@ -138,16 +156,22 @@ The **Ask anything** command bar stays visible at the bottom at all times.
 ```text
 Mark-LIV-main/
 ├── main.py                 # entry point
-├── ui.py                   # user interface
+├── ui.py                   # user interface + HUD
 ├── setup.py                # dependency installer
 ├── requirements.txt
 ├── actions/                # built-in tools
+│   ├── phone_control.py
+│   ├── plugin_store.py
+│   ├── profile_switch.py
+│   └── ...
 ├── plugins/                # drop-in plugins
-├── core/                   # avatar, audio, LLM…
-├── dashboard/              # remote server + Jarvis App
+├── core/                   # avatar, audio, LLM, updater…
+├── dashboard/              # remote server + web companion
 │   └── static/jarvis_app.html
+├── android/JarvisApp/      # native Android companion source
 ├── memory/                 # config + long-term memory
-└── config/                 # API keys, certificates
+├── config/                 # API keys, certificates
+└── .github/workflows/      # APK build (GitHub Actions)
 ```
 
 ---
@@ -159,5 +183,5 @@ This project is licensed under the **MIT License**.
 ---
 
 <p align="center">
-  <b>By ASDcuber</b>
+<b>By ASDcuber</b>
 </p>
