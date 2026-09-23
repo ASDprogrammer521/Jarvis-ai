@@ -563,6 +563,23 @@ class DashboardServer:
         self._clients -= dead
         return n
 
+    def send_to_phones_sync(self, msg: dict, timeout: float = 5.0) -> int:
+        """Thread-safe push from action tools (Gemini tool thread)."""
+        try:
+            loop = getattr(self, "_loop", None)
+            if loop is None:
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = asyncio.get_event_loop()
+            if loop.is_running():
+                fut = asyncio.run_coroutine_threadsafe(self.send_to_phones(msg), loop)
+                return int(fut.result(timeout=timeout) or 0)
+            return int(loop.run_until_complete(self.send_to_phones(msg)) or 0)
+        except Exception as e:
+            print(f"[Dashboard] send_to_phones_sync failed: {e}")
+            return 0
+
     # ── FastAPI app ───────────────────────────────────────────────────────
 
     def _build_app(self) -> "FastAPI":
@@ -630,15 +647,12 @@ class DashboardServer:
                 return HTMLResponse("""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width">
 <style>
-  body{background:#07090f url('https://images.unsplash.com/photo-1639762681485-074b7f938ba0?q=80&w=1920&auto=format&fit=crop') no-repeat center center fixed;background-size:cover;color:#dde3ed;font-family:'Segoe UI',sans-serif;
+  body{background:#07090f;color:#dde3ed;font-family:sans-serif;
        display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center}
-  .card{background:rgba(7, 9, 15, 0.85);padding:30px;border-radius:12px;border:1px solid rgba(248, 113, 113, 0.3);box-shadow:0 0 20px rgba(248, 113, 113, 0.2);backdrop-filter:blur(10px)}
-  h2{color:#f87171;margin-bottom:12px;font-size:22px;letter-spacing:1px}
-  p{color:#94a3b8;font-size:14px}
-  strong{color:#dde3ed}
+  h2{color:#f87171;margin-bottom:12px}p{color:#5e6a7e;font-size:14px}
 </style></head>
-<body><div class="card"><h2>LINK EXPIRED</h2>
-<p>Press <strong style="color:#60a5fa">Remote Control</strong> in JARVIS to get a new QR code.</p>
+<body><div><h2>Link Expired</h2>
+<p>Press <strong style="color:#dde3ed">Remote Control</strong> in JARVIS to get a new QR code.</p>
 </div></body></html>""")
 
             del self._pending_keys[key]
@@ -658,26 +672,20 @@ class DashboardServer:
             return HTMLResponse(f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width">
 <style>
-  body{{background:#07090f url('https://images.unsplash.com/photo-1639762681485-074b7f938ba0?q=80&w=1920&auto=format&fit=crop') no-repeat center center fixed;background-size:cover;color:#dde3ed;font-family:'Segoe UI',sans-serif;
+  body{{background:#07090f;color:#dde3ed;font-family:sans-serif;
        display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center}}
-  .loader-box{{background:rgba(7, 9, 15, 0.85);padding:40px;border-radius:16px;border:1px solid rgba(56, 189, 248, 0.3);box-shadow:0 0 30px rgba(56, 189, 248, 0.25);backdrop-filter:blur(12px);display:flex;flex-direction:column;align-items:center}}
-  .spinner{{width:50px;height:50px;border:3px solid rgba(56, 189, 248, 0.2);border-top:3px solid #38bdf8;border-radius:50%;animation:spin 1s linear infinite;margin-bottom:20px}}
-  @keyframes spin{{0%{{transform:rotate(0deg);}}100%{{transform:rotate(360deg);}}}}
-  p{{color:#38bdf8;font-size:15px;letter-spacing:1.5px;text-transform:uppercase;font-weight:600;margin:0;text-shadow:0 0 10px rgba(56, 189, 248, 0.4)}}
+  p{{color:#5e6a7e;font-size:14px}}
 </style></head>
 <body>
-<div class="loader-box">
-  <div class="spinner"></div>
-  <p>Connecting to JARVIS…</p>
-</div>
 <script>
   sessionStorage.setItem('jarvis_token','{tok}');
   sessionStorage.setItem('jarvis_key','{key}');
   localStorage.setItem('jarvis_device_token','{dev_tok}');
-  setTimeout(function(){{location.replace('/')}},600);
+  setTimeout(function(){{location.replace('/')}},400);
 </script>
+<p>Connecting to JARVIS…</p>
 </body></html>""")
-        
+
         @app.post("/api/device-login")
         async def device_login_ep(req: Request):
             """Return a fresh auth token for a previously paired device token."""
@@ -940,6 +948,14 @@ class DashboardServer:
             print("[Dashboard] fastapi/uvicorn not installed — dashboard disabled.")
             print("[Dashboard] Run:  pip install fastapi 'uvicorn[standard]' cryptography")
             return
+
+        # Remember the running loop so tools (phone_control) can push safely
+        try:
+            self._loop = asyncio.get_running_loop()
+        except Exception:
+            self._loop = asyncio.get_event_loop()
+        global _ACTIVE_DASHBOARD
+        _ACTIVE_DASHBOARD = self
 
         # Firewall setup runs in a thread — uvicorn starts immediately,
         # no waiting for UAC dialogs or subprocess timeouts.
