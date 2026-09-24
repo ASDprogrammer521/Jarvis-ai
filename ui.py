@@ -56,22 +56,15 @@ def _read_full_config() -> dict:
     except Exception:
         return {}
 
-
-# Single source of truth for the release name — the window title, the header
-# badge and the readme must never disagree again.
-APP_VERSION  = "MARK LIV"
-APP_PROTOCOL = APP_VERSION.split()[-1]
-
 _DEFAULT_W, _DEFAULT_H = 980, 700
 _MIN_W,     _MIN_H     = 820, 580
 _LEFT_W  = 148
 _RIGHT_W = 380
 
-_OS = platform.system()  # "Windows" | "Darwin" | "Linux"
+_OS = platform.system()  
 
 
 class C:
-    # Modern cinematic palette (Brahma Echo–inspired glass dark)
     BG        = "#03060b"
     PANEL     = "#080d16"
     PANEL2    = "#0c121c"
