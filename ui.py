@@ -56,15 +56,22 @@ def _read_full_config() -> dict:
     except Exception:
         return {}
 
+
+# Single source of truth for the release name — the window title, the header
+# badge and the readme must never disagree again.
+APP_VERSION  = "MARK LIV"
+APP_PROTOCOL = APP_VERSION.split()[-1]
+
 _DEFAULT_W, _DEFAULT_H = 980, 700
 _MIN_W,     _MIN_H     = 820, 580
 _LEFT_W  = 148
 _RIGHT_W = 380
 
-_OS = platform.system()  
+_OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
 
 class C:
+    # Modern cinematic palette (Brahma Echo–inspired glass dark)
     BG        = "#03060b"
     PANEL     = "#080d16"
     PANEL2    = "#0c121c"
@@ -1093,6 +1100,24 @@ class HudCanvas(QWidget):
         W, H = self.width(), self.height()
         cx, cy = W / 2, H / 2
         fw = min(W, H)
+
+        # WOW ambient: soft edge glow when speaking / loud audio
+        try:
+            amp = float(getattr(self, "_amp_disp", 0.0) or 0.0)
+            if (self.speaking or amp > 0.08) and not self.muted:
+                pulse = 0.35 + 0.65 * min(1.0, amp * 1.8)
+                if self.speaking:
+                    pulse = max(pulse, 0.55 + 0.25 * abs(__import__("math").sin(self._core_phase * 3)))
+                g = QRadialGradient(cx, cy, max(W, H) * 0.72)
+                col = qcol(C.PRI)
+                g.setColorAt(0.0, QColor(col.red(), col.green(), col.blue(), int(18 * pulse)))
+                g.setColorAt(0.45, QColor(col.red(), col.green(), col.blue(), int(40 * pulse)))
+                g.setColorAt(1.0, QColor(0, 0, 0, 0))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QBrush(g))
+                p.drawRect(self.rect())
+        except Exception:
+            pass
 
         # grid dots — blitted from a cached layer; rebuilt only when the size
         # or the theme's ghost colour changes (so live re-theming still works).
@@ -2154,6 +2179,34 @@ class CustomizeOverlay(QWidget):
         self._wheel.hue_picked.connect(self._on_wheel_pick)
         self._wheel.hue_committed.connect(self._on_wheel_commit)
 
+        lay.addSpacing(6)
+        lay.addWidget(_lbl("THEME PRESETS", 8, color=C.TEXT_DIM,
+                            align=Qt.AlignmentFlag.AlignLeft))
+        bg_row = QHBoxLayout(); bg_row.setSpacing(8)
+        for hex_c, name in (
+            ("#00d4ff", "Cyan"),
+            ("#7c5cff", "Violet"),
+            ("#ff6b00", "Amber"),
+            ("#37ff8b", "Jade"),
+            ("#ff4d6d", "Rose"),
+            ("#c0c8d4", "Mono"),
+        ):
+            b = QPushButton(name)
+            b.setFixedSize(64, 28)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+            b.setStyleSheet(f"""
+                QPushButton {{
+                    background: {hex_c}22; color: {hex_c};
+                    border: 1px solid {hex_c}88; border-radius: 8px;
+                }}
+                QPushButton:hover {{ background: {hex_c}44; }}
+            """)
+            b.clicked.connect(lambda _=False, h=hex_c: self._pick_preset(h))
+            bg_row.addWidget(b)
+        bg_row.addStretch()
+        lay.addLayout(bg_row)
+
         self._hex_input = QLineEdit(self._sel_color)
         self._hex_input.setPlaceholderText("#00d4ff   (custom hex colour)")
         self._hex_input.setFont(QFont("Courier New", 10))
@@ -2260,6 +2313,18 @@ class CustomizeOverlay(QWidget):
         self.saved.emit(name, user, self._sel_color or DEFAULT_UI_COLOR, self._sel_voice)
         self.hide()
 
+
+
+    def _pick_preset(self, hex_color: str) -> None:
+        """Apply a one-click accent/theme preset from the swatch row."""
+        try:
+            self._sel_color = hex_color
+            if hasattr(self, "_wheel") and self._wheel is not None:
+                self._wheel.set_color(hex_color)
+            if hasattr(self, "_hex_input") and self._hex_input is not None:
+                self._hex_input.setText(hex_color)
+        except Exception:
+            self._sel_color = hex_color
 
 class PluginManagerOverlay(QWidget):
     """Floating overlay — lists discovered plugins with per-plugin ON/OFF toggles."""
@@ -4829,6 +4894,15 @@ class MainWindow(QMainWindow):
         plugin_btn.clicked.connect(self._open_plugin_manager)
         lay.addWidget(plugin_btn)
 
+        store_btn = QPushButton("🛒  PLUGIN STORE (WEB)")
+        store_btn.setFixedHeight(32)
+        store_btn.setFont(QFont("Segoe UI", 9))
+        store_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        store_btn.setStyleSheet(_BTN_STYLE_PRI)
+        store_btn.setToolTip("Open the web plugin store in your browser")
+        store_btn.clicked.connect(self._open_plugin_store_web)
+        lay.addWidget(store_btn)
+
         settings_btn = QPushButton("⚙  PLUGIN SETTINGS")
         settings_btn.setFixedHeight(32)
         settings_btn.setFont(QFont("Segoe UI", 9))
@@ -6136,6 +6210,23 @@ class MainWindow(QMainWindow):
             resolve(bool(accepted))
         except Exception as e:
             self._log.append_log(f"ERR: Confirmation failed — {e}")
+
+
+    def _open_plugin_store_web(self) -> None:
+        """Open local Plugin Store page in the default browser."""
+        try:
+            import webbrowser
+            from dashboard.server import get_active_dashboard
+            dash = get_active_dashboard()
+            ip = getattr(dash, "_ip", None) if dash else None
+            url = f"http://{ip or '127.0.0.1'}:8000/plugin-store"
+            webbrowser.open(url)
+            self._log.append_log(f"SYS: Plugin Store → {url}")
+        except Exception as e:
+            try:
+                self._log.append_log(f"SYS: Plugin Store error: {e}")
+            except Exception:
+                pass
 
     def _open_plugin_manager(self):
         plugins = self.get_plugins() if self.get_plugins else []

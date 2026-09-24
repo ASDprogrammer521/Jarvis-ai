@@ -925,6 +925,58 @@ class DashboardServer:
                     {"type": "sys", "text": f"Remote client offline ({len(self._clients)} left)."}
                 ))
 
+
+        @app.get("/plugin-store")
+        async def plugin_store_page():
+            path = STATIC_DIR / "plugin_store.html"
+            if path.exists():
+                return FileResponse(str(path), media_type="text/html")
+            return HTMLResponse("<h3>plugin_store.html missing</h3>", status_code=404)
+
+        @app.get("/api/plugins")
+        async def api_plugins_list():
+            try:
+                from actions.plugin_store import list_plugins
+                return JSONResponse({"plugins": list_plugins()})
+            except Exception as e:
+                return JSONResponse({"plugins": [], "error": str(e)})
+
+        @app.post("/api/plugins/enable")
+        async def api_plugins_enable(req: Request):
+            body = await req.json()
+            name = (body.get("name") or "").strip()
+            try:
+                from actions.plugin_store import run as ps_run
+                msg = ps_run(action="enable", value=name)
+                return JSONResponse({"ok": True, "message": msg})
+            except Exception as e:
+                return JSONResponse({"ok": False, "error": str(e)})
+
+        @app.post("/api/plugins/disable")
+        async def api_plugins_disable(req: Request):
+            body = await req.json()
+            name = (body.get("name") or "").strip()
+            try:
+                from actions.plugin_store import run as ps_run
+                msg = ps_run(action="disable", value=name)
+                return JSONResponse({"ok": True, "message": msg})
+            except Exception as e:
+                return JSONResponse({"ok": False, "error": str(e)})
+
+        @app.post("/api/plugins/install")
+        async def api_plugins_install(req: Request):
+            body = await req.json()
+            url = (body.get("url") or "").strip()
+            try:
+                from actions.plugin_store import install_from_url
+                msg = install_from_url(url)
+                ok = msg.startswith("Installed")
+                name = msg.split(":")[-1].strip() if ok else ""
+                return JSONResponse({"ok": ok, "name": name, "error": None if ok else msg, "message": msg})
+            except Exception as e:
+                return JSONResponse({"ok": False, "error": str(e)})
+
+
         return app
 
     # ── serve ─────────────────────────────────────────────────────────────

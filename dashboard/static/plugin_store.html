@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Jarvis · Plugin Store</title>
+<style>
+  :root { --bg:#05070c; --card:#0c121c; --line:#1a2a3e; --pri:#00d4ff; --txt:#e8f4ff; --mut:#6a8499; --ok:#37ff8b; --warn:#ffb428; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "Segoe UI", system-ui, sans-serif; background: radial-gradient(1200px 600px at 20% -10%, #0a2233 0%, var(--bg) 55%); color: var(--txt); min-height: 100vh; }
+  header { display:flex; align-items:center; justify-content:space-between; padding:20px 28px; border-bottom:1px solid var(--line); }
+  header h1 { margin:0; font-size:18px; letter-spacing:3px; font-weight:700; }
+  header a { color:var(--mut); text-decoration:none; font-size:13px; }
+  header a:hover { color:var(--pri); }
+  main { max-width:920px; margin:0 auto; padding:24px 20px 48px; }
+  .hero { margin-bottom:22px; }
+  .hero p { color:var(--mut); margin:8px 0 0; line-height:1.5; }
+  .install { display:flex; gap:10px; flex-wrap:wrap; margin:18px 0 28px; }
+  .install input { flex:1; min-width:220px; background:#121820; border:1px solid var(--line); color:var(--txt); border-radius:12px; padding:12px 14px; font-size:14px; }
+  .install button, .card button { background: linear-gradient(90deg,#00b4d8,#0077b6); color:#fff; border:none; border-radius:12px; padding:12px 18px; font-weight:700; cursor:pointer; }
+  .install button:hover, .card button:hover { filter:brightness(1.1); }
+  .grid { display:grid; grid-template-columns: repeat(auto-fill,minmax(260px,1fr)); gap:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px; display:flex; flex-direction:column; gap:10px; box-shadow:0 8px 30px rgba(0,0,0,.35); }
+  .card h3 { margin:0; font-size:15px; }
+  .card p { margin:0; color:var(--mut); font-size:13px; line-height:1.45; flex:1; }
+  .badge { display:inline-block; font-size:11px; font-weight:700; letter-spacing:1px; padding:4px 8px; border-radius:999px; }
+  .on { background:rgba(55,255,139,.12); color:var(--ok); border:1px solid rgba(55,255,139,.35); }
+  .off { background:rgba(255,255,255,.04); color:var(--mut); border:1px solid var(--line); }
+  .row { display:flex; gap:8px; align-items:center; justify-content:space-between; }
+  .status { margin-top:14px; color:var(--mut); font-size:13px; min-height:20px; }
+  .status.ok { color:var(--ok); }
+  .status.err { color:#ff6b81; }
+</style>
+</head>
+<body>
+<header>
+  <h1>PLUGIN STORE</h1>
+  <a href="/">← Dashboard</a>
+</header>
+<main>
+  <div class="hero">
+    <strong>Local plugins</strong>
+    <p>Drop a <code>.py</code> into the <code>plugins/</code> folder, or paste a raw GitHub URL to install.</p>
+  </div>
+  <div class="install">
+    <input id="url" placeholder="https://raw.githubusercontent.com/.../my_plugin.py" />
+    <button id="installBtn">Install from URL</button>
+    <button id="refreshBtn" style="background:#1a2433">Refresh</button>
+  </div>
+  <div id="grid" class="grid"></div>
+  <div id="status" class="status"></div>
+</main>
+<script>
+const grid = document.getElementById('grid');
+const status = document.getElementById('status');
+function setStatus(msg, cls){ status.textContent = msg||''; status.className = 'status'+(cls?(' '+cls):''); }
+
+async function loadList(){
+  setStatus('Loading…');
+  try {
+    const r = await fetch('/api/plugins');
+    const j = await r.json();
+    grid.innerHTML = '';
+    (j.plugins||[]).forEach(p => {
+      const el = document.createElement('div');
+      el.className = 'card';
+      el.innerHTML = `
+        <div class="row">
+          <h3>${p.name}</h3>
+          <span class="badge ${p.enabled?'on':'off'}">${p.enabled?'ON':'OFF'}</span>
+        </div>
+        <p>${p.description||'Local plugin'}</p>
+        <div class="row">
+          <button data-name="${p.name}" data-act="${p.enabled?'disable':'enable'}">${p.enabled?'Disable':'Enable'}</button>
+        </div>`;
+      grid.appendChild(el);
+    });
+    if (!(j.plugins||[]).length) setStatus('No plugins yet. Install from URL or add files to plugins/.');
+    else setStatus(`${j.plugins.length} plugin(s)`, 'ok');
+    grid.querySelectorAll('button[data-name]').forEach(btn => {
+      btn.onclick = async () => {
+        const name = btn.dataset.name, action = btn.dataset.act;
+        const r = await fetch('/api/plugins/'+action, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name}) });
+        const j = await r.json();
+        if (j.ok) loadList(); else setStatus(j.error||'Failed','err');
+      };
+    });
+  } catch(e){ setStatus(String(e),'err'); }
+}
+
+document.getElementById('refreshBtn').onclick = loadList;
+document.getElementById('installBtn').onclick = async () => {
+  const url = document.getElementById('url').value.trim();
+  if (!url) return setStatus('Paste a raw .py URL','err');
+  setStatus('Installing…');
+  try {
+    const r = await fetch('/api/plugins/install', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({url}) });
+    const j = await r.json();
+    if (j.ok) { setStatus('Installed: '+j.name,'ok'); loadList(); }
+    else setStatus(j.error||'Install failed','err');
+  } catch(e){ setStatus(String(e),'err'); }
+};
+loadList();
+</script>
+</body>
+</html>
