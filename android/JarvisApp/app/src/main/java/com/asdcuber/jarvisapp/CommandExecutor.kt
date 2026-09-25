@@ -1,5 +1,7 @@
 package com.asdcuber.jarvisapp
 
+import android.Manifest
+import android.app.KeyguardManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -14,11 +16,14 @@ import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Environment
+import android.os.PowerManager
 import android.provider.Settings
+import android.telecom.TelecomManager
 import android.telephony.SmsManager
 import android.util.Base64
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -29,7 +34,10 @@ object CommandExecutor {
 
     fun handle(context: Context, msg: JSONObject): String {
         val action = msg.optString("action", "").lowercase()
-        val value = msg.optString("value", msg.optString("text", msg.optString("url", "")))
+        val value = msg.optString(
+            "value",
+            msg.optString("text", msg.optString("url", msg.optString("number", "")))
+        )
 
         return when (action) {
             "notify", "message", "alert", "say" -> {
@@ -55,6 +63,9 @@ object CommandExecutor {
                 "Home"
             )
             "lock" -> lockScreen(context)
+            "unlock", "wake" -> unlockOrWake(context)
+            "call", "phone", "dial" -> placeCall(context, value)
+            "sms", "text" -> sendSms(context, value)
             "volume", "volume_up" -> {
                 val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
                 am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
@@ -77,24 +88,130 @@ object CommandExecutor {
             )
             "notifications", "read_notifications" -> JarvisNotificationListener.snapshot()
             "location", "where" -> readLocation(context)
-            "call" -> {
-                val num = value.filter { it.isDigit() || it == '+' }
-                if (num.isBlank()) return "No number"
-                val i = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$num")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                launchFromBackground(context, i, "Dial $num")
-            }
-            "sms" -> {
-                // value format: number|message
-                val parts = value.split("|", limit = 2)
-                if (parts.size < 2) return "Use: number|message"
-                val i = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:${parts[0].trim()}"))
-                    .putExtra("sms_body", parts[1].trim())
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                launchFromBackground(context, i, "SMS")
-            }
             "save_file", "receive_file" -> saveFileFromPc(context, msg)
-            "screenshot" -> "Screenshot needs MediaProjection consent."
+            "screenshot", "screen" -> {
+                val i = Intent(context, ScreenshotActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                launchFromBackground(context, i, "Screenshot")
+            }
             else -> "Unknown action: $action"
+        }
+    }
+
+    private fun placeCall(context: Context, raw: String): String {
+        val number = raw.filter { it.isDigit() || it == '+' }
+        if (number.length < 3) return "No valid phone number"
+
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) ==
+            PackageManager.PERMISSION_GRANTED
+
+        // Prefer real call when permission granted
+        if (granted) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    val tm = context.getSystemService(Context.TELECOM_SERVICE) as TelecomManager
+                    val uri = Uri.fromParts("tel", number, null)
+                    tm.placeCall(uri, null)
+                    return "Calling $number"
+                }
+            } catch (_: Exception) { /* fall through */ }
+
+            try {
+                val call = Intent(Intent.ACTION_CALL, Uri.parse("tel:$number"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(call)
+                return "Calling $number"
+            } catch (e: Exception) {
+                // fall through to dialer
+            }
+        }
+
+        // Fallback: open dialer with number filled (user taps Call)
+        return try {
+            val dial = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(dial)
+            if (!granted) {
+                "Dialer opened for $number — grant Phone permission in App settings for auto-call"
+            } else {
+                "Dialer opened for $number"
+            }
+        } catch (e: Exception) {
+            postNotice(
+                context,
+                "Call $number",
+                "Tap to call",
+                Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            "Call queued in notification: $number"
+        }
+    }
+
+    private fun sendSms(context: Context, value: String): String {
+        // formats: "number|message" or just number
+        val parts = value.split("|", limit = 2)
+        val number = parts[0].filter { it.isDigit() || it == '+' }
+        val body = if (parts.size > 1) parts[1].trim() else ""
+        if (number.length < 3) return "No valid number for SMS"
+
+        val canSend = ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) ==
+            PackageManager.PERMISSION_GRANTED
+        if (canSend && body.isNotBlank()) {
+            return try {
+                val sms = SmsManager.getDefault()
+                sms.sendTextMessage(number, null, body, null, null)
+                "SMS sent to $number"
+            } catch (e: Exception) {
+                openSmsComposer(context, number, body)
+            }
+        }
+        return openSmsComposer(context, number, body)
+    }
+
+    private fun openSmsComposer(context: Context, number: String, body: String): String {
+        return try {
+            val i = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$number"))
+                .putExtra("sms_body", body)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(i)
+            "SMS composer opened for $number"
+        } catch (e: Exception) {
+            "SMS failed: ${e.message}"
+        }
+    }
+
+    private fun unlockOrWake(context: Context): String {
+        // Full PIN/pattern unlock is blocked by Android security.
+        // We can: turn screen on + try dismiss keyguard when no secure lock.
+        return try {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+            @Suppress("DEPRECATION")
+            val wl = pm.newWakeLock(
+                PowerManager.FULL_WAKE_LOCK or
+                    PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                    PowerManager.ON_AFTER_RELEASE,
+                "jarvis:wake"
+            )
+            wl.acquire(3000)
+            try {
+                val km = context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    // Needs activity callback for secure keyguard — open trampoline
+                    val i = Intent(context, UnlockActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(i)
+                    "Wake/unlock requested (secure lock still needs your PIN/biometric)"
+                } else {
+                    @Suppress("DEPRECATION")
+                    km.newKeyguardLock("jarvis").disableKeyguard()
+                    "Keyguard dismiss attempted"
+                }
+            } finally {
+                if (wl.isHeld) wl.release()
+            }
+        } catch (e: Exception) {
+            "Unlock limited by Android: ${e.message}. Screen wake tried; PIN unlock is not allowed for apps."
         }
     }
 
@@ -118,8 +235,7 @@ object CommandExecutor {
     private fun readLocation(context: Context): String {
         return try {
             val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-            val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
-            for (p in providers) {
+            for (p in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
                 if (!lm.isProviderEnabled(p)) continue
                 @Suppress("MissingPermission")
                 val loc = lm.getLastKnownLocation(p) ?: continue
@@ -138,7 +254,7 @@ object CommandExecutor {
             "Opened $label"
         } catch (e: Exception) {
             postNotice(context, "Jarvis", "Tap to open $label", intent)
-            "Queued $label (background)"
+            "Queued $label (tap notification if nothing opened)"
         }
     }
 
@@ -181,6 +297,8 @@ object CommandExecutor {
             "instagram" to "com.instagram.android",
             "spotify" to "com.spotify.music",
             "settings" to "com.android.settings",
+            "phone" to "com.android.dialer",
+            "dialer" to "com.android.dialer",
         )
         val lower = name.lowercase().trim()
         val pkgHint = aliases[lower]
@@ -217,7 +335,10 @@ object CommandExecutor {
         val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         val admin = ComponentName(context, JarvisDeviceAdmin::class.java)
         return if (dpm.isAdminActive(admin)) {
-            dpm.lockNow(); "Locked"
-        } else "Enable lock permission in Jarvis App first."
+            dpm.lockNow()
+            "Locked"
+        } else {
+            "Enable lock permission in Jarvis App first (Enable lock permission button)."
+        }
     }
 }

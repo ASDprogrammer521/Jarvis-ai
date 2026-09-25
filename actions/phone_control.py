@@ -197,6 +197,33 @@ def run(action: str = "status", value: str = "", **kwargs) -> str:
         if web_ok:
             return "Phone is linked (Jarvis App). Use notify/message/open_url, or enable ADB for system actions."
     
+        if action in ("call", "phone", "dial"):
+            num = (value or "").strip()
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "call", "value": num, "number": num})
+            return f"Call request sent for {num} ({n}). Grant Phone permission on the device." if n else "Phone not linked."
+
+        if action in ("sms", "text"):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "sms", "value": value})
+            return f"SMS request sent ({n})." if n else "Phone not linked."
+
+        if action in ("screenshot", "screen"):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "screenshot"})
+            return (
+                f"Screenshot requested ({n}). Approve the screen-capture prompt on the phone."
+                if n else "Phone not linked."
+            )
+
+        if action in ("unlock", "wake"):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "unlock"})
+            return (
+                f"Unlock/wake requested ({n}). Secure PIN/biometric cannot be bypassed by apps."
+                if n else "Phone not linked."
+            )
+
+        if action in ("lock",):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "lock"})
+            return f"Lock requested ({n})." if n else "Phone not linked."
+
         if action in ("send_file", "file_to_phone"):
             # value = path on PC
             path = (value or "").strip().strip('"')

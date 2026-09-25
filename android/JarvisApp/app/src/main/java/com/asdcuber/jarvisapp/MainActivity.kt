@@ -208,12 +208,18 @@ class MainActivity : AppCompatActivity() {
                 need.add(Manifest.permission.ACCESS_FINE_LOCATION)
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
                 need.add(Manifest.permission.RECORD_AUDIO)
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED)
+                need.add(Manifest.permission.CALL_PHONE)
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED)
+                need.add(Manifest.permission.SEND_SMS)
         } else {
             listOf(
                 Manifest.permission.READ_EXTERNAL_STORAGE,
                 Manifest.permission.CAMERA,
                 Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.RECORD_AUDIO
+                Manifest.permission.RECORD_AUDIO,
+                Manifest.permission.CALL_PHONE,
+                Manifest.permission.SEND_SMS
             ).forEach {
                 if (ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED) need.add(it)
             }
