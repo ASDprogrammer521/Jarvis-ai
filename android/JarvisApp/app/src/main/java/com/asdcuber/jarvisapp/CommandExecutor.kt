@@ -2,6 +2,7 @@ package com.asdcuber.jarvisapp
 
 import android.Manifest
 import android.app.KeyguardManager
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -81,12 +82,12 @@ object CommandExecutor {
             "sms", "text" -> sendSms(context, value)
             "volume", "volume_up" -> {
                 val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
+                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, 0)
                 "Volume up"
             }
             "volume_down" -> {
                 val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, 0)
                 "Volume down"
             }
             "battery" -> {
@@ -121,9 +122,16 @@ object CommandExecutor {
     private fun setTorch(context: Context, on: Boolean): String {
         return try {
             val cm = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-            val id = cm.cameraIdList.firstOrNull() ?: return "No camera for flashlight"
+            val id = cm.cameraIdList.firstOrNull { camId ->
+                try {
+                    val c = cm.getCameraCharacteristics(camId)
+                    c.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+                } catch (_: Exception) { false }
+            } ?: return "No flashlight on this device"
             cm.setTorchMode(id, on)
             if (on) "Flashlight ON" else "Flashlight OFF"
+        } catch (e: SecurityException) {
+            "Flashlight needs Camera permission — open Jarvis App and allow Camera"
         } catch (e: Exception) {
             "Flashlight failed: ${e.message}"
         }
@@ -319,14 +327,30 @@ object CommandExecutor {
         }
     }
 
+    /**
+     * Android 10+ blocks startActivity from background even from FGS.
+     * Strategy: always post a heads-up notification with the real Intent,
+     * and also try startActivity (works when app is visible / some OEMs).
+     */
     private fun launchFromBackground(context: Context, intent: Intent, label: String): String {
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        return try {
+        intent.addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+        )
+        var started = false
+        try {
             context.startActivity(intent)
-            "Opened $label"
-        } catch (e: Exception) {
-            postNotice(context, "Jarvis", "Tap to open $label", intent)
-            "Queued $label (tap notification if nothing opened)"
+            started = true
+        } catch (_: Exception) {
+            started = false
+        }
+        // Always notify — background starts are often silently dropped
+        postNotice(context, "Jarvis: $label", "Tap to open", intent)
+        return if (started) {
+            "Tried to open $label (if not open, tap the notification)"
+        } else {
+            "Tap notification to open $label"
         }
     }
 
@@ -336,8 +360,9 @@ object CommandExecutor {
             val ch = NotificationChannel(
                 CMD_CHANNEL, "Jarvis Commands", NotificationManager.IMPORTANCE_HIGH
             )
-            ch.description = "Jarvis remote actions"
+            ch.description = "Jarvis remote actions — tap to run"
             ch.enableVibration(true)
+            ch.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             nm.createNotificationChannel(ch)
         }
         val intent = (launch ?: Intent(context, MainActivity::class.java)).apply {
@@ -351,14 +376,15 @@ object CommandExecutor {
         val b = NotificationCompat.Builder(context, CMD_CHANNEL)
             .setContentTitle(title)
             .setContentText(body)
-            .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setSmallIcon(android.R.drawable.ic_menu_send)
             .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
             .setAutoCancel(true)
             .setContentIntent(pi)
             .setFullScreenIntent(pi, true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-        nm.notify(9001 + (req % 50), b.build())
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+        nm.notify(9100 + (req % 80), b.build())
     }
 
     private fun openApp(context: Context, name: String): String {

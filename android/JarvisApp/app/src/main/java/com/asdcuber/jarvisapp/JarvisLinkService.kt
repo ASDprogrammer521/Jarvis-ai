@@ -18,6 +18,7 @@ import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
 import java.util.concurrent.Executors
+import android.content.Context
 
 class JarvisLinkService : Service() {
 
@@ -89,6 +90,13 @@ class JarvisLinkService : Service() {
             val base = "http://$host"
 
             var token = key.trim().uppercase()
+            // Prefer saved session token for reconnect (pairing key is one-time)
+            val prefs = getSharedPreferences("jarvis_link", Context.MODE_PRIVATE)
+            val saved = prefs.getString("session_token", null)
+            if (!saved.isNullOrBlank() && reconnectAttempts > 0) {
+                token = saved
+                lastLog = "Reconnecting with saved session…"
+            }
             try {
                 val url = URL("$base/login")
                 val conn = (url.openConnection() as HttpURLConnection).apply {
@@ -110,6 +118,11 @@ class JarvisLinkService : Service() {
                     val t = JSONObject(body).optString("token", "")
                     if (t.isNotBlank()) {
                         token = t
+                        getSharedPreferences("jarvis_link", Context.MODE_PRIVATE)
+                            .edit()
+                            .putString("session_token", t)
+                            .putString("host", host)
+                            .apply()
                         lastLog = "Login OK — opening socket…"
                         statusLine = "Login OK…"
                         updateNotification("Login OK…", false)
@@ -182,12 +195,15 @@ class JarvisLinkService : Service() {
                 lastLog = "Disconnected ($code) ${reason ?: ""}"
                 updateNotification("Disconnected", false)
                 // Auto-reconnect
-                if (hostRaw.isNotBlank() && keyRaw.isNotBlank() && reconnectAttempts < maxReconnect) {
+                if (hostRaw.isNotBlank() && reconnectAttempts < maxReconnect) {
                     reconnectAttempts++
-                    lastLog = "Reconnecting in 3s… ($reconnectAttempts)"
+                    val delay = (3000L * reconnectAttempts.coerceAtMost(5))
+                    lastLog = "Reconnecting in ${delay/1000}s… ($reconnectAttempts)"
+                    statusLine = "Connecting…"
+                    updateNotification("Reconnecting…", false)
                     mainHandler.postDelayed({
                         io.execute { connectPipeline(hostRaw, keyRaw) }
-                    }, 3000)
+                    }, delay)
                 }
             }
 

@@ -161,7 +161,7 @@ def run(action: str = "status", value: str = "", **kwargs) -> str:
             return "Phone ready. " + " ".join(parts)
         return "No phone linked. " + " ".join(parts)
 
-    # ── Web / Jarvis App path ─────────────────────────────────────────────
+    # ── Web / Jarvis App path (primary — no ADB required) ─────────────────
     if web_ok:
         if action in ("notify", "message", "say", "alert"):
             text = value or "Message from Jarvis"
@@ -176,7 +176,6 @@ def run(action: str = "status", value: str = "", **kwargs) -> str:
 
         if action in ("open_app", "app"):
             app = (value or "").strip()
-            # Native app command — Android Jarvis App opens by package/name
             n = _push_phone(dash, {
                 "type": "phone_cmd",
                 "action": "open_app",
@@ -196,23 +195,64 @@ def run(action: str = "status", value: str = "", **kwargs) -> str:
             n = _push_phone(dash, {"type": "phone_cmd", "action": "notify", "text": value})
             return f"Displayed on phone ({n}): {value}"
 
-        # For ADB-only actions, fall through if ADB available
-        if action in ("lock", "unlock", "home", "back", "volume", "screenshot", "battery") and not adb_ok:
-            n = _push_phone(dash, {
-                "type": "phone_cmd",
-                "action": "notify",
-                "text": f"Jarvis requested: {action} {value}".strip(),
-            })
-            return (
-                f"Phone is linked via Jarvis App, but '{action}' needs ADB for full system control. "
-                f"Notified the phone instead ({n}). Enable USB debugging for deep control."
-            )
+        if action in ("battery",):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "battery"})
+            return f"Battery requested from phone ({n})." if n else "Phone not linked."
+
+        if action in ("volume", "volume_up"):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "volume_up"})
+            return f"Volume up on phone ({n})." if n else "Phone not linked."
+
+        if action in ("volume_down",):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "volume_down"})
+            return f"Volume down on phone ({n})." if n else "Phone not linked."
+
+        if action in ("flashlight", "torch", "flashlight_on"):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "flashlight_on"})
+            return f"Flashlight ON ({n})." if n else "Phone not linked."
+
+        if action in ("flashlight_off", "torch_off"):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "flashlight_off"})
+            return f"Flashlight OFF ({n})." if n else "Phone not linked."
+
+        if action in ("lock",):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "lock"})
+            return f"Lock requested ({n})." if n else "Phone not linked."
+
+        if action in ("unlock", "wake"):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "unlock"})
+            return f"Unlock/wake requested ({n})." if n else "Phone not linked."
+
+        if action in ("home",):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "home"})
+            return f"Home requested ({n})." if n else "Phone not linked."
+
+        if action in ("screenshot", "screen"):
+            if adb_ok:
+                pass  # fall through to ADB screencap below
+            else:
+                n = _push_phone(dash, {"type": "phone_cmd", "action": "screenshot"})
+                return (
+                    f"Screenshot requested ({n}). Approve / tap notification on phone."
+                    if n else "Phone not linked."
+                )
+
+        if action in ("screenshare", "screen_share", "start_share"):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "screenshare"})
+            return f"Screen share requested ({n})." if n else "Phone not linked."
+
+        if action in ("screenshare_stop", "stop_share"):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "screenshare_stop"})
+            return f"Screen share stop ({n})." if n else "Phone not linked."
+
+        if action in ("call", "phone", "dial"):
+            num = (value or "").strip()
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "call", "value": num, "number": num})
+            return f"Call request sent for {num} ({n})." if n else "Phone not linked."
 
     # ── ADB path ──────────────────────────────────────────────────────────
-    if not adb_ok:
-        if web_ok:
-            return "Phone is linked (Jarvis App). Use notify/message/open_url, or enable ADB for system actions."
-    
+    if not adb_ok and not web_ok:
+        return "No phone linked and no ADB device."
 
         if action in ("battery",):
             n = _push_phone(dash, {"type": "phone_cmd", "action": "battery"})
