@@ -41,6 +41,17 @@ class JarvisLinkService : Service() {
                 false
             }
         }
+
+        fun sendRaw(json: String): Boolean {
+            val c = activeClient ?: return false
+            if (!connected) return false
+            return try {
+                c.send(json)
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
     }
 
     private var client: WebSocketClient? = null

@@ -1,3 +1,4 @@
+
 package com.asdcuber.jarvisapp
 
 import android.app.Activity
@@ -19,9 +20,6 @@ import android.widget.Toast
 import java.io.File
 import java.io.FileOutputStream
 
-/**
- * One-shot screen capture via MediaProjection (user must approve once per session).
- */
 class ScreenshotActivity : Activity() {
 
     companion object {
@@ -31,9 +29,11 @@ class ScreenshotActivity : Activity() {
     private var projection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
+    private var shareMode = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        shareMode = intent?.getStringExtra("mode") == "share"
         val mgr = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         startActivityForResult(mgr.createScreenCaptureIntent(), REQ)
     }
@@ -45,15 +45,25 @@ class ScreenshotActivity : Activity() {
             finish(); return
         }
         if (resultCode != RESULT_OK || data == null) {
-            Toast.makeText(this, "Screenshot permission denied", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Screen capture denied", Toast.LENGTH_SHORT).show()
             finish(); return
+        }
+        if (shareMode) {
+            val svc = Intent(this, ScreenShareService::class.java)
+                .putExtra(ScreenShareService.EXTRA_RESULT_CODE, resultCode)
+                .putExtra(ScreenShareService.EXTRA_DATA, data)
+            startForegroundService(svc)
+            Toast.makeText(this, "Screen sharing to PC", Toast.LENGTH_SHORT).show()
+            JarvisLinkService.sendCommand("[PHONE_SCREENSHARE] started")
+            finish()
+            return
         }
         val mgr = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         projection = mgr.getMediaProjection(resultCode, data)
-        Handler(Looper.getMainLooper()).postDelayed({ capture() }, 250)
+        Handler(Looper.getMainLooper()).postDelayed({ captureOnce() }, 250)
     }
 
-    private fun capture() {
+    private fun captureOnce() {
         try {
             val metrics = DisplayMetrics()
             @Suppress("DEPRECATION")
@@ -61,7 +71,6 @@ class ScreenshotActivity : Activity() {
             val width = metrics.widthPixels
             val height = metrics.heightPixels
             val density = metrics.densityDpi
-
             imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
             virtualDisplay = projection?.createVirtualDisplay(
                 "jarvis_cap",
@@ -69,7 +78,6 @@ class ScreenshotActivity : Activity() {
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 imageReader?.surface, null, null
             )
-
             Handler(Looper.getMainLooper()).postDelayed({
                 val img = imageReader?.acquireLatestImage()
                 if (img == null) {
@@ -95,9 +103,7 @@ class ScreenshotActivity : Activity() {
                     cropped.compress(Bitmap.CompressFormat.PNG, 100, fos)
                 }
                 Toast.makeText(this, "Saved: ${out.name}", Toast.LENGTH_LONG).show()
-                JarvisLinkService.sendCommand(
-                    "[PHONE_SCREENSHOT] saved=${out.absolutePath}"
-                )
+                JarvisLinkService.sendCommand("[PHONE_SCREENSHOT] saved=${out.absolutePath}")
                 cleanup()
                 finish()
             }, 400)

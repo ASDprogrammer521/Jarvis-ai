@@ -36,7 +36,23 @@ def _run_adb(args: list[str], timeout: int = 20) -> tuple[bool, str]:
         return False, str(e)
 
 
-def _devices() -> list[str]:
+def _ensure_adb() -> list[str]:
+    """Refresh device list; try wireless connect if we know phone IP."""
+    try:
+        from core import adb_bridge
+        devs = adb_bridge.devices()
+        if devs:
+            return devs
+        ip = adb_bridge.get_phone_ip()
+        if ip:
+            adb_bridge.connect_wireless(ip)
+            return adb_bridge.devices()
+    except Exception:
+        pass
+    return _devices_raw()
+
+
+def _devices_raw() -> list[str]:
     if not _adb_available():
         return []
     ok, out = _run_adb(["devices"])
@@ -124,7 +140,7 @@ def run(action: str = "status", value: str = "", **kwargs) -> str:
 
     dash = _get_dashboard()
     web_ok = _phone_web_linked(dash)
-    adb_devs = _devices()
+    adb_devs = _ensure_adb()
     adb_ok = bool(adb_devs)
 
     if action in ("status", "list", "list_devices", "devices"):
@@ -197,6 +213,38 @@ def run(action: str = "status", value: str = "", **kwargs) -> str:
         if web_ok:
             return "Phone is linked (Jarvis App). Use notify/message/open_url, or enable ADB for system actions."
     
+
+        if action in ("battery",):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "battery"})
+            return f"Battery requested from phone ({n})." if n else "Phone not linked."
+
+        if action in ("volume", "volume_up"):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "volume_up"})
+            return f"Volume up on phone ({n})." if n else "Phone not linked."
+
+        if action in ("volume_down",):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "volume_down"})
+            return f"Volume down on phone ({n})." if n else "Phone not linked."
+
+        if action in ("flashlight", "torch", "flashlight_on"):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "flashlight_on"})
+            return f"Flashlight ON ({n})." if n else "Phone not linked."
+
+        if action in ("flashlight_off", "torch_off"):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "flashlight_off"})
+            return f"Flashlight OFF ({n})." if n else "Phone not linked."
+
+        if action in ("screenshare", "screen_share", "start_share"):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "screenshare"})
+            return (
+                f"Screen share requested ({n}). On phone: allow capture (or tap notification)."
+                if n else "Phone not linked."
+            )
+
+        if action in ("screenshare_stop", "stop_share"):
+            n = _push_phone(dash, {"type": "phone_cmd", "action": "screenshare_stop"})
+            return f"Screen share stop ({n})." if n else "Phone not linked."
+
         if action in ("call", "phone", "dial"):
             num = (value or "").strip()
             n = _push_phone(dash, {"type": "phone_cmd", "action": "call", "value": num, "number": num})
@@ -207,10 +255,26 @@ def run(action: str = "status", value: str = "", **kwargs) -> str:
             return f"SMS request sent ({n})." if n else "Phone not linked."
 
         if action in ("screenshot", "screen"):
+            # Prefer ADB screencap (no on-phone permission dialog)
+            adb_devs = _ensure_adb()
+            if adb_devs:
+                from pathlib import Path as _P
+                import time as _time
+                local = _P.home() / f"jarvis_phone_{int(_time.time())}.png"
+                try:
+                    from core.adb_bridge import screencap_to
+                    ok, msg = screencap_to(str(local))
+                    if ok:
+                        return f"Screenshot saved via ADB: {local}"
+                except Exception:
+                    ok, msg = _run_adb(["-s", adb_devs[0], "shell", "screencap", "-p", "/sdcard/jarvis_screen.png"])
+                    if ok:
+                        _run_adb(["-s", adb_devs[0], "pull", "/sdcard/jarvis_screen.png", str(local)])
+                        return f"Screenshot saved via ADB: {local}"
             n = _push_phone(dash, {"type": "phone_cmd", "action": "screenshot"})
             return (
-                f"Screenshot requested ({n}). Approve the screen-capture prompt on the phone."
-                if n else "Phone not linked."
+                f"Screenshot requested ({n}). Approve the screen-capture prompt on the phone (or enable Wireless debugging for ADB)."
+                if n else "Phone not linked and no ADB."
             )
 
         if action in ("unlock", "wake"):

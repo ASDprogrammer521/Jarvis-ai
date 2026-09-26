@@ -2003,9 +2003,16 @@ class JarvisLive:
                 except asyncio.QueueFull:
                     pass
 
-    def _on_phone_connected(self) -> None:
+    def _on_phone_connected(self, client_ip: str | None = None) -> None:
         self.ui.write_log("SYS: Phone connected via Remote Dashboard.")
-        self.ui.notify_phone_connected()
+        try:
+            self.ui.notify_phone_connected()
+        except Exception:
+            pass
+        # ADB auto-bridge disabled — phone control uses Jarvis App only.
+
+    def _on_phone_disconnected(self) -> None:
+        pass
 
     # ── dashboard command relay ─────────────────────────────────────────────
 
@@ -2096,6 +2103,15 @@ class JarvisLive:
             import dashboard.server as _dash_mod
             self._dashboard = DashboardServer()
             self._dashboard.set_connect_callback(self._on_phone_connected)
+            self._dashboard.set_disconnect_callback(self._on_phone_disconnected)
+            def _on_frame(b64):
+                try:
+                    from PyQt6.QtCore import QMetaObject, Qt, Q_ARG
+                    # UI thread
+                    self.ui.show_phone_screen_frame(b64)
+                except Exception:
+                    pass
+            self._dashboard.set_screen_frame_callback(_on_frame)
             try:
                 self._dashboard._loop = asyncio.get_running_loop()
             except Exception:

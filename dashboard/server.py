@@ -472,6 +472,7 @@ class DashboardServer:
         self._connect_callback            = None
         self._pending_keys: dict[str, float] = {}
         self._device_sessions: dict[str, dict] = {}  # device_token → {session_key}
+        self._last_screen_frame = None
         self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=200)
         self._uploads_dir                 = UPLOADS_DIR
         self._login_html                  = _read("login.html")
@@ -526,6 +527,12 @@ class DashboardServer:
 
     def set_connect_callback(self, fn) -> None:
         self._connect_callback = fn
+
+    def set_disconnect_callback(self, fn) -> None:
+        self._disconnect_callback = fn
+
+    def set_screen_frame_callback(self, fn) -> None:
+        self._screen_frame_callback = fn
 
     # ── broadcast ────────────────────────────────────────────────────────
 
@@ -890,9 +897,20 @@ class DashboardServer:
                 return
             await websocket.accept()
             self._clients.add(websocket)
+            client_ip = None
+            try:
+                if websocket.client:
+                    client_ip = websocket.client.host
+            except Exception:
+                client_ip = None
             if self._connect_callback:
                 try:
-                    self._connect_callback()
+                    self._connect_callback(client_ip)
+                except TypeError:
+                    try:
+                        self._connect_callback()
+                    except Exception:
+                        pass
                 except Exception:
                     pass
             asyncio.create_task(self.broadcast(
@@ -917,6 +935,20 @@ class DashboardServer:
                         asyncio.create_task(self.broadcast(
                             {"type": "sys", "text": "Jarvis App linked and ready."}
                         ))
+                    elif data.get("type") == "screen_frame":
+                        self._last_screen_frame = data
+                        cb = getattr(self, "_screen_frame_callback", None)
+                        if cb and data.get("data"):
+                            try:
+                                cb(data.get("data"))
+                            except Exception:
+                                pass
+                        asyncio.create_task(self.broadcast({
+                            "type": "phone_screen",
+                            "width": data.get("width"),
+                            "height": data.get("height"),
+                            "data": data.get("data"),
+                        }))
             except WebSocketDisconnect:
                 pass
             finally:
@@ -924,6 +956,11 @@ class DashboardServer:
                 asyncio.create_task(self.broadcast(
                     {"type": "sys", "text": f"Remote client offline ({len(self._clients)} left)."}
                 ))
+                if not self._clients and getattr(self, "_disconnect_callback", None):
+                    try:
+                        self._disconnect_callback()
+                    except Exception:
+                        pass
 
 
         @app.get("/plugin-store")
@@ -976,6 +1013,14 @@ class DashboardServer:
             except Exception as e:
                 return JSONResponse({"ok": False, "error": str(e)})
 
+
+
+        @app.get("/api/phone_screen")
+        async def api_phone_screen():
+            fr = getattr(self, "_last_screen_frame", None)
+            if not fr:
+                return JSONResponse({"ok": False, "error": "no frame"})
+            return JSONResponse({"ok": True, "frame": fr})
 
         return app
 

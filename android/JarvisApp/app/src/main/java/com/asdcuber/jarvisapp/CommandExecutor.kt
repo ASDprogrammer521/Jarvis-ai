@@ -12,6 +12,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.LocationManager
 import android.media.AudioManager
+import android.hardware.camera2.CameraManager
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
@@ -63,7 +64,19 @@ object CommandExecutor {
                 "Home"
             )
             "lock" -> lockScreen(context)
-            "unlock", "wake" -> unlockOrWake(context)
+            "unlock", "wake" -> {
+                val trampoline = Intent(context, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    putExtra("jarvis_action", "unlock")
+                }
+                try {
+                    context.startActivity(trampoline)
+                    unlockOrWake(context)
+                } catch (_: Exception) {
+                    postNotice(context, "Jarvis Unlock", "Tap to wake / unlock phone", trampoline)
+                    "Tap notification to unlock/wake"
+                }
+            }
             "call", "phone", "dial" -> placeCall(context, value)
             "sms", "text" -> sendSms(context, value)
             "volume", "volume_up" -> {
@@ -80,6 +93,17 @@ object CommandExecutor {
                 val bm = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
                 "Battery ${bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)}%"
             }
+            "flashlight", "torch", "flashlight_on", "torch_on" -> setTorch(context, true)
+            "flashlight_off", "torch_off" -> setTorch(context, false)
+            "screenshare", "screen_share", "start_share" -> startScreenShare(context)
+            "screenshare_stop", "stop_share" -> {
+                try {
+                    context.stopService(Intent(context, ScreenShareService::class.java))
+                    "Screen share stopped"
+                } catch (e: Exception) {
+                    "Stop share: ${e.message}"
+                }
+            }
             "status" -> "Jarvis App online · ${Build.MODEL} · Android ${Build.VERSION.RELEASE}"
             "settings" -> launchFromBackground(
                 context,
@@ -89,12 +113,33 @@ object CommandExecutor {
             "notifications", "read_notifications" -> JarvisNotificationListener.snapshot()
             "location", "where" -> readLocation(context)
             "save_file", "receive_file" -> saveFileFromPc(context, msg)
-            "screenshot", "screen" -> {
-                val i = Intent(context, ScreenshotActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                launchFromBackground(context, i, "Screenshot")
-            }
+            "screenshot", "screen" -> startScreenshot(context)
             else -> "Unknown action: $action"
+        }
+    }
+
+    private fun setTorch(context: Context, on: Boolean): String {
+        return try {
+            val cm = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            val id = cm.cameraIdList.firstOrNull() ?: return "No camera for flashlight"
+            cm.setTorchMode(id, on)
+            if (on) "Flashlight ON" else "Flashlight OFF"
+        } catch (e: Exception) {
+            "Flashlight failed: ${e.message}"
+        }
+    }
+
+    private fun startScreenShare(context: Context): String {
+        val trampoline = Intent(context, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra("jarvis_action", "screenshare")
+        }
+        return try {
+            context.startActivity(trampoline)
+            "Screen share — allow capture on phone"
+        } catch (e: Exception) {
+            postNotice(context, "Jarvis Screen Share", "Tap to start sharing", trampoline)
+            "Tap notification to start screen share"
         }
     }
 
@@ -247,6 +292,33 @@ object CommandExecutor {
         }
     }
 
+    private fun startScreenshot(context: Context): String {
+        val i = Intent(context, ScreenshotActivity::class.java).apply {
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+            )
+        }
+        return try {
+            context.startActivity(i)
+            "Screenshot UI opened — allow screen capture on the phone"
+        } catch (e: Exception) {
+            // Trampoline: open MainActivity which immediately starts ScreenshotActivity
+            val trampoline = Intent(context, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                putExtra("jarvis_action", "screenshot")
+            }
+            postNotice(
+                context,
+                "Jarvis Screenshot",
+                "Tap to capture screen",
+                trampoline
+            )
+            "Tap the Jarvis Screenshot notification to capture"
+        }
+    }
+
     private fun launchFromBackground(context: Context, intent: Intent, label: String): String {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         return try {
@@ -261,28 +333,32 @@ object CommandExecutor {
     private fun postNotice(context: Context, title: String, body: String, launch: Intent?) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            nm.createNotificationChannel(
-                NotificationChannel(CMD_CHANNEL, "Jarvis Commands", NotificationManager.IMPORTANCE_HIGH)
+            val ch = NotificationChannel(
+                CMD_CHANNEL, "Jarvis Commands", NotificationManager.IMPORTANCE_HIGH
             )
+            ch.description = "Jarvis remote actions"
+            ch.enableVibration(true)
+            nm.createNotificationChannel(ch)
         }
-        val pi = if (launch != null) {
-            PendingIntent.getActivity(
-                context, (System.currentTimeMillis() % 100000).toInt(),
-                launch,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-        } else null
+        val intent = (launch ?: Intent(context, MainActivity::class.java)).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        val req = (System.currentTimeMillis() % 100000).toInt()
+        val pi = PendingIntent.getActivity(
+            context, req, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         val b = NotificationCompat.Builder(context, CMD_CHANNEL)
             .setContentTitle(title)
             .setContentText(body)
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setAutoCancel(true)
-        if (pi != null) {
-            b.setContentIntent(pi)
-            b.setFullScreenIntent(pi, true)
-        }
-        nm.notify((System.currentTimeMillis() % 10000).toInt(), b.build())
+            .setContentIntent(pi)
+            .setFullScreenIntent(pi, true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+        nm.notify(9001 + (req % 50), b.build())
     }
 
     private fun openApp(context: Context, name: String): String {

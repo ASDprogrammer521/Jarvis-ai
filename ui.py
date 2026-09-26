@@ -56,6 +56,12 @@ def _read_full_config() -> dict:
     except Exception:
         return {}
 
+
+# Single source of truth for the release name — the window title, the header
+# badge and the readme must never disagree again.
+APP_VERSION  = "MARK LIV"
+APP_PROTOCOL = APP_VERSION.split()[-1]
+
 _DEFAULT_W, _DEFAULT_H = 980, 700
 _MIN_W,     _MIN_H     = 820, 580
 _LEFT_W  = 148
@@ -65,6 +71,7 @@ _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
 
 class C:
+    # Modern cinematic palette (Brahma Echo–inspired glass dark)
     BG        = "#03060b"
     PANEL     = "#080d16"
     PANEL2    = "#0c121c"
@@ -5542,6 +5549,34 @@ class MainWindow(QMainWindow):
             )
             threading.Thread(target=self.on_text_command, args=(msg,), daemon=True).start()
 
+    def show_phone_screen_frame(self, b64_jpeg: str) -> None:
+        """Show latest phone screenshare frame in the content / log area."""
+        try:
+            import base64
+            from PyQt6.QtGui import QPixmap, QImage
+            raw = base64.b64decode(b64_jpeg)
+            img = QImage.fromData(raw, "JPEG")
+            if img.isNull():
+                return
+            if not hasattr(self, "_phone_screen_lbl") or self._phone_screen_lbl is None:
+                from PyQt6.QtWidgets import QLabel
+                self._phone_screen_lbl = QLabel()
+                self._phone_screen_lbl.setMinimumSize(200, 360)
+                self._phone_screen_lbl.setStyleSheet("background:#000; border:1px solid #1a2a3e; border-radius:8px;")
+                try:
+                    self._content_panel.layout().addWidget(self._phone_screen_lbl)
+                except Exception:
+                    pass
+            pm = QPixmap.fromImage(img).scaledToWidth(280)
+            self._phone_screen_lbl.setPixmap(pm)
+            self._phone_screen_lbl.show()
+            self._log.append_log("SYS: Phone screen frame received")
+        except Exception as e:
+            try:
+                self._log.append_log(f"SYS: Phone screen error: {e}")
+            except Exception:
+                pass
+
     def notify_phone_connected(self) -> None:
         if self._remote_overlay and self._remote_overlay.isVisible():
             self._remote_overlay.mark_connected()
@@ -6579,6 +6614,34 @@ class JarvisUI:
             self._win.hud.push_visemes(frames, hop, at)
         except Exception:
             pass
+
+    def show_phone_screen_frame(self, b64_jpeg: str) -> None:
+        """Show latest phone screenshare frame in the content / log area."""
+        try:
+            import base64
+            from PyQt6.QtGui import QPixmap, QImage
+            raw = base64.b64decode(b64_jpeg)
+            img = QImage.fromData(raw, "JPEG")
+            if img.isNull():
+                return
+            if not hasattr(self, "_phone_screen_lbl") or self._phone_screen_lbl is None:
+                from PyQt6.QtWidgets import QLabel
+                self._phone_screen_lbl = QLabel()
+                self._phone_screen_lbl.setMinimumSize(200, 360)
+                self._phone_screen_lbl.setStyleSheet("background:#000; border:1px solid #1a2a3e; border-radius:8px;")
+                try:
+                    self._content_panel.layout().addWidget(self._phone_screen_lbl)
+                except Exception:
+                    pass
+            pm = QPixmap.fromImage(img).scaledToWidth(280)
+            self._phone_screen_lbl.setPixmap(pm)
+            self._phone_screen_lbl.show()
+            self._log.append_log("SYS: Phone screen frame received")
+        except Exception as e:
+            try:
+                self._log.append_log(f"SYS: Phone screen error: {e}")
+            except Exception:
+                pass
 
     def notify_phone_connected(self) -> None:
         self._win.notify_phone_connected()

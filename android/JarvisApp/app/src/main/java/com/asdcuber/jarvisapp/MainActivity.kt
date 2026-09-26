@@ -62,6 +62,9 @@ class MainActivity : AppCompatActivity() {
 
         requestStartupPermissions()
 
+        // Deep-link from notification (screenshot etc.)
+        handleJarvisAction(intent)
+
         connectBtn.setOnClickListener {
             val host = hostInput.text.toString().trim()
             val key = keyInput.text.toString().trim()
@@ -315,6 +318,52 @@ class MainActivity : AppCompatActivity() {
             if (i >= 0 && c.moveToFirst()) return c.getLong(i)
         }
         return -1L
+    }
+
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleJarvisAction(intent)
+    }
+
+    private fun handleJarvisAction(intent: Intent?) {
+        when (intent?.getStringExtra("jarvis_action")) {
+            "screenshot" -> {
+                try {
+                    startActivity(
+                        Intent(this, ScreenshotActivity::class.java)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                    appendLog("Screenshot requested…")
+                } catch (e: Exception) {
+                    appendLog("Screenshot open failed: ${e.message}")
+                }
+            }
+            "unlock" -> {
+                try {
+                    startActivity(
+                        Intent(this, UnlockActivity::class.java)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                    appendLog("Unlock/wake…")
+                } catch (e: Exception) {
+                    appendLog("Unlock: ${e.message}")
+                }
+            }
+            "screenshare" -> {
+                try {
+                    startActivity(
+                        Intent(this, ScreenshotActivity::class.java)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            .putExtra("mode", "share")
+                    )
+                    appendLog("Screen share permission…")
+                } catch (e: Exception) {
+                    appendLog("Share: ${e.message}")
+                }
+            }
+        }
     }
 
     private fun appendLog(line: String) {
