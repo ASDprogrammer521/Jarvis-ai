@@ -65,7 +65,6 @@ _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
 
 class C:
-    # Modern cinematic palette (Brahma Echo–inspired glass dark)
     BG        = "#03060b"
     PANEL     = "#080d16"
     PANEL2    = "#0c121c"
