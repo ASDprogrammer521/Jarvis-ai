@@ -1,8 +1,6 @@
 import platform as _platform
 import subprocess as _subprocess
 
-# ── Nuclear: force CREATE_NO_WINDOW on EVERY subprocess call on Windows ───────
-# This patches Popen itself, so no per-file flag is needed anywhere.
 if _platform.system() == "Windows":
     _OrigPopen = _subprocess.Popen
 
@@ -14,14 +12,6 @@ if _platform.system() == "Windows":
 
     _subprocess.Popen = _Popen
 
-
-# ── Console must survive non-UTF-8 code pages ────────────────────────────────
-# Every status line in this file carries an emoji, and on a legacy Windows
-# console the active code page is the system one — cp1254 in Turkey, cp1251 in
-# Russia, cp932 in Japan. Printing an emoji there raises UnicodeEncodeError, and
-# because most of these prints sit inside the receive loop it takes the session
-# down on startup. Reconfiguring to UTF-8 with a replacement fallback costs
-# nothing and makes the app launch the same way in every locale.
 import sys as _sys
 
 for _stream in ("stdout", "stderr"):
