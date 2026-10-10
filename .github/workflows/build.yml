@@ -30,13 +30,13 @@ jobs:
           python -m pip install pyinstaller
 
       - name: Build with PyInstaller (Jarvis.spec)
+        shell: pwsh
         run: |
           if (Test-Path Jarvis.spec) {
             python -m PyInstaller Jarvis.spec --noconfirm --clean
           } else {
             python -m PyInstaller --noconsole --name Jarvis --collect-all PyQt6 main.py
           }
-        shell: pwsh
 
       - name: Package zip
         shell: pwsh
@@ -55,6 +55,7 @@ jobs:
           }
           echo "ZIP_NAME=$name" >> $env:GITHUB_ENV
           echo "VERSION=$ver" >> $env:GITHUB_ENV
+          echo "TAG_NAME=v$ver-$short" >> $env:GITHUB_ENV
           Get-Item $name | Format-List Name, Length
 
       - name: Upload Artifact
@@ -65,28 +66,30 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Create / Update GitHub Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: windows-latest
-          name: Jarvis Windows (latest build)
+          tag_name: v${{ env.VERSION }}-${{ github.sha }}
+          name: Jarvis Windows v${{ env.VERSION }}
           body: |
             ## Jarvis AI — Windows build
-            Auto-built from `main` (commit ${{ github.sha }}).
+            Built from commit `${{ github.sha }}` on `${{ github.ref_name }}`.
 
-            **Python o'rnatish shart emas.**
+            **No Python install required.**
 
-            1. Download the `.zip` below
-            2. Extract
+            1. Download the `.zip` asset
+            2. Extract the archive
             3. Run `Jarvis.exe`
-            4. Enter Gemini API key on first launch
+            4. On first launch, enter your Gemini API key
 
-            SmartScreen: More info → Run anyway
+            ### Notes
+            - SmartScreen may warn (unsigned build): More info → Run anyway
+            - Keep the whole extracted folder together (DLLs next to the EXE)
 
             **By ASDcuber**
           files: Jarvis-Windows-x64-*.zip
           draft: false
           prerelease: false
-          make_latest: true
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
