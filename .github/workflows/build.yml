@@ -1,33 +1,92 @@
 name: Build Python to EXE
 
-on: [push]
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 90
 
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
 
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pyinstaller
-        # If your project requires other libraries, install them here:
-        # pip install requests discord.py
-    
-    - name: Compile to EXE using PyInstaller
-      run: |
-        pyinstaller --onefile --noconsole main.py
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip wheel
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
 
-    - name: Upload Artifact (EXE file)
-      uses: actions/upload-artifact@v4
-      with:
-        name: compiled-exe
-        path: dist/*.exe
+      - name: Build with PyInstaller (Jarvis.spec)
+        run: |
+          if (Test-Path Jarvis.spec) {
+            python -m PyInstaller Jarvis.spec --noconfirm --clean
+          } else {
+            python -m PyInstaller --noconsole --name Jarvis --collect-all PyQt6 main.py
+          }
+        shell: pwsh
+
+      - name: Package zip
+        shell: pwsh
+        run: |
+          $ver = "1.0.0"
+          if (Test-Path "VERSION") { $ver = (Get-Content VERSION -Raw).Trim() }
+          $short = $env:GITHUB_SHA.Substring(0, 7)
+          $name = "Jarvis-Windows-x64-v$ver-$short.zip"
+          if (Test-Path "dist\Jarvis") {
+            Compress-Archive -Path "dist\Jarvis\*" -DestinationPath $name -Force
+          } elseif (Test-Path "dist\Jarvis.exe") {
+            Compress-Archive -Path "dist\Jarvis.exe" -DestinationPath $name -Force
+          } else {
+            Get-ChildItem -Recurse dist | Select-Object FullName
+            throw "No dist output found"
+          }
+          echo "ZIP_NAME=$name" >> $env:GITHUB_ENV
+          echo "VERSION=$ver" >> $env:GITHUB_ENV
+          Get-Item $name | Format-List Name, Length
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jarvis-Windows-x64
+          path: Jarvis-Windows-x64-*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create / Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: windows-latest
+          name: Jarvis Windows (latest build)
+          body: |
+            ## Jarvis AI — Windows build
+            Auto-built from `main` (commit ${{ github.sha }}).
+
+            **Python o'rnatish shart emas.**
+
+            1. Download the `.zip` below
+            2. Extract
+            3. Run `Jarvis.exe`
+            4. Enter Gemini API key on first launch
+
+            SmartScreen: More info → Run anyway
+
+            **By ASDcuber**
+          files: Jarvis-Windows-x64-*.zip
+          draft: false
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
