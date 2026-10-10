@@ -8,10 +8,13 @@ on:
       - ".github/workflows/build-apk.yml"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
       - name: Checkout
@@ -23,6 +26,9 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Grant execute permission for gradlew
         working-directory: android/JarvisApp
         run: chmod +x gradlew
@@ -30,14 +36,67 @@ jobs:
       - name: Build debug APK
         working-directory: android/JarvisApp
         run: |
-          mkdir -p local.properties.d
           echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
           ./gradlew assembleDebug --no-daemon -Dorg.gradle.jvmargs="-Xmx2g"
+
+      - name: Prepare release asset
+        id: prep
+        run: |
+          VER="1.0.0"
+          if [ -f VERSION ]; then VER=$(tr -d '[:space:]' < VERSION); fi
+          SHORT="${GITHUB_SHA:0:7}"
+          SRC="android/JarvisApp/app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$SRC" ]; then
+            echo "APK not found at $SRC"
+            find android -name "*.apk" 2>/dev/null || true
+            exit 1
+          fi
+          NAME="JarvisApp-android-v${VER}-${SHORT}.apk"
+          cp "$SRC" "$NAME"
+          # Also keep a stable name for convenience
+          cp "$SRC" "JarvisApp-debug.apk"
+          echo "APK_NAME=$NAME" >> "$GITHUB_ENV"
+          echo "VERSION=$VER" >> "$GITHUB_ENV"
+          echo "SHORT=$SHORT" >> "$GITHUB_ENV"
+          ls -lh "$NAME" JarvisApp-debug.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: JarvisApp-debug
-          path: android/JarvisApp/app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            JarvisApp-android-*.apk
+            JarvisApp-debug.apk
           if-no-files-found: error
           retention-days: 90
+
+      - name: Create GitHub Release (Android)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-v${{ env.VERSION }}-${{ env.SHORT }}
+          name: Jarvis Android App v${{ env.VERSION }}
+          body: |
+            ## Jarvis App — Android APK
+            Built from commit `${{ github.sha }}`.
+
+            ### Install
+            1. Download `JarvisApp-android-*.apk` (or `JarvisApp-debug.apk`)
+            2. On your phone: allow install from unknown sources if needed
+            3. Open the APK and install
+            4. Grant notifications / required permissions
+            5. Connect with **PC IP** + **pairing key** from Jarvis on PC
+
+            ### Notes
+            - Same Wi‑Fi as the PC
+            - Set battery usage to **Unrestricted** for background link
+            - Windows desktop build is in a separate release
+
+            **By ASDcuber**
+          files: |
+            JarvisApp-android-*.apk
+            JarvisApp-debug.apk
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
