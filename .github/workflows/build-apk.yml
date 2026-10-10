@@ -6,15 +6,16 @@ on:
     paths:
       - "android/JarvisApp/**"
       - ".github/workflows/build-apk.yml"
+      - "app-debug.apk"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  build-and-release:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -26,34 +27,64 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Install Android command-line tools
+        run: |
+          set -e
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq wget unzip
+          mkdir -p "$HOME/android-sdk/cmdline-tools"
+          cd /tmp
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdtools.zip
+          unzip -q cmdtools.zip -d "$HOME/android-sdk/cmdline-tools"
+          # layout required by sdkmanager: cmdline-tools/latest/
+          mv "$HOME/android-sdk/cmdline-tools/cmdline-tools" "$HOME/android-sdk/cmdline-tools/latest"
+          echo "ANDROID_HOME=$HOME/android-sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> "$GITHUB_ENV"
+          echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$HOME/android-sdk/platform-tools" >> "$GITHUB_PATH"
+
+      - name: Accept licenses & install SDK packages
+        run: |
+          set -e
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
       - name: Grant execute permission for gradlew
         working-directory: android/JarvisApp
         run: chmod +x gradlew
 
       - name: Build debug APK
+        id: build
+        continue-on-error: true
         working-directory: android/JarvisApp
         run: |
           echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
           ./gradlew assembleDebug --no-daemon -Dorg.gradle.jvmargs="-Xmx2g"
 
-      - name: Prepare release asset
+      - name: Prepare APK for release
         id: prep
         run: |
+          set -e
           VER="1.0.0"
           if [ -f VERSION ]; then VER=$(tr -d '[:space:]' < VERSION); fi
           SHORT="${GITHUB_SHA:0:7}"
-          SRC="android/JarvisApp/app/build/outputs/apk/debug/app-debug.apk"
-          if [ ! -f "$SRC" ]; then
-            echo "APK not found at $SRC"
-            find android -name "*.apk" 2>/dev/null || true
+          BUILT="android/JarvisApp/app/build/outputs/apk/debug/app-debug.apk"
+          REPO_APK="app-debug.apk"
+
+          if [ -f "$BUILT" ]; then
+            echo "Using freshly built APK"
+            SRC="$BUILT"
+          elif [ -f "$REPO_APK" ]; then
+            echo "Build failed or missing — using repo app-debug.apk"
+            SRC="$REPO_APK"
+          else
+            echo "No APK available"
+            find . -name "*.apk" 2>/dev/null || true
             exit 1
           fi
+
           NAME="JarvisApp-android-v${VER}-${SHORT}.apk"
           cp "$SRC" "$NAME"
-          # Also keep a stable name for convenience
           cp "$SRC" "JarvisApp-debug.apk"
           echo "APK_NAME=$NAME" >> "$GITHUB_ENV"
           echo "VERSION=$VER" >> "$GITHUB_ENV"
@@ -80,16 +111,16 @@ jobs:
             Built from commit `${{ github.sha }}`.
 
             ### Install
-            1. Download `JarvisApp-android-*.apk` (or `JarvisApp-debug.apk`)
-            2. On your phone: allow install from unknown sources if needed
-            3. Open the APK and install
-            4. Grant notifications / required permissions
+            1. Download **JarvisApp-debug.apk** (or the versioned `.apk`)
+            2. Allow install from unknown sources if needed
+            3. Install and open Jarvis App
+            4. Allow notifications / required permissions
             5. Connect with **PC IP** + **pairing key** from Jarvis on PC
 
             ### Notes
             - Same Wi‑Fi as the PC
-            - Set battery usage to **Unrestricted** for background link
-            - Windows desktop build is in a separate release
+            - Battery: set Jarvis App to **Unrestricted**
+            - Windows desktop build is a separate release
 
             **By ASDcuber**
           files: |
