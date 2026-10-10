@@ -1,6 +1,8 @@
 import platform as _platform
 import subprocess as _subprocess
 
+# ── Nuclear: force CREATE_NO_WINDOW on EVERY subprocess call on Windows ───────
+# This patches Popen itself, so no per-file flag is needed anywhere.
 if _platform.system() == "Windows":
     _OrigPopen = _subprocess.Popen
 
@@ -12,6 +14,14 @@ if _platform.system() == "Windows":
 
     _subprocess.Popen = _Popen
 
+
+# ── Console must survive non-UTF-8 code pages ────────────────────────────────
+# Every status line in this file carries an emoji, and on a legacy Windows
+# console the active code page is the system one — cp1254 in Turkey, cp1251 in
+# Russia, cp932 in Japan. Printing an emoji there raises UnicodeEncodeError, and
+# because most of these prints sit inside the receive loop it takes the session
+# down on startup. Reconfiguring to UTF-8 with a replacement fallback costs
+# nothing and makes the app launch the same way in every locale.
 import sys as _sys
 
 for _stream in ("stdout", "stderr"):
@@ -79,13 +89,30 @@ from core.wake_word            import (
 WAKE_SLEEP_TIMEOUT = 120.0   # seconds (2 minutes)
 
 def get_base_dir():
+    """Writable base (config next to the EXE)."""
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+def get_resource_dir():
+    """Read-only bundled resources (PyInstaller _MEIPASS / _internal)."""
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            return Path(meipass)
+        return Path(sys.executable).resolve().parent / "_internal"
     return Path(__file__).resolve().parent
 
 BASE_DIR        = get_base_dir()
+RESOURCE_DIR    = get_resource_dir()
 API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
-PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
+# prompt ships inside the bundle
+_prompt_candidates = [
+    RESOURCE_DIR / "core" / "prompt.txt",
+    BASE_DIR / "core" / "prompt.txt",
+    BASE_DIR / "_internal" / "core" / "prompt.txt",
+]
+PROMPT_PATH = next((p for p in _prompt_candidates if p.is_file()), _prompt_candidates[0])
 LIVE_MODEL          = "models/gemini-3.1-flash-live-preview"
 CHANNELS            = 1
 SEND_SAMPLE_RATE    = 16000 

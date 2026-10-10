@@ -1,15 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller spec for Jarvis AI (Windows onedir — more reliable for PyQt6)
-from PyInstaller.utils.hooks import collect_all, collect_submodules
+import sys
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
 block_cipher = None
 
 datas = [
     ('dashboard/static', 'dashboard/static'),
+    ('dashboard', 'dashboard'),
     ('core/prompt.txt', 'core'),
     ('core/face_model.obj', 'core'),
     ('VERSION', '.'),
     ('plugins', 'plugins'),
+    ('actions', 'actions'),
 ]
 binaries = []
 hiddenimports = [
@@ -39,6 +42,8 @@ hiddenimports = [
     'starlette',
     'multipart',
     'websockets',
+    'yaml',
+    'cryptography',
 ]
 
 for pkg in ('google.genai', 'uvicorn', 'fastapi', 'starlette'):
@@ -83,7 +88,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,
+    console=False,  # GUI app — no black console window
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

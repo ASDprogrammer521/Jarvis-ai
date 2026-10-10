@@ -21,6 +21,16 @@ META = {
 
 
 def _plugins_dir() -> Path:
+    import sys
+    if getattr(sys, "frozen", False):
+        meipass = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        exe = Path(sys.executable).resolve().parent
+        for c in (exe / "plugins", meipass / "plugins", exe / "_internal" / "plugins"):
+            if c.is_dir():
+                return c
+        c = exe / "plugins"
+        c.mkdir(parents=True, exist_ok=True)
+        return c
     return Path(__file__).resolve().parent.parent / "plugins"
 
 

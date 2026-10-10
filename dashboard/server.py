@@ -15,6 +15,7 @@ import re
 import secrets
 import socket
 import string
+import sys
 import time
 from pathlib import Path
 
@@ -35,8 +36,32 @@ try:
 except Exception:
     pass
 
-BASE_DIR    = Path(__file__).resolve().parent.parent
-STATIC_DIR  = Path(__file__).parent / "static"
+
+def _resolve_dirs():
+    """Resolve BASE_DIR / STATIC_DIR for source and PyInstaller (frozen) builds."""
+    if getattr(sys, "frozen", False):
+        meipass = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        exe_dir = Path(sys.executable).resolve().parent
+        static_candidates = [
+            meipass / "dashboard" / "static",
+            exe_dir / "_internal" / "dashboard" / "static",
+            exe_dir / "dashboard" / "static",
+            meipass / "static",
+        ]
+        static = next((c for c in static_candidates if c.is_dir()), static_candidates[0])
+        base_candidates = [
+            exe_dir,
+            meipass,
+            static.parent.parent if static.name == "static" else meipass,
+        ]
+        base = next((c for c in base_candidates if c.is_dir()), exe_dir)
+        return base, static
+    base = Path(__file__).resolve().parent.parent
+    static = Path(__file__).resolve().parent / "static"
+    return base, static
+
+
+BASE_DIR, STATIC_DIR = _resolve_dirs()
 PORT        = 8000
 _ACTIVE_DASHBOARD = None  # set when DashboardServer starts
 
@@ -453,7 +478,13 @@ def _ensure_certs() -> bool:
 
 
 def _read(name: str) -> str:
-    return (STATIC_DIR / name).read_text(encoding="utf-8")
+    path = STATIC_DIR / name
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception as e:
+        print(f"[Dashboard] missing static file: {path} ({e})")
+        return f"<h2>Missing {name}</h2><p>STATIC_DIR={STATIC_DIR}</p>"
+
 
 
 # ── DashboardServer ───────────────────────────────────────────────────────────
@@ -1067,6 +1098,7 @@ class DashboardServer:
         )
 
         print(f"[Dashboard] http://{self._ip}:{PORT}")
+        print(f"[Dashboard] static={STATIC_DIR} exists={STATIC_DIR.is_dir()}")
         print(f"[Dashboard] Jarvis App:  http://{self._ip}:{PORT}/jarvis-app")
         print("[Dashboard] Press 'Remote Control' in JARVIS UI to get the pairing key.")
         await uvicorn.Server(cfg).serve()
