@@ -1,0 +1,33 @@
+name: Build Python to EXE
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller
+        # If your project requires other libraries, install them here:
+        # pip install requests discord.py
+    
+    - name: Compile to EXE using PyInstaller
+      run: |
+        pyinstaller --onefile --noconsole main.py
+
+    - name: Upload Artifact (EXE file)
+      uses: actions/upload-artifact@v4
+      with:
+        name: compiled-exe
+        path: dist/*.exe
