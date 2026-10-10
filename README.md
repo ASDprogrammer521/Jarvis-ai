@@ -2,6 +2,7 @@
 
 <p align="center">
 <img src="https://img.shields.io/badge/Python-3.11%2B-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python">
+<img src="https://img.shields.io/badge/Windows-EXE-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Windows EXE">
 <img src="https://img.shields.io/badge/Status-Active-success?style=for-the-badge" alt="Status">
 <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License">
 <img src="https://img.shields.io/badge/By-ASDcuber-orange?style=for-the-badge" alt="ASDcuber">
@@ -17,9 +18,47 @@ Voice, vision, desktop control, holographic HUD, and phone companion — one sys
 
 ---
 
-## 🚀 Getting Started
+## 📥 Download (no Python required)
 
-Follow these steps to set up and run the project:
+<p align="center">
+<a href="https://github.com/ASDprogrammer521/Jarvis-ai/releases/latest">
+<img src="https://img.shields.io/badge/Download-Windows%20EXE-blue?style=for-the-badge&logo=windows&logoColor=white" alt="Download Windows">
+</a>
+<a href="https://github.com/ASDprogrammer521/Jarvis-ai/releases/latest">
+<img src="https://img.shields.io/badge/Download-Android%20APK-brightgreen?style=for-the-badge&logo=android&logoColor=white" alt="Download APK">
+</a>
+</p>
+
+1. Open **[Releases](https://github.com/ASDprogrammer521/Jarvis-ai/releases/latest)**
+2. Download `Jarvis-Windows-x64-v*.zip`
+3. Extract the zip → run **`Jarvis.exe`**
+4. Enter your **Gemini API key** on first launch
+
+**Website / landing page:** link the same URL  
+`https://github.com/ASDprogrammer521/Jarvis-ai/releases/latest`
+
+> Windows may show SmartScreen (unsigned build) → **More info → Run anyway**.
+
+### Publish a new release (for maintainers)
+
+```bash
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+Or: **Actions → Build Windows EXE + Release → Run workflow** (optional tag input).
+
+Local build on Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1
+```
+
+---
+
+## 🚀 Getting Started (from source)
+
+Follow these steps if you prefer Python source:
 
 * 📦 **Step 1:** Install dependencies with **`setup.py`**:
 
@@ -51,8 +90,9 @@ python main.py
 | 🧠 **Memory** | Long-term facts you can view and delete |
 | 🔌 **Plugins + store** | Drop-in tools in `plugins/`; list / enable / disable |
 | 👤 **Profiles** | `home` · `work` · `game` presets |
-| 🔄 **Self-update** | Check GitHub (`ASDcuber/Jarvis-ai`) for updates |
+| 🔄 **Self-update** | Check GitHub for updates |
 | 🖥️ **Compact mode** | Floating always-on-top mic (F12) |
+| 💻 **Windows EXE** | Single-folder build via GitHub Releases — no Python install |
 
 ---
 
@@ -61,7 +101,7 @@ python main.py
 ### Option A — Android APK (recommended)
 
 <p align="center">
-<a href="https://github.com/ASDprogrammer521/Jarvis-ai/raw/main/app-debug.apk">
+<a href="https://github.com/ASDprogrammer521/Jarvis-ai/releases/latest">
 <img src="https://img.shields.io/badge/Download-Jarvis%20APK-brightgreen?style=for-the-badge&logo=android&logoColor=white" alt="Download APK">
 </a>
 </p>
@@ -98,21 +138,6 @@ Same Wi‑Fi required. Use **http** (not https) unless you configured certificat
 | Auto-reconnect | Service retries the link if the socket drops |
 | Background link | Foreground notification keeps the connection alive |
 
-### PC → phone commands (examples)
-
-- Open YouTube / Chrome / apps on the phone  
-- Send a file to the phone (`send_file`)  
-- Ask for notifications or location  
-- Notify / toast on the phone  
-
-### Quick URLs
-
-| URL | Purpose |
-| --- | ------- |
-| `/jarvis-app` or `/app` | Web phone companion |
-| `/` | Main remote dashboard |
-| `/login` | Pairing login |
-
 ### Troubleshooting
 
 - Test on the PC: `http://127.0.0.1:8000/jarvis-app`
@@ -120,10 +145,6 @@ Same Wi‑Fi required. Use **http** (not https) unless you configured certificat
 - Same Wi‑Fi (not guest isolation)  
 - **ADB is optional** — main path is Jarvis App reverse WebSocket  
 - Phone battery: set Jarvis App to **Unrestricted** so background link stays alive  
-
-```bash
-pip install fastapi "uvicorn[standard]" cryptography
-```
 
 ---
 
@@ -154,24 +175,21 @@ Top-left shows the live clock and date.
 ## 📁 Project structure
 
 ```text
-Mark-LIV-main/
+Jarvis-ai/
 ├── main.py                 # entry point
 ├── ui.py                   # user interface + HUD
 ├── setup.py                # dependency installer
+├── Jarvis.spec             # PyInstaller (Windows EXE)
 ├── requirements.txt
 ├── actions/                # built-in tools
-│   ├── phone_control.py
-│   ├── plugin_store.py
-│   ├── profile_switch.py
-│   └── ...
 ├── plugins/                # drop-in plugins
 ├── core/                   # avatar, audio, LLM, updater…
 ├── dashboard/              # remote server + web companion
-│   └── static/jarvis_app.html
 ├── android/JarvisApp/      # native Android companion source
+├── scripts/build_exe.ps1   # local Windows packaging
 ├── memory/                 # config + long-term memory
 ├── config/                 # API keys, certificates
-└── .github/workflows/      # APK build (GitHub Actions)
+└── .github/workflows/      # APK + Windows EXE releases
 ```
 
 ---
