@@ -56,6 +56,12 @@ def _read_full_config() -> dict:
     except Exception:
         return {}
 
+
+# Single source of truth for the release name — the window title, the header
+# badge and the readme must never disagree again.
+APP_VERSION  = "MARK LIV"
+APP_PROTOCOL = APP_VERSION.split()[-1]
+
 _DEFAULT_W, _DEFAULT_H = 980, 700
 _MIN_W,     _MIN_H     = 820, 580
 _LEFT_W  = 148
@@ -65,6 +71,7 @@ _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
 
 class C:
+    # Modern cinematic palette (Brahma Echo–inspired glass dark)
     BG        = "#03060b"
     PANEL     = "#080d16"
     PANEL2    = "#0c121c"
@@ -3599,7 +3606,7 @@ class MainWindow(QMainWindow):
         self._cmd_bar_host.setObjectName("CmdBarHost")
         self._cmd_bar_host.setStyleSheet(
             f"QWidget#CmdBarHost {{ background: rgba(3, 6, 11, 0.98); "
-            f"border-top: 1px solid rgba(0,212,255,0.12); }}"
+            f"border-top: 1px solid rgba(0,229,255,0.14); }}"
         )
         _cmd_lay = QVBoxLayout(self._cmd_bar_host)
         _cmd_lay.setContentsMargins(20, 10, 20, 10)
@@ -4204,71 +4211,60 @@ class MainWindow(QMainWindow):
 
 
     def _build_header(self) -> QWidget:
-        """Top navigation: Dashboard | Chat | Settings (clean pill tabs)."""
+        """Top bar: JARVIS logo · Dashboard | Chat | Settings · clock."""
         w = QWidget()
-        w.setFixedHeight(58)
+        w.setFixedHeight(56)
         w.setStyleSheet(
-            f"background: {C.DARK}; border-bottom: 1px solid rgba(255,255,255,0.06);"
+            f"background: rgba(2,5,8,0.96); border-bottom: 1px solid rgba(0,229,255,0.10);"
         )
         lay = QHBoxLayout(w)
-        lay.setContentsMargins(16, 0, 16, 0)
-        lay.setSpacing(12)
+        lay.setContentsMargins(18, 0, 18, 0)
+        lay.setSpacing(14)
 
-        # Top-left: live clock + date
-        clock_box = QVBoxLayout()
-        clock_box.setContentsMargins(0, 4, 0, 4)
-        clock_box.setSpacing(0)
-        self._clock_lbl = QLabel("--:--:--")
-        self._clock_lbl.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
-        self._clock_lbl.setStyleSheet(
-            f"color: {C.PRI}; background: transparent; letter-spacing: 1px;"
+        brand = QHBoxLayout()
+        brand.setSpacing(8)
+        logo = QLabel("◉")
+        logo.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+        logo.setStyleSheet(f"color: {C.PRI}; background: transparent;")
+        name = QLabel("JARVIS")
+        name.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        name.setStyleSheet(
+            f"color: {C.PRI}; letter-spacing: 3px; background: transparent;"
         )
-        self._date_lbl = QLabel("---")
-        self._date_lbl.setFont(QFont("Segoe UI", 9))
-        self._date_lbl.setStyleSheet(
-            f"color: {C.TEXT_MED}; background: transparent;"
-        )
-        clock_box.addWidget(self._clock_lbl)
-        clock_box.addWidget(self._date_lbl)
-        lay.addLayout(clock_box)
+        brand.addWidget(logo)
+        brand.addWidget(name)
+        lay.addLayout(brand)
+        lay.addSpacing(20)
 
-        lay.addStretch()
-
-        # Pill tab group
         tabs = QWidget()
         tabs.setObjectName("NavTabs")
-        tabs.setStyleSheet(
-            "QWidget#NavTabs { background: transparent; }"
-        )
+        tabs.setStyleSheet("QWidget#NavTabs { background: transparent; }")
         tlay = QHBoxLayout(tabs)
-        tlay.setContentsMargins(4, 4, 4, 4)
-        tlay.setSpacing(6)
+        tlay.setContentsMargins(0, 0, 0, 0)
+        tlay.setSpacing(4)
 
         def _make_tab(label: str, key: str) -> QPushButton:
             btn = QPushButton(label)
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-            btn.setFixedHeight(34)
-            btn.setMinimumWidth(100)
+            btn.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+            btn.setFixedHeight(32)
+            btn.setMinimumWidth(96)
             btn.setProperty("tab_key", key)
             btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: rgba(255,255,255,0.04);
-                    color: {C.TEXT_MED};
-                    border: 1px solid rgba(255,255,255,0.08);
-                    border-radius: 17px;
-                    padding: 0 18px;
+                    background: transparent;
+                    color: {C.TEXT_DIM};
+                    border: none;
+                    border-bottom: 2px solid transparent;
+                    border-radius: 0;
+                    padding: 0 14px;
                 }}
-                QPushButton:hover {{
-                    color: {C.WHITE};
-                    border-color: rgba(255,200,60,0.35);
-                }}
+                QPushButton:hover {{ color: {C.TEXT}; }}
                 QPushButton:checked {{
-                    background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                        stop:0 rgba(255,180,40,0.35), stop:1 rgba(255,140,20,0.45));
-                    color: #ffe9a8;
-                    border: 1px solid rgba(255,200,60,0.65);
+                    color: {C.PRI};
+                    border-bottom: 2px solid {C.PRI};
+                    background: rgba(0,229,255,0.06);
                 }}
             """)
             btn.clicked.connect(lambda _=False, k=key: self._on_nav_tab(k))
@@ -4283,17 +4279,29 @@ class MainWindow(QMainWindow):
         lay.addWidget(tabs)
         lay.addStretch()
 
-        # Keep hidden stubs so old code that references them does not crash
-        self._drawer_btn = QPushButton()
-        self._drawer_btn.setVisible(False)
-        self._title_lbl = QLabel(self._assistant_name.upper())
-        self._title_lbl.setVisible(False)
-        self._sub_lbl = QLabel("")
-        self._sub_lbl.setVisible(False)
-        # Default: dashboard (HUD) active
+        clock_box = QVBoxLayout()
+        clock_box.setContentsMargins(0, 6, 0, 6)
+        clock_box.setSpacing(0)
+        self._clock_lbl = QLabel("--:--:--")
+        self._clock_lbl.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        self._clock_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._clock_lbl.setStyleSheet(
+            f"color: {C.PRI}; background: transparent; letter-spacing: 1px;"
+        )
+        self._date_lbl = QLabel("---")
+        self._date_lbl.setFont(QFont("Segoe UI", 8))
+        self._date_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._date_lbl.setStyleSheet(
+            f"color: {C.TEXT_DIM}; background: transparent;"
+        )
+        clock_box.addWidget(self._clock_lbl)
+        clock_box.addWidget(self._date_lbl)
+        lay.addLayout(clock_box)
+
         self._tab_dashboard.setChecked(True)
         self._active_nav = "dashboard"
         return w
+
 
     def _on_nav_tab(self, key: str) -> None:
         """Dashboard = HUD · Chat = history · Settings = full page.
@@ -4372,20 +4380,7 @@ class MainWindow(QMainWindow):
                 # Put the real controls on top, full width, scrollable area host
                 if hasattr(self, "_quick_drawer") and self._quick_drawer is not None:
                     d = self._quick_drawer
-                    d.setParent(self._settings_page if hasattr(self, "_settings_page") else cw)
-                    d.setMinimumSize(0, 0)
-                    d.setMaximumSize(16777215, 16777215)
-                    # Leave room for SETTINGS header (~56px)
-                    d.setGeometry(20, 56, max(280, cw.width() - 40), max(200, cw.height() - 80))
-                    d.setStyleSheet(f"""
-                        QWidget#QuickDrawer {{
-                            background: {C.PANEL};
-                            border: 1px solid {C.BORDER_A};
-                            border-radius: 16px;
-                        }}
-                    """)
                     d.show()
-                    d.raise_()
                     d.setVisible(True)
             else:
                 if hasattr(self, "_settings_page"):
@@ -4599,7 +4594,7 @@ class MainWindow(QMainWindow):
         return w
 
     def _build_settings_page(self) -> QWidget:
-        """Full-screen settings — hosts the same controls as the old ⚙ drawer."""
+        """Full-screen settings — left sidebar + content (Jarvis clean aesthetic)."""
         page = QWidget(self.centralWidget())
         page.setObjectName("SettingsPage")
         page.setStyleSheet(f"""
@@ -4607,31 +4602,103 @@ class MainWindow(QMainWindow):
                 background: {C.BG};
             }}
         """)
-        lay = QVBoxLayout(page)
-        lay.setContentsMargins(20, 16, 20, 16)
-        lay.setSpacing(12)
+        root = QHBoxLayout(page)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        hdr = QHBoxLayout()
-        title = QLabel("SETTINGS")
-        title.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
-        title.setStyleSheet(
-            f"color: {C.WHITE}; letter-spacing: 3px; background: transparent;"
-        )
-        hdr.addWidget(title)
-        hdr.addStretch()
-        close_btn = QPushButton("✕  Close")
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.setFixedHeight(34)
-        close_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {C.PANEL2}; color: {C.TEXT_MED};
-                border: 1px solid {C.BORDER_A}; border-radius: 12px; padding: 0 14px;
+        side = QWidget()
+        side.setObjectName("SettingsSide")
+        side.setFixedWidth(220)
+        side.setStyleSheet(f"""
+            QWidget#SettingsSide {{
+                background: {C.PANEL};
+                border-right: 1px solid rgba(0,229,255,0.10);
             }}
-            QPushButton:hover {{ color: {C.WHITE}; border-color: {C.PRI}; }}
         """)
-        close_btn.clicked.connect(lambda: self._on_nav_tab("settings"))  # second click path closes only
-        hdr.addWidget(close_btn)
-        lay.addLayout(hdr)
+        sl = QVBoxLayout(side)
+        sl.setContentsMargins(16, 20, 16, 16)
+        sl.setSpacing(6)
+
+        brand_row = QHBoxLayout()
+        jmark = QLabel("J")
+        jmark.setFixedSize(36, 36)
+        jmark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        jmark.setStyleSheet(f"""
+            background: rgba(0,229,255,0.12); color: {C.PRI};
+            border: 1px solid rgba(0,229,255,0.35); border-radius: 18px;
+            font-weight: 800; font-size: 15px;
+        """)
+        brand_col = QVBoxLayout()
+        brand_col.setSpacing(0)
+        jt = QLabel("JARVIS")
+        jt.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        jt.setStyleSheet(f"color: {C.PRI}; letter-spacing: 1px; background: transparent;")
+        js = QLabel("Your intelligent assistant")
+        js.setFont(QFont("Segoe UI", 8))
+        js.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        brand_col.addWidget(jt)
+        brand_col.addWidget(js)
+        brand_row.addWidget(jmark)
+        brand_row.addLayout(brand_col)
+        sl.addLayout(brand_row)
+        sl.addSpacing(18)
+
+        def _side_btn(text: str, active: bool = False) -> QPushButton:
+            b = QPushButton(text)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setFixedHeight(38)
+            b.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+            if active:
+                b.setStyleSheet(f"""
+                    QPushButton {{
+                        text-align: left; padding-left: 14px;
+                        background: rgba(0,229,255,0.12); color: {C.PRI};
+                        border: 1px solid rgba(0,229,255,0.25); border-radius: 10px;
+                    }}
+                """)
+            else:
+                b.setStyleSheet(f"""
+                    QPushButton {{
+                        text-align: left; padding-left: 14px;
+                        background: transparent; color: {C.TEXT_MED};
+                        border: none; border-radius: 10px;
+                    }}
+                    QPushButton:hover {{ background: rgba(255,255,255,0.04); color: {C.TEXT}; }}
+                """)
+            return b
+
+        sl.addWidget(_side_btn("Settings", active=True))
+        for label in ("Help & Support", "Privacy", "About JARVIS"):
+            sl.addWidget(_side_btn(label))
+        sl.addStretch()
+        close_side = QPushButton("Back")
+        close_side.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_side.setFixedHeight(36)
+        close_side.setStyleSheet(f"""
+            QPushButton {{
+                text-align: left; padding-left: 14px;
+                background: transparent; color: {C.TEXT_DIM};
+                border: 1px solid rgba(255,255,255,0.06); border-radius: 10px;
+            }}
+            QPushButton:hover {{ color: {C.PRI}; border-color: {C.PRI}; }}
+        """)
+        close_side.clicked.connect(lambda: self._on_nav_tab("settings"))
+        sl.addWidget(close_side)
+        root.addWidget(side)
+
+        main = QWidget()
+        ml = QVBoxLayout(main)
+        ml.setContentsMargins(28, 22, 28, 18)
+        ml.setSpacing(12)
+
+        title = QLabel("Settings")
+        title.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
+        title.setStyleSheet(f"color: {C.WHITE}; background: transparent;")
+        ml.addWidget(title)
+        sub = QLabel("Customize your AI assistant experience")
+        sub.setFont(QFont("Segoe UI", 10))
+        sub.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        ml.addWidget(sub)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -4639,62 +4706,52 @@ class MainWindow(QMainWindow):
         scroll.setStyleSheet(f"""
             QScrollArea {{ background: transparent; border: none; }}
             QScrollBar:vertical {{
-                background: {C.PANEL}; width: 10px; border-radius: 5px;
+                background: {C.PANEL}; width: 8px; border-radius: 4px;
             }}
             QScrollBar::handle:vertical {{
-                background: {C.BORDER_B}; border-radius: 5px; min-height: 40px;
+                background: {C.BORDER_B}; border-radius: 4px; min-height: 36px;
             }}
         """)
 
         body = QWidget()
         body.setObjectName("SettingsBody")
-        body.setStyleSheet(f"""
-            QWidget#SettingsBody {{
-                background: {C.PANEL};
-                border: 1px solid {C.BORDER_A};
-                border-radius: 16px;
-            }}
-        """)
+        body.setStyleSheet("QWidget#SettingsBody { background: transparent; }")
         bl = QVBoxLayout(body)
-        bl.setContentsMargins(18, 18, 18, 18)
+        bl.setContentsMargins(0, 0, 8, 0)
         bl.setSpacing(10)
 
-        # Re-parent the original settings drawer so ALL old buttons remain
         if hasattr(self, "_quick_drawer") and self._quick_drawer is not None:
             d = self._quick_drawer
             d.setParent(body)
-            d.show()
-            d.setVisible(True)
-            # Remove fixed floating-panel constraints
             d.setMinimumSize(0, 0)
             d.setMaximumSize(16777215, 16777215)
-            d.setMinimumWidth(280)
-            d.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
-            # Drop any leftover floating geometry
-            d.adjustSize()
-            d.setStyleSheet(f"""
-                QWidget#QuickDrawer {{
+            d.setStyleSheet("""
+                QWidget#QuickDrawer {
                     background: transparent;
                     border: none;
-                }}
+                }
             """)
-            # Ensure every child button is visible and expands horizontally
-            for child in d.findChildren(QPushButton):
-                child.setVisible(True)
-                child.setMinimumHeight(30)
-                child.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            bl.addWidget(d, stretch=0)
-            bl.addStretch(0)
+            bl.addWidget(d)
         else:
-            miss = QLabel("Settings controls failed to load.")
-            miss.setStyleSheet(f"color: {C.RED};")
-            bl.addWidget(miss)
+            bl.addWidget(QLabel("Settings controls loading..."))
+
+        tip = QLabel("Tip  ·  Changes are saved automatically")
+        tip.setFont(QFont("Segoe UI", 9))
+        tip.setStyleSheet(f"""
+            color: {C.TEXT_DIM}; background: rgba(0,229,255,0.05);
+            border: 1px solid rgba(0,229,255,0.12); border-radius: 10px;
+            padding: 10px 14px;
+        """)
+        bl.addWidget(tip)
+        bl.addStretch()
 
         scroll.setWidget(body)
-        lay.addWidget(scroll, stretch=1)
+        ml.addWidget(scroll, stretch=1)
+        root.addWidget(main, stretch=1)
 
         page.hide()
         return page
+
 
     def _build_quick_drawer(self) -> QWidget:
         """Floating overlay panel shown when the ⚙ header button is toggled."""
@@ -4974,8 +5031,8 @@ class MainWindow(QMainWindow):
         bar.setFixedHeight(48)
         bar.setStyleSheet(f"""
             QFrame#AskBar {{
-                background: rgba(12, 18, 28, 0.95);
-                border: 1px solid rgba(0, 212, 255, 0.22);
+                background: rgba(8, 14, 22, 0.98);
+                border: 1px solid rgba(0, 229, 255, 0.28);
                 border-radius: 24px;
             }}
         """)
@@ -4999,7 +5056,7 @@ class MainWindow(QMainWindow):
         bl.addWidget(plus)
 
         self._input = QLineEdit()
-        self._input.setPlaceholderText("Ask anything")
+        self._input.setPlaceholderText("Ask JARVIS anything…")
         self._input.setFont(QFont("Segoe UI", 11))
         self._input.setStyleSheet(f"""
             QLineEdit {{
@@ -5511,7 +5568,7 @@ class MainWindow(QMainWindow):
         w = QWidget()
         w.setFixedHeight(28)
         w.setStyleSheet(
-            f"background: {C.DARK}; border-top: 1px solid rgba(0,212,255,0.12);"
+            f"background: {C.DARK}; border-top: 1px solid rgba(0,229,255,0.14);"
         )
         lay = QHBoxLayout(w); lay.setContentsMargins(18, 0, 18, 0)
 
