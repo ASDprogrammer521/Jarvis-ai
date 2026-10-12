@@ -6515,8 +6515,12 @@ class _RootShim:
 
 class JarvisUI:
     def __init__(self, face_path: str, size=None):
-        self._app = QApplication.instance() or QApplication(sys.argv)
+        # QApplication MUST exist before any QWidget/QMainWindow
+        self._app = QApplication.instance()
+        if self._app is None:
+            self._app = QApplication(sys.argv)
         self._app.setStyle("Fusion")
+        # Defer window build until app is fully ready
         self._win = MainWindow(face_path)
         self.root = _RootShim(self._app)
         self._win.show()

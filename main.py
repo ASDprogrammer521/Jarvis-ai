@@ -48,6 +48,17 @@ import sounddevice as sd
 import numpy as np
 from google import genai
 from google.genai import types
+
+# Early QApplication bootstrap — must exist before any QWidget is constructed
+# (including during ui import side-effects on some platforms).
+try:
+    from PyQt6.QtWidgets import QApplication as _QApplication
+    import sys as _sys_qt
+    if _QApplication.instance() is None:
+        _QApplication(_sys_qt.argv)
+except Exception:
+    pass
+
 from ui import JarvisUI
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
