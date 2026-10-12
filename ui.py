@@ -408,7 +408,14 @@ class HudCanvas(QWidget):
             from memory.config_manager import get_hud_style
             self.hud_style = get_hud_style()
         except Exception:
-            self.hud_style = "face"
+            self.hud_style = "sphere"
+        try:
+            _hs = str((_read_full_config() or {}).get("hud_style") or "sphere").lower()
+            if _hs in ("sphere", "core", "armor", "rings", "face"):
+                self.hud_style = _hs
+        except Exception:
+            pass
+
         self._core_phase = 0.0
 
         self._tick       = 0
@@ -831,14 +838,15 @@ class HudCanvas(QWidget):
             bright = QColor(220, 120, 100)
             white = QColor(255, 200, 180)
         else:
-            gold = QColor(255, 170, 30)
-            bright = QColor(255, 210, 60)
-            white = QColor(255, 245, 200)
-            try:
-                if QColor(C.PRI).hue() > 160:
-                    pass  # keep warm gold for this style
-            except Exception:
-                pass
+            # Clean aesthetic: follow app accent (ice blue / cyan)
+            base = QColor(C.PRI)
+            gold = base
+            bright = QColor(
+                min(255, base.red() + 40),
+                min(255, base.green() + 40),
+                min(255, base.blue() + 30),
+            )
+            white = QColor(230, 245, 255)
 
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         lift = 1.0 + 0.5 * amp + (0.25 if self.speaking else 0.0)
@@ -997,6 +1005,57 @@ class HudCanvas(QWidget):
             sz = 1.0 + 1.5 * abs(math.sin(t * 2.5 + i))
             p.setBrush(QColor(255, 230, 120, 100 + int(80 * abs(math.sin(t + i)))))
             p.drawEllipse(QPointF(px, py), sz, sz)
+
+
+    def _paint_rings(self, p: QPainter, cx: float, cy: float, r: float) -> None:
+        """Clean orbital rings — minimal aesthetic HUD."""
+        import math
+        t = getattr(self, "_t", 0.0) or (time.time() % 1000)
+        col = qcol(C.MUTED_C) if self.muted else qcol(C.PRI)
+        dim = QColor(col.red(), col.green(), col.blue(), 40)
+        mid = QColor(col.red(), col.green(), col.blue(), 110)
+        bright = QColor(col.red(), col.green(), col.blue(), 200)
+
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        # soft core
+        g = QRadialGradient(cx, cy, r * 0.55)
+        g.setColorAt(0.0, QColor(col.red(), col.green(), col.blue(), 90 if not self.muted else 40))
+        g.setColorAt(0.45, QColor(col.red(), col.green(), col.blue(), 25))
+        g.setColorAt(1.0, QColor(0, 0, 0, 0))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(g))
+        p.drawEllipse(QRectF(cx - r * 0.55, cy - r * 0.55, r * 1.1, r * 1.1))
+
+        # concentric rings
+        for i, (rr, a, w) in enumerate((
+            (0.28, 90, 1.5), (0.48, 70, 1.2), (0.68, 55, 1.0), (0.88, 40, 0.9),
+        )):
+            p.setPen(QPen(QColor(col.red(), col.green(), col.blue(), a), w))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawEllipse(QRectF(cx - r * rr, cy - r * rr, r * rr * 2, r * rr * 2))
+
+        # rotating arcs
+        for i, (rr, span, speed) in enumerate((
+            (0.58, 70, 0.7), (0.78, 50, -0.45), (0.95, 35, 0.3),
+        )):
+            ang = (t * speed * 60) % 360
+            p.setPen(QPen(bright, 2.2))
+            p.drawArc(
+                QRectF(cx - r * rr, cy - r * rr, r * rr * 2, r * rr * 2),
+                int(ang * 16), int(span * 16),
+            )
+
+        # center dot
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(bright)
+        p.drawEllipse(QPointF(cx, cy), 4.0, 4.0)
+        # amplitude pulse when listening/speaking
+        amp = float(getattr(self, "amp", 0.0) or 0.0)
+        if amp > 0.02 and not self.muted:
+            pr = r * (0.12 + 0.2 * min(1.0, amp))
+            p.setPen(QPen(mid, 1.5))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawEllipse(QRectF(cx - pr, cy - pr, pr * 2, pr * 2))
 
     def _paint_armor(self, p: QPainter, cx: float, cy: float, r: float) -> None:
         """Iron Man-style holographic upper-body wireframe + arc reactor."""
@@ -1161,8 +1220,12 @@ class HudCanvas(QWidget):
             _r = min(W * 0.42, _band_h / 2.0)
             self._paint_armor(p, cx, _band_t + _band_h / 2.0, _r)
 
+        elif self.hud_style == "rings":
+            _r = min(W * 0.44, _band_h / 2.0)
+            self._paint_rings(p, cx, _band_t + _band_h / 2.0, _r)
+
         else:
-            # reactor core — fallback and the classic look
+            # reactor core — fallback
             _r = min(W * 0.46, _band_h / 2.0)
             self._paint_core(p, cx, _band_t + _band_h / 2.0, _r, W, _band_h)
 
@@ -1378,8 +1441,8 @@ class MetricBar(QWidget):
         self._value = 0.0
         self._text  = "--"
         self._display = 0.0  # smoothed for animation
-        self.setFixedHeight(88)
-        self.setMinimumWidth(100)
+        self.setFixedHeight(78)
+        self.setMinimumWidth(96)
         self._anim_timer = QTimer(self)
         self._anim_timer.setInterval(33)
         self._anim_timer.timeout.connect(self._tick_anim)
@@ -4474,124 +4537,121 @@ class MainWindow(QMainWindow):
             pass
 
     def _build_left_panel(self) -> QWidget:
+        """Clean system metrics column."""
         w = QWidget()
         w.setFixedWidth(_LEFT_W)
-        w.setStyleSheet(
-            f"background: rgba(5, 10, 18, 0.96); border-right: 1px solid rgba(0,212,255,0.12);"
-        )
+        w.setStyleSheet(f"""
+            background: {C.PANEL};
+            border-right: 1px solid {C.BORDER};
+        """)
         lay = QVBoxLayout(w)
-        lay.setContentsMargins(10, 12, 10, 12)
-        lay.setSpacing(8)
+        lay.setContentsMargins(12, 16, 12, 16)
+        lay.setSpacing(10)
 
-        hdr = QLabel("SYS MONITOR")
-        hdr.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        hdr = QLabel("System")
+        hdr.setFont(QFont("Segoe UI", 11, QFont.Weight.DemiBold))
         hdr.setStyleSheet(
-            f"color: {C.WHITE}; background: transparent; "
-            f"border-bottom: 1px solid {C.BORDER_A}; padding-bottom: 8px; letter-spacing: 2px;"
+            f"color: {C.TEXT}; background: transparent; letter-spacing: 0.5px;"
         )
         lay.addWidget(hdr)
-        lay.addSpacing(4)
+
+        sub = QLabel("Live metrics")
+        sub.setFont(QFont("Segoe UI", 8))
+        sub.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        lay.addWidget(sub)
+        lay.addSpacing(6)
 
         self._bar_cpu = MetricBar("CPU", C.PRI)
-        self._bar_mem = MetricBar("MEM", C.ACC2)
+        self._bar_mem = MetricBar("MEM", C.PRI_DIM)
         self._bar_net = MetricBar("NET", C.GREEN)
         self._bar_gpu = MetricBar("GPU", C.ACC)
-        self._bar_tmp = MetricBar("TMP", "#ff6688")
+        self._bar_tmp = MetricBar("TMP", C.RED)
 
         for bar in [self._bar_cpu, self._bar_mem, self._bar_net,
                     self._bar_gpu, self._bar_tmp]:
             lay.addWidget(bar)
 
-        lay.addSpacing(4)
+        lay.addSpacing(8)
 
         info_panel = QWidget()
-        info_panel.setStyleSheet(
-            f"background: {C.PANEL2}; border: 1px solid {C.BORDER_A}; border-radius: 6px;"
-        )
+        info_panel.setObjectName("SysInfoCard")
+        info_panel.setStyleSheet(f"""
+            QWidget#SysInfoCard {{
+                background: {C.PANEL2};
+                border: 1px solid {C.BORDER};
+                border-radius: 12px;
+            }}
+        """)
         ip_lay = QVBoxLayout(info_panel)
-        ip_lay.setContentsMargins(8, 7, 8, 7)
-        ip_lay.setSpacing(4)
+        ip_lay.setContentsMargins(12, 10, 12, 10)
+        ip_lay.setSpacing(6)
 
-        self._uptime_lbl = QLabel("UP   --:--")
-        self._uptime_lbl.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._uptime_lbl = QLabel("Up  --:--")
+        self._uptime_lbl.setFont(QFont("Segoe UI", 9, QFont.Weight.DemiBold))
         self._uptime_lbl.setStyleSheet(f"color: {C.GREEN}; background: transparent; border: none;")
         ip_lay.addWidget(self._uptime_lbl)
 
-        self._proc_lbl = QLabel("PROC --")
-        self._proc_lbl.setFont(QFont("Courier New", 8))
+        self._proc_lbl = QLabel("Proc  --")
+        self._proc_lbl.setFont(QFont("Segoe UI", 9))
         self._proc_lbl.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent; border: none;")
         ip_lay.addWidget(self._proc_lbl)
 
-        os_name = {"Windows": "WIN", "Darwin": "macOS", "Linux": "LINUX"}.get(_OS, _OS.upper())
-        os_lbl = QLabel(f"OS   {os_name}")
-        os_lbl.setFont(QFont("Courier New", 8))
-        os_lbl.setStyleSheet(f"color: {C.ACC2}; background: transparent; border: none;")
+        os_name = {"Windows": "Windows", "Darwin": "macOS", "Linux": "Linux"}.get(_OS, _OS)
+        os_lbl = QLabel(f"OS  {os_name}")
+        os_lbl.setFont(QFont("Segoe UI", 9))
+        os_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent; border: none;")
         ip_lay.addWidget(os_lbl)
 
         lay.addWidget(info_panel)
-        lay.addSpacing(4)
-
         lay.addStretch()
-
         return w
+
     def _build_right_panel(self) -> QWidget:
-        """Chat history only — command bar lives at the bottom of the main window."""
+        """Clean chat history panel."""
         w = QWidget()
         w.setFixedWidth(_RIGHT_W)
-        w.setStyleSheet(
-            f"background: rgba(5, 10, 18, 0.96); border-left: 1px solid rgba(0,212,255,0.15);"
-        )
+        w.setStyleSheet(f"""
+            background: {C.PANEL};
+            border-left: 1px solid {C.BORDER};
+        """)
         lay = QVBoxLayout(w)
-        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setContentsMargins(14, 16, 14, 14)
         lay.setSpacing(10)
 
-        chat_hdr = QHBoxLayout()
-        pulse = QLabel("●")
-        pulse.setFont(QFont("Segoe UI", 10))
-        pulse.setStyleSheet(f"color: {C.GREEN}; background: transparent;")
-        chat_hdr.addWidget(pulse)
-        title = QLabel("CHAT")
-        title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
-        title.setStyleSheet(
-            f"color: {C.WHITE}; background: transparent; letter-spacing: 2px;"
-        )
-        chat_hdr.addWidget(title)
-        chat_hdr.addStretch()
-        lay.addLayout(chat_hdr)
+        top = QHBoxLayout()
+        hdr = QLabel("Chat")
+        hdr.setFont(QFont("Segoe UI", 13, QFont.Weight.DemiBold))
+        hdr.setStyleSheet(f"color: {C.TEXT}; background: transparent;")
+        top.addWidget(hdr)
+        top.addStretch()
+        clear_btn = QPushButton("Clear")
+        clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        clear_btn.setFixedHeight(28)
+        clear_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: {C.TEXT_DIM};
+                border: 1px solid {C.BORDER}; border-radius: 8px; padding: 0 12px;
+            }}
+            QPushButton:hover {{ color: {C.TEXT}; border-color: {C.PRI}; }}
+        """)
+        clear_btn.clicked.connect(lambda: self._log.clear() if hasattr(self, "_log") else None)
+        top.addWidget(clear_btn)
+        lay.addLayout(top)
 
         self._log = LogWidget()
         self._log.setStyleSheet(f"""
             QTextEdit {{
-                background: {C.PANEL};
-                color: {C.TEXT};
-                border: 1px solid {C.BORDER_A};
+                background: {C.PANEL2};
+                color: {C.TEXT_MED};
+                border: 1px solid {C.BORDER};
                 border-radius: 14px;
-                padding: 10px;
+                padding: 12px;
                 selection-background-color: {C.PRI_GHO};
             }}
         """)
         lay.addWidget(self._log, stretch=1)
-
-        # Hidden drop zone so + button / file upload still works
-        self._drop_zone = FileDropZone()
-        self._drop_zone.setVisible(False)
-        self._drop_zone.file_selected.connect(self._on_file_selected)
-        lay.addWidget(self._drop_zone)
-        self._file_hint = QLabel("")
-        self._file_hint.setVisible(False)
-        lay.addWidget(self._file_hint)
-
-        # Hidden mute/interrupt kept for API compatibility
-        self._interrupt_btn = QPushButton()
-        self._interrupt_btn.setVisible(False)
-        self._interrupt_btn.clicked.connect(self._do_interrupt)
-        lay.addWidget(self._interrupt_btn)
-        self._mute_btn = QPushButton()
-        self._mute_btn.setVisible(False)
-        self._mute_btn.clicked.connect(self._toggle_mute)
-        lay.addWidget(self._mute_btn)
-
         return w
+
 
     def _build_settings_page(self) -> QWidget:
         """Full-screen settings — left sidebar + content (Jarvis clean aesthetic)."""
@@ -4757,10 +4817,9 @@ class MainWindow(QMainWindow):
         """Floating overlay panel shown when the ⚙ header button is toggled."""
         _BTN_STYLE_PRI = f"""
             QPushButton {{
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                    stop:0 rgba(0,180,220,0.25), stop:1 rgba(0,100,140,0.35));
-                color: {C.WHITE};
-                border: 1px solid {C.PRI_DIM}; border-radius: 10px;
+                background: rgba(94,179,246,0.12);
+                color: {C.PRI};
+                border: 1px solid rgba(94,179,246,0.35); border-radius: 12px;
                 text-align: left; padding: 0 14px;
             }}
             QPushButton:hover {{
@@ -4802,7 +4861,7 @@ class MainWindow(QMainWindow):
             lab = QLabel(title)
             lab.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
             lab.setStyleSheet(
-                f"color: {C.PRI}; background: transparent; letter-spacing: 1.5px; margin-top: 6px;"
+                f"color: {C.TEXT_DIM}; background: transparent; letter-spacing: 1px; margin-top: 10px;"
             )
             lay.addWidget(lab)
 
@@ -5567,20 +5626,20 @@ class MainWindow(QMainWindow):
     def _build_footer(self) -> QWidget:
         w = QWidget()
         w.setFixedHeight(28)
-        w.setStyleSheet(
-            f"background: {C.DARK}; border-top: 1px solid rgba(0,229,255,0.14);"
-        )
-        lay = QHBoxLayout(w); lay.setContentsMargins(18, 0, 18, 0)
-
-        def _fl(txt, color=C.TEXT_MED):
-            l = QLabel(txt); l.setFont(QFont("Segoe UI", 9))
-            l.setStyleSheet(f"color: {color}; background: transparent;")
-            return l
-
-        lay.addWidget(_fl("[F4] Mute  ·  [F11] Fullscreen  ·  [F12] Compact"))
+        w.setStyleSheet(f"background: {C.DARK}; border-top: 1px solid {C.BORDER};")
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(16, 0, 16, 0)
+        tips = QLabel("[F4] Mute   [F11] Fullscreen   [F12] Compact")
+        tips.setFont(QFont("Segoe UI", 8))
+        tips.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        lay.addWidget(tips)
         lay.addStretch()
-        lay.addWidget(_fl("ASDcuber", C.TEXT_DIM))
+        brand = QLabel("ASDcuber")
+        brand.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
+        brand.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        lay.addWidget(brand)
         return w
+
 
     def _on_file_selected(self, path: str):
         self._current_file = path
@@ -5860,16 +5919,18 @@ class MainWindow(QMainWindow):
                 text-align: left; padding: 0 8px; }}
             QPushButton:hover {{ color: {C.WHITE}; border: 1px solid {C.BORDER_B}; }}"""
         labels = {
-            "face":   ("🧑  HUD: ANIMATED FACE",
-                       "Animated head with lip-sync."),
-            "core":   ("◉  HUD: REACTOR CORE",
-                       "Reactor core that reacts to voice."),
-            "sphere": ("🌐  HUD: HOLO SPHERE",
-                       "Golden holographic sphere."),
-            "armor":  ("🦾  HUD: IRON MAN ARMOR",
-                       "Holographic Iron Man suit + arc reactor."),
+            "sphere": ("HUD: HOLO SPHERE",
+                       "Clean holographic sphere."),
+            "core":   ("HUD: REACTOR CORE",
+                       "Arc reactor core."),
+            "armor":  ("HUD: ARMOR FRAME",
+                       "Holographic armor silhouette."),
+            "rings":  ("HUD: ORBITAL RINGS",
+                       "Minimal orbital rings."),
+            "face":   ("HUD: ANIMATED FACE",
+                       "Optional face (legacy)."),
         }
-        text, tip = labels.get(style_name, labels["face"])
+        text, tip = labels.get(style_name, labels.get("sphere", ("HUD", "")))
         self._hud_btn.setText(text)
         self._hud_btn.setStyleSheet(style)
         self._hud_btn.setToolTip(tip)
@@ -5877,7 +5938,7 @@ class MainWindow(QMainWindow):
     def _toggle_hud_style(self):
         """Cycle face → core → sphere → face. Instant, no reload."""
         from memory.config_manager import get_hud_style, save_hud_style
-        order = ("face", "core", "sphere", "armor")
+        order = ("sphere", "core", "armor", "rings")
         cur = get_hud_style()
         try:
             idx = order.index(cur)
@@ -5891,7 +5952,7 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         self._refresh_hud_btn()
-        names = {"face": "animated face", "core": "reactor core", "sphere": "holographic sphere", "armor": "Iron Man armor"}
+        names = {"sphere": "holographic sphere", "core": "reactor core", "armor": "armor frame", "rings": "orbital rings", "face": "animated face"}
         self._log.append_log(f"SYS: HUD switched to the {names.get(want, want)}.")
 
     def _refresh_profile_btns(self) -> None:
@@ -6515,12 +6576,16 @@ class _RootShim:
 
 class JarvisUI:
     def __init__(self, face_path: str, size=None):
-        # QApplication MUST exist before any QWidget/QMainWindow
+        # Single QApplication for the whole process (Windows qpa class register)
+        import os
+        os.environ.setdefault(
+            "QT_LOGGING_RULES",
+            "qt.qpa.windowclass=false;qt.qpa.*=false",
+        )
         self._app = QApplication.instance()
         if self._app is None:
             self._app = QApplication(sys.argv)
         self._app.setStyle("Fusion")
-        # Defer window build until app is fully ready
         self._win = MainWindow(face_path)
         self.root = _RootShim(self._app)
         self._win.show()
