@@ -71,16 +71,16 @@ _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
 
 class C:
-    # Clean minimal dark aesthetic
-    BG        = "#0b0e14"
-    PANEL     = "#12151c"
-    PANEL2    = "#181c26"
-    BORDER    = "#232836"
-    BORDER_B  = "#2e3548"
-    BORDER_A  = "#1c2230"
-    PRI       = "#5eb3f6"
-    PRI_DIM   = "#3d8fd4"
-    PRI_GHO   = "#1a3348"
+    # Premium mockup aesthetic — deep navy + soft violet/blue
+    BG        = "#0a0c14"
+    PANEL     = "#111527"
+    PANEL2    = "#161b2e"
+    BORDER    = "#252b42"
+    BORDER_B  = "#323a58"
+    BORDER_A  = "#1e2438"
+    PRI       = "#6b8cff"
+    PRI_DIM   = "#5a6fd4"
+    PRI_GHO   = "#1a2248"
     ACC       = "#ff9a3d"
     ACC2      = "#ffcc00"
     GREEN     = "#37ff8b"
@@ -4503,66 +4503,76 @@ class MainWindow(QMainWindow):
 
 
     def _build_header(self) -> QWidget:
-        """Top bar: JARVIS logo · Dashboard | Chat | Settings · clock."""
+        """Premium top bar matching settings mockup language."""
         w = QWidget()
         w.setFixedHeight(56)
-        w.setStyleSheet(
-            f"background: rgba(2,5,8,0.96); border-bottom: 1px solid rgba(0,229,255,0.10);"
-        )
+        w.setStyleSheet(f"""
+            background: {C.PANEL};
+            border-bottom: 1px solid {C.BORDER};
+        """)
         lay = QHBoxLayout(w)
-        lay.setContentsMargins(18, 0, 18, 0)
-        lay.setSpacing(14)
+        lay.setContentsMargins(16, 0, 16, 0)
+        lay.setSpacing(12)
 
-        brand = QHBoxLayout()
-        brand.setSpacing(8)
-        logo = QLabel("◉")
-        logo.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
-        logo.setStyleSheet(f"color: {C.PRI}; background: transparent;")
-        name = QLabel("JARVIS")
-        name.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
-        name.setStyleSheet(
-            f"color: {C.PRI}; letter-spacing: 3px; background: transparent;"
-        )
-        brand.addWidget(logo)
+        # Logo mark
+        logo = QLabel("▲")
+        logo.setFixedSize(32, 32)
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo.setStyleSheet("""
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+                stop:0 #5b8cff, stop:1 #9b5cff);
+            color: white; border-radius: 9px; font-size: 14px; font-weight: 800;
+        """)
+        lay.addWidget(logo)
+
+        brand = QVBoxLayout()
+        brand.setSpacing(0)
+        brand.setContentsMargins(0, 6, 0, 6)
+        name = QLabel("JARVIS AI")
+        name.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        name.setStyleSheet(f"color: {C.TEXT}; background: transparent; letter-spacing: 0.5px;")
+        sub = QLabel("Your AI Assistant")
+        sub.setFont(QFont("Segoe UI", 7))
+        sub.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
         brand.addWidget(name)
+        brand.addWidget(sub)
         lay.addLayout(brand)
-        lay.addSpacing(20)
 
+        lay.addSpacing(16)
+
+        # Tabs as soft pills
         tabs = QWidget()
-        tabs.setObjectName("NavTabs")
-        tabs.setStyleSheet("QWidget#NavTabs { background: transparent; }")
+        tabs.setStyleSheet("background: transparent;")
         tlay = QHBoxLayout(tabs)
         tlay.setContentsMargins(0, 0, 0, 0)
-        tlay.setSpacing(4)
+        tlay.setSpacing(6)
 
         def _make_tab(label: str, key: str) -> QPushButton:
             btn = QPushButton(label)
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+            btn.setFont(QFont("Segoe UI", 9, QFont.Weight.DemiBold))
             btn.setFixedHeight(32)
-            btn.setMinimumWidth(96)
+            btn.setMinimumWidth(88)
             btn.setProperty("tab_key", key)
             btn.setStyleSheet(f"""
                 QPushButton {{
                     background: transparent;
                     color: {C.TEXT_DIM};
                     border: none;
-                    border-bottom: 2px solid transparent;
-                    border-radius: 0;
+                    border-radius: 10px;
                     padding: 0 14px;
                 }}
-                QPushButton:hover {{ color: {C.TEXT}; }}
+                QPushButton:hover {{ color: {C.TEXT}; background: rgba(255,255,255,0.04); }}
                 QPushButton:checked {{
-                    color: {C.PRI};
-                    border-bottom: 2px solid {C.PRI};
-                    background: rgba(0,229,255,0.06);
+                    color: {C.WHITE};
+                    background: rgba(107,140,255,0.18);
                 }}
             """)
             btn.clicked.connect(lambda _=False, k=key: self._on_nav_tab(k))
             return btn
 
-        self._tab_dashboard = _make_tab("Dashboard", "dashboard")
+        self._tab_dashboard = _make_tab("Home", "dashboard")
         self._tab_chat = _make_tab("Chat", "chat")
         self._tab_settings = _make_tab("Settings", "settings")
         tlay.addWidget(self._tab_dashboard)
@@ -4571,21 +4581,30 @@ class MainWindow(QMainWindow):
         lay.addWidget(tabs)
         lay.addStretch()
 
+        # Online pill
+        online = QLabel("●  Online")
+        online.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
+        online.setStyleSheet(f"""
+            color: {C.GREEN};
+            background: rgba(55,255,139,0.08);
+            border: 1px solid rgba(55,255,139,0.22);
+            border-radius: 11px;
+            padding: 4px 10px;
+        """)
+        lay.addWidget(online)
+
+        # Clock
         clock_box = QVBoxLayout()
-        clock_box.setContentsMargins(0, 6, 0, 6)
+        clock_box.setContentsMargins(8, 8, 0, 8)
         clock_box.setSpacing(0)
         self._clock_lbl = QLabel("--:--:--")
-        self._clock_lbl.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        self._clock_lbl.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
         self._clock_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self._clock_lbl.setStyleSheet(
-            f"color: {C.PRI}; background: transparent; letter-spacing: 1px;"
-        )
+        self._clock_lbl.setStyleSheet(f"color: {C.TEXT}; background: transparent;")
         self._date_lbl = QLabel("---")
-        self._date_lbl.setFont(QFont("Segoe UI", 8))
+        self._date_lbl.setFont(QFont("Segoe UI", 7))
         self._date_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self._date_lbl.setStyleSheet(
-            f"color: {C.TEXT_DIM}; background: transparent;"
-        )
+        self._date_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
         clock_box.addWidget(self._clock_lbl)
         clock_box.addWidget(self._date_lbl)
         lay.addLayout(clock_box)
@@ -4774,7 +4793,7 @@ class MainWindow(QMainWindow):
             border-right: 1px solid {C.BORDER};
         """)
         lay = QVBoxLayout(w)
-        lay.setContentsMargins(12, 16, 12, 16)
+        lay.setContentsMargins(14, 18, 14, 16)
         lay.setSpacing(10)
 
         hdr = QLabel("System")
@@ -4883,7 +4902,7 @@ class MainWindow(QMainWindow):
 
 
     def _build_settings_page(self) -> QWidget:
-        """Full-screen settings — left sidebar + content (Jarvis clean aesthetic)."""
+        """Premium card-grid settings — mockup style (no Performance section)."""
         page = QWidget(self.centralWidget())
         page.setObjectName("SettingsPage")
         page.setStyleSheet(f"""
@@ -4895,148 +4914,311 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
+        # ── Left navigation ─────────────────────────────────────────────
         side = QWidget()
-        side.setObjectName("SettingsSide")
-        side.setFixedWidth(220)
+        side.setObjectName("SettingsNav")
+        side.setFixedWidth(210)
         side.setStyleSheet(f"""
-            QWidget#SettingsSide {{
+            QWidget#SettingsNav {{
                 background: {C.PANEL};
-                border-right: 1px solid rgba(0,229,255,0.10);
+                border-right: 1px solid {C.BORDER};
             }}
         """)
         sl = QVBoxLayout(side)
-        sl.setContentsMargins(16, 20, 16, 16)
-        sl.setSpacing(6)
+        sl.setContentsMargins(14, 18, 14, 14)
+        sl.setSpacing(4)
 
-        brand_row = QHBoxLayout()
-        jmark = QLabel("J")
-        jmark.setFixedSize(36, 36)
-        jmark.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        jmark.setStyleSheet(f"""
-            background: rgba(0,229,255,0.12); color: {C.PRI};
-            border: 1px solid rgba(0,229,255,0.35); border-radius: 18px;
-            font-weight: 800; font-size: 15px;
+        brand = QHBoxLayout()
+        logo = QLabel("▲")
+        logo.setFixedSize(36, 36)
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo.setStyleSheet(f"""
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+                stop:0 #5b8cff, stop:1 #9b5cff);
+            color: white; border-radius: 10px; font-size: 16px; font-weight: 700;
         """)
-        brand_col = QVBoxLayout()
-        brand_col.setSpacing(0)
-        jt = QLabel("JARVIS")
-        jt.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
-        jt.setStyleSheet(f"color: {C.PRI}; letter-spacing: 1px; background: transparent;")
-        js = QLabel("Your intelligent assistant")
-        js.setFont(QFont("Segoe UI", 8))
-        js.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
-        brand_col.addWidget(jt)
-        brand_col.addWidget(js)
-        brand_row.addWidget(jmark)
-        brand_row.addLayout(brand_col)
-        sl.addLayout(brand_row)
-        sl.addSpacing(18)
+        bc = QVBoxLayout(); bc.setSpacing(0)
+        bt = QLabel("JARVIS AI")
+        bt.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        bt.setStyleSheet(f"color: {C.TEXT}; background: transparent;")
+        bs = QLabel("Your AI Assistant")
+        bs.setFont(QFont("Segoe UI", 8))
+        bs.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        bc.addWidget(bt); bc.addWidget(bs)
+        brand.addWidget(logo); brand.addLayout(bc)
+        sl.addLayout(brand)
+        sl.addSpacing(16)
 
-        def _side_btn(text: str, active: bool = False) -> QPushButton:
+        def _nav(text: str, active: bool = False) -> QPushButton:
             b = QPushButton(text)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setFixedHeight(38)
-            b.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+            b.setFixedHeight(36)
+            b.setFont(QFont("Segoe UI", 9, QFont.Weight.DemiBold))
             if active:
                 b.setStyleSheet(f"""
                     QPushButton {{
-                        text-align: left; padding-left: 14px;
-                        background: rgba(0,229,255,0.12); color: {C.PRI};
-                        border: 1px solid rgba(0,229,255,0.25); border-radius: 10px;
+                        text-align: left; padding-left: 12px;
+                        background: rgba(94,179,246,0.14); color: {C.PRI};
+                        border: none; border-radius: 10px;
                     }}
                 """)
             else:
                 b.setStyleSheet(f"""
                     QPushButton {{
-                        text-align: left; padding-left: 14px;
+                        text-align: left; padding-left: 12px;
                         background: transparent; color: {C.TEXT_MED};
                         border: none; border-radius: 10px;
                     }}
-                    QPushButton:hover {{ background: rgba(255,255,255,0.04); color: {C.TEXT}; }}
+                    QPushButton:hover {{
+                        background: rgba(255,255,255,0.05); color: {C.TEXT};
+                    }}
                 """)
             return b
 
-        sl.addWidget(_side_btn("Settings", active=True))
-        for label in ("Help & Support", "Privacy", "About JARVIS"):
-            sl.addWidget(_side_btn(label))
+        sl.addWidget(_nav("Settings", active=True))
+        for name in ("General", "Appearance", "Voice & AI", "Hotkeys", "Privacy", "Plugins"):
+            sl.addWidget(_nav(name))
         sl.addStretch()
-        close_side = QPushButton("Back")
-        close_side.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_side.setFixedHeight(36)
-        close_side.setStyleSheet(f"""
+
+        back = QPushButton("←  Back to Dashboard")
+        back.setCursor(Qt.CursorShape.PointingHandCursor)
+        back.setFixedHeight(34)
+        back.setStyleSheet(f"""
             QPushButton {{
-                text-align: left; padding-left: 14px;
+                text-align: left; padding-left: 12px;
                 background: transparent; color: {C.TEXT_DIM};
-                border: 1px solid rgba(255,255,255,0.06); border-radius: 10px;
+                border: 1px solid {C.BORDER}; border-radius: 10px;
             }}
             QPushButton:hover {{ color: {C.PRI}; border-color: {C.PRI}; }}
         """)
-        close_side.clicked.connect(lambda: self._on_nav_tab("settings"))
-        sl.addWidget(close_side)
+        back.clicked.connect(lambda: self._on_nav_tab("settings"))
+        sl.addWidget(back)
+        ver = QLabel("v3.1.0")
+        ver.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent; padding-left: 4px;")
+        ver.setFont(QFont("Segoe UI", 8))
+        sl.addWidget(ver)
         root.addWidget(side)
 
+        # ── Main column ─────────────────────────────────────────────────
         main = QWidget()
         ml = QVBoxLayout(main)
-        ml.setContentsMargins(28, 22, 28, 18)
+        ml.setContentsMargins(24, 18, 24, 16)
         ml.setSpacing(12)
 
+        title_row = QHBoxLayout()
         title = QLabel("Settings")
-        title.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
+        title.setFont(QFont("Segoe UI", 22, QFont.Weight.Bold))
         title.setStyleSheet(f"color: {C.WHITE}; background: transparent;")
-        ml.addWidget(title)
-        sub = QLabel("Customize your AI assistant experience")
+        title_row.addWidget(title)
+        title_row.addStretch()
+        online = QLabel("●  Online")
+        online.setFont(QFont("Segoe UI", 9, QFont.Weight.DemiBold))
+        online.setStyleSheet(f"""
+            color: {C.GREEN}; background: rgba(55,255,139,0.08);
+            border: 1px solid rgba(55,255,139,0.25); border-radius: 12px;
+            padding: 4px 12px;
+        """)
+        title_row.addWidget(online)
+        ml.addLayout(title_row)
+
+        sub = QLabel("Customize your JARVIS AI experience")
         sub.setFont(QFont("Segoe UI", 10))
         sub.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
         ml.addWidget(sub)
 
+        # Body: cards + controls
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setStyleSheet(f"""
             QScrollArea {{ background: transparent; border: none; }}
             QScrollBar:vertical {{
-                background: {C.PANEL}; width: 8px; border-radius: 4px;
+                background: transparent; width: 8px;
             }}
             QScrollBar::handle:vertical {{
-                background: {C.BORDER_B}; border-radius: 4px; min-height: 36px;
+                background: {C.BORDER_B}; border-radius: 4px; min-height: 32px;
             }}
         """)
 
         body = QWidget()
-        body.setObjectName("SettingsBody")
-        body.setStyleSheet("QWidget#SettingsBody { background: transparent; }")
+        body.setStyleSheet("background: transparent;")
         bl = QVBoxLayout(body)
-        bl.setContentsMargins(0, 0, 8, 0)
-        bl.setSpacing(10)
+        bl.setContentsMargins(0, 4, 6, 8)
+        bl.setSpacing(14)
+
+        # Top row: three info cards (visual)
+        cards = QHBoxLayout()
+        cards.setSpacing(12)
+
+        def _info_card(title: str, subtitle: str) -> QWidget:
+            c = QWidget()
+            c.setStyleSheet(f"""
+                background: {C.PANEL};
+                border: 1px solid {C.BORDER};
+                border-radius: 16px;
+            """)
+            cl = QVBoxLayout(c)
+            cl.setContentsMargins(16, 14, 16, 14)
+            cl.setSpacing(4)
+            t1 = QLabel(title)
+            t1.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+            t1.setStyleSheet(f"color: {C.TEXT}; background: transparent;")
+            t2 = QLabel(subtitle)
+            t2.setFont(QFont("Segoe UI", 8))
+            t2.setWordWrap(True)
+            t2.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+            cl.addWidget(t1)
+            cl.addWidget(t2)
+            return c
+
+        cards.addWidget(_info_card("General", "Assistant name, autostart, compact mode"))
+        cards.addWidget(_info_card("Appearance", "Theme, HUD models, accent color"))
+        cards.addWidget(_info_card("Voice & AI", "Wake word, voice, audio devices"))
+        bl.addLayout(cards)
+
+        cards2 = QHBoxLayout()
+        cards2.setSpacing(12)
+        cards2.addWidget(_info_card("Hotkeys", "F4 Mute · F11 Fullscreen · F12 Compact · Esc"))
+        cards2.addWidget(_info_card("Privacy", "Local memory, API keys stay on your PC"))
+        cards2.addWidget(_info_card("Plugins", "Plugin manager & plugin store"))
+        bl.addLayout(cards2)
+
+        # Live controls card (existing drawer)
+        controls = QWidget()
+        controls.setObjectName("ControlsCard")
+        controls.setStyleSheet(f"""
+            QWidget#ControlsCard {{
+                background: {C.PANEL};
+                border: 1px solid {C.BORDER};
+                border-radius: 16px;
+            }}
+        """)
+        cl = QVBoxLayout(controls)
+        cl.setContentsMargins(16, 14, 16, 14)
+        cl.setSpacing(8)
+        ch = QLabel("All controls")
+        ch.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        ch.setStyleSheet(f"color: {C.TEXT}; background: transparent;")
+        cl.addWidget(ch)
+        cs = QLabel("Changes save automatically")
+        cs.setFont(QFont("Segoe UI", 8))
+        cs.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        cl.addWidget(cs)
 
         if hasattr(self, "_quick_drawer") and self._quick_drawer is not None:
             d = self._quick_drawer
-            d.setParent(body)
+            d.setParent(controls)
             d.setMinimumSize(0, 0)
             d.setMaximumSize(16777215, 16777215)
-            d.setStyleSheet("""
-                QWidget#QuickDrawer {
+            d.setStyleSheet(f"""
+                QWidget#QuickDrawer {{
                     background: transparent;
                     border: none;
-                }
+                }}
             """)
-            bl.addWidget(d)
+            cl.addWidget(d)
         else:
-            bl.addWidget(QLabel("Settings controls loading..."))
+            cl.addWidget(QLabel("Loading controls…"))
 
-        tip = QLabel("Tip  ·  Changes are saved automatically")
+        bl.addWidget(controls)
+
+        # Bottom actions
+        actions = QHBoxLayout()
+        actions.addStretch()
+        tip = QLabel("Tip · Settings apply instantly")
+        tip.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
         tip.setFont(QFont("Segoe UI", 9))
-        tip.setStyleSheet(f"""
-            color: {C.TEXT_DIM}; background: rgba(0,229,255,0.05);
-            border: 1px solid rgba(0,229,255,0.12); border-radius: 10px;
-            padding: 10px 14px;
-        """)
-        bl.addWidget(tip)
+        actions.addWidget(tip)
+        bl.addLayout(actions)
         bl.addStretch()
 
         scroll.setWidget(body)
         ml.addWidget(scroll, stretch=1)
         root.addWidget(main, stretch=1)
+
+        # ── Right column: brand + quick ─────────────────────────────────
+        right = QWidget()
+        right.setFixedWidth(240)
+        rl = QVBoxLayout(right)
+        rl.setContentsMargins(0, 18, 18, 16)
+        rl.setSpacing(12)
+
+        brand_card = QWidget()
+        brand_card.setStyleSheet(f"""
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+                stop:0 #12182a, stop:1 #1a1040);
+            border: 1px solid {C.BORDER};
+            border-radius: 16px;
+        """)
+        bcl = QVBoxLayout(brand_card)
+        bcl.setContentsMargins(18, 22, 18, 22)
+        bcl.setSpacing(8)
+        bcl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mark = QLabel("▲")
+        mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mark.setFixedSize(64, 64)
+        mark.setStyleSheet("""
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+                stop:0 #5b8cff, stop:1 #9b5cff);
+            color: white; border-radius: 32px; font-size: 26px; font-weight: 800;
+        """)
+        bcl.addWidget(mark, alignment=Qt.AlignmentFlag.AlignCenter)
+        bn = QLabel("JARVIS AI")
+        bn.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        bn.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        bn.setStyleSheet(f"color: {C.WHITE}; background: transparent;")
+        bcl.addWidget(bn)
+        bd = QLabel("Intelligent · Fast · Yours")
+        bd.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        bd.setFont(QFont("Segoe UI", 9))
+        bd.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        bcl.addWidget(bd)
+        quote = QLabel('"The best way to predict\nthe future is to create it."')
+        quote.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        quote.setFont(QFont("Segoe UI", 8))
+        quote.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent; margin-top: 8px;")
+        bcl.addWidget(quote)
+        rl.addWidget(brand_card)
+
+        quick = QWidget()
+        quick.setStyleSheet(f"""
+            background: {C.PANEL};
+            border: 1px solid {C.BORDER};
+            border-radius: 16px;
+        """)
+        ql = QVBoxLayout(quick)
+        ql.setContentsMargins(14, 14, 14, 14)
+        ql.setSpacing(8)
+        qt = QLabel("Quick actions")
+        qt.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        qt.setStyleSheet(f"color: {C.TEXT}; background: transparent;")
+        ql.addWidget(qt)
+
+        def _qbtn(text, slot):
+            b = QPushButton(text)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setFixedHeight(34)
+            b.setStyleSheet(f"""
+                QPushButton {{
+                    text-align: left; padding-left: 12px;
+                    background: rgba(255,255,255,0.03); color: {C.TEXT_MED};
+                    border: 1px solid {C.BORDER}; border-radius: 10px;
+                }}
+                QPushButton:hover {{
+                    color: {C.PRI}; border-color: {C.PRI};
+                    background: rgba(94,179,246,0.08);
+                }}
+            """)
+            b.clicked.connect(slot)
+            return b
+
+        ql.addWidget(_qbtn("Remote / Phone link", self._open_remote))
+        ql.addWidget(_qbtn("Compact mode  [F12]", self._enter_compact_mode))
+        ql.addWidget(_qbtn("Fullscreen  [F11]", self._toggle_fullscreen))
+        ql.addWidget(_qbtn("Toggle mute  [F4]", self._toggle_mute))
+        rl.addWidget(quick)
+        rl.addStretch()
+        root.addWidget(right)
 
         page.hide()
         return page
@@ -5319,9 +5501,9 @@ class MainWindow(QMainWindow):
         bar.setFixedHeight(48)
         bar.setStyleSheet(f"""
             QFrame#AskBar {{
-                background: rgba(8, 14, 22, 0.98);
-                border: 1px solid rgba(0, 229, 255, 0.28);
-                border-radius: 24px;
+                background: {C.PANEL2};
+                border: 1px solid {C.BORDER};
+                border-radius: 16px;
             }}
         """)
         bl = QHBoxLayout(bar)
@@ -5344,7 +5526,7 @@ class MainWindow(QMainWindow):
         bl.addWidget(plus)
 
         self._input = QLineEdit()
-        self._input.setPlaceholderText("Ask JARVIS anything…")
+        self._input.setPlaceholderText("Ask me anything…")
         self._input.setFont(QFont("Segoe UI", 11))
         self._input.setStyleSheet(f"""
             QLineEdit {{
@@ -5356,19 +5538,19 @@ class MainWindow(QMainWindow):
         bl.addWidget(self._input, stretch=1)
 
         # Mic toggle
-        mic = QPushButton("🎤")
-        mic.setFixedSize(34, 34)
-        mic.setCursor(Qt.CursorShape.PointingHandCursor)
-        mic.setToolTip("Toggle microphone")
-        mic.setStyleSheet(f"""
+        self._mic_btn = QPushButton("🎤")
+        self._mic_btn.setFixedSize(34, 34)
+        self._mic_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._mic_btn.setToolTip("Toggle microphone (F4)")
+        self._mic_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent; color: {C.TEXT_MED};
                 border: none; border-radius: 17px; font-size: 14px;
             }}
             QPushButton:hover {{ background: rgba(255,255,255,0.08); }}
         """)
-        mic.clicked.connect(self._toggle_mute)
-        bl.addWidget(mic)
+        self._mic_btn.clicked.connect(self._toggle_mute)
+        bl.addWidget(self._mic_btn)
 
         # Send / voice orb
         send = QPushButton("✦")
@@ -5377,11 +5559,12 @@ class MainWindow(QMainWindow):
         send.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
         send.setStyleSheet(f"""
             QPushButton {{
-                background: #0a84ff; color: white;
-                border: none; border-radius: 18px;
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+                    stop:0 #5b8cff, stop:1 #9b5cff);
+                color: white; border: none; border-radius: 18px;
             }}
-            QPushButton:hover {{ background: #2997ff; }}
-            QPushButton:pressed {{ background: #0066cc; }}
+            QPushButton:hover {{ background: #7a9fff; }}
+            QPushButton:pressed {{ background: #4a6fd4; }}
         """)
         send.clicked.connect(self._send)
         bl.addWidget(send)
@@ -6728,23 +6911,29 @@ class MainWindow(QMainWindow):
             self._log.append_log("SYS: Microphone active.")
 
     def _style_mute_btn(self):
+        """Update mic control appearance if the button exists."""
+        btn = getattr(self, "_mic_btn", None) or getattr(self, "_mute_btn", None)
+        if btn is None:
+            return
         if self._muted:
-            self._mute_btn.setText("🔇  MICROPHONE MUTED")
-            self._mute_btn.setStyleSheet(f"""
+            btn.setText("🔇")
+            btn.setToolTip("Microphone muted — click or F4 to unmute")
+            btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: rgba(255, 77, 109, 0.12); color: {C.MUTED_C};
-                    border: 1px solid {C.MUTED_C}; border-radius: 12px;
+                    background: rgba(255, 77, 109, 0.18); color: {C.MUTED_C};
+                    border: 1px solid {C.MUTED_C}; border-radius: 17px; font-size: 14px;
                 }}
-                QPushButton:hover {{ background: rgba(255, 77, 109, 0.22); }}
+                QPushButton:hover {{ background: rgba(255, 77, 109, 0.28); }}
             """)
         else:
-            self._mute_btn.setText("🎙  MICROPHONE ACTIVE")
-            self._mute_btn.setStyleSheet(f"""
+            btn.setText("🎤")
+            btn.setToolTip("Microphone active — click or F4 to mute")
+            btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: rgba(55, 255, 139, 0.10); color: {C.GREEN};
-                    border: 1px solid {C.GREEN}; border-radius: 12px;
+                    background: transparent; color: {C.GREEN};
+                    border: 1px solid {C.GREEN}; border-radius: 17px; font-size: 14px;
                 }}
-                QPushButton:hover {{ background: rgba(55, 255, 139, 0.20); }}
+                QPushButton:hover {{ background: rgba(55, 255, 139, 0.12); }}
             """)
 
     def _send(self):
