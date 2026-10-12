@@ -130,7 +130,7 @@ def save_push_to_talk_enabled(enabled: bool) -> None:
     _save_flag("push_to_talk_enabled", enabled)
 
 
-HUD_STYLES = ("sphere", "core", "armor", "rings", "face")
+HUD_STYLES = ("neural", "orbitals", "ribbons", "burst", "radial", "blueprint", "sphere", "core", "armor", "rings", "face")
 
 
 def get_hud_style() -> str:
@@ -141,8 +141,8 @@ def get_hud_style() -> str:
     cost about the same. Defaults to the head because that is what MARK LIV
     shipped with; the choice survives a restart.
     """
-    v = str(load_api_keys().get("hud_style", "sphere")).strip().lower()
-    return v if v in HUD_STYLES else "sphere"
+    v = str(load_api_keys().get("hud_style", "orbitals")).strip().lower()
+    return v if v in HUD_STYLES else "orbitals"
 
 
 def save_hud_style(style: str) -> None:

@@ -408,10 +408,10 @@ class HudCanvas(QWidget):
             from memory.config_manager import get_hud_style
             self.hud_style = get_hud_style()
         except Exception:
-            self.hud_style = "sphere"
+            self.hud_style = "orbitals"
         try:
             _hs = str((_read_full_config() or {}).get("hud_style") or "sphere").lower()
-            if _hs in ("sphere", "core", "armor", "rings", "face"):
+            if _hs in ("neural", "orbitals", "ribbons", "burst", "radial", "blueprint", "sphere", "core", "armor", "rings", "face"):
                 self.hud_style = _hs
         except Exception:
             pass
@@ -1057,6 +1057,212 @@ class HudCanvas(QWidget):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawEllipse(QRectF(cx - pr, cy - pr, pr * 2, pr * 2))
 
+
+    def _hud_cols(self):
+        """Primary / bright / dim colors for current mute state."""
+        if self.muted:
+            return QColor(180, 90, 90), QColor(220, 120, 100), QColor(120, 50, 50)
+        base = QColor(C.PRI)
+        bright = QColor(min(255, base.red()+50), min(255, base.green()+50), min(255, base.blue()+40))
+        dim = QColor(base.red(), base.green(), base.blue(), 80)
+        return base, bright, dim
+
+    def _paint_neural(self, p: QPainter, cx: float, cy: float, r: float) -> None:
+        """Dense organic neural mesh + outer rings (image top-left)."""
+        import math, random
+        col, bright, _ = self._hud_cols()
+        t = self._core_phase
+        amp = float(getattr(self, "_amp_disp", 0) or 0)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # outer rings
+        for i, rr in enumerate((1.05, 0.92, 0.80)):
+            a = 50 - i * 12
+            p.setPen(QPen(QColor(col.red(), col.green(), col.blue(), a), 1.2))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawEllipse(QRectF(cx - r*rr, cy - r*rr, r*rr*2, r*rr*2))
+        # organic filaments
+        rng = random.Random(42)
+        for k in range(48):
+            ang0 = rng.random() * math.tau + t * (0.3 + 0.2 * (k % 5))
+            rad0 = r * (0.15 + 0.7 * rng.random())
+            path = QPainterPath()
+            path.moveTo(cx + rad0 * math.cos(ang0), cy + rad0 * math.sin(ang0))
+            for s in range(1, 6):
+                ang = ang0 + 0.35 * s + 0.15 * math.sin(t * 2 + k)
+                rad = rad0 + r * 0.08 * s * (0.5 + 0.5 * math.sin(t + k))
+                path.lineTo(cx + rad * math.cos(ang), cy + rad * math.sin(ang))
+            alpha = int(40 + 80 * (0.5 + 0.5 * math.sin(t + k * 0.3)) + 40 * amp)
+            p.setPen(QPen(QColor(col.red(), col.green(), col.blue(), min(200, alpha)), 1.0))
+            p.drawPath(path)
+        # core
+        g = QRadialGradient(cx, cy, r * 0.25)
+        g.setColorAt(0.0, QColor(bright.red(), bright.green(), bright.blue(), 180))
+        g.setColorAt(1.0, QColor(0, 0, 0, 0))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(g))
+        p.drawEllipse(QRectF(cx - r*0.25, cy - r*0.25, r*0.5, r*0.5))
+
+    def _paint_orbitals(self, p: QPainter, cx: float, cy: float, r: float) -> None:
+        """Multi-axis elliptical orbitals (image top-right)."""
+        import math
+        col, bright, _ = self._hud_cols()
+        t = self._core_phase
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        for i, (rx, ry, tilt, speed) in enumerate((
+            (1.0, 0.35, 0.4, 0.8),
+            (0.85, 0.45, -0.7, -0.55),
+            (0.7, 0.55, 1.1, 0.4),
+            (0.55, 0.25, -1.3, 0.9),
+            (0.95, 0.2, 0.2, -0.3),
+        )):
+            p.save()
+            p.translate(cx, cy)
+            p.rotate(math.degrees(tilt + t * speed * 0.4))
+            a = 70 + 20 * (i % 3)
+            p.setPen(QPen(QColor(col.red(), col.green(), col.blue(), a), 1.4))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawEllipse(QRectF(-r*rx, -r*ry, r*rx*2, r*ry*2))
+            # node on orbit
+            ang = t * speed * 2 + i
+            x, y = r*rx*math.cos(ang), r*ry*math.sin(ang)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(bright.red(), bright.green(), bright.blue(), 200))
+            p.drawEllipse(QPointF(x, y), 3.2, 3.2)
+            p.restore()
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(bright.red(), bright.green(), bright.blue(), 160))
+        p.drawEllipse(QPointF(cx, cy), 5, 5)
+
+    def _paint_ribbons(self, p: QPainter, cx: float, cy: float, r: float) -> None:
+        """Flowing ribbon orbitals (image mid-left)."""
+        import math
+        col, bright, _ = self._hud_cols()
+        t = self._core_phase
+        amp = float(getattr(self, "_amp_disp", 0) or 0)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        for band in range(5):
+            path = QPainterPath()
+            first = True
+            for i in range(80):
+                u = i / 79.0
+                ang = u * math.tau * 2 + t * (0.6 + 0.15 * band) + band * 0.8
+                rr = r * (0.35 + 0.12 * band + 0.08 * math.sin(u * math.tau * 3 + t + band))
+                rr *= (1.0 + 0.12 * amp)
+                x = cx + rr * math.cos(ang)
+                y = cy + rr * math.sin(ang) * (0.45 + 0.1 * band)
+                if first:
+                    path.moveTo(x, y); first = False
+                else:
+                    path.lineTo(x, y)
+            a = 90 + band * 15
+            p.setPen(QPen(QColor(col.red(), col.green(), col.blue(), min(220, a)), 2.0 - band * 0.2))
+            p.drawPath(path)
+        # radial spokes faint
+        for i in range(12):
+            ang = i * math.tau / 12 + t * 0.1
+            p.setPen(QPen(QColor(col.red(), col.green(), col.blue(), 30), 1))
+            p.drawLine(QPointF(cx, cy), QPointF(cx + r*0.9*math.cos(ang), cy + r*0.55*math.sin(ang)))
+
+    def _paint_burst(self, p: QPainter, cx: float, cy: float, r: float) -> None:
+        """Particle atom burst (image mid-right)."""
+        import math
+        col, bright, _ = self._hud_cols()
+        t = self._core_phase
+        amp = float(getattr(self, "_amp_disp", 0) or 0)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # rays
+        for i in range(36):
+            ang = i * math.tau / 36 + t * 0.2
+            len_ = r * (0.55 + 0.4 * abs(math.sin(t * 1.5 + i)) + 0.15 * amp)
+            p.setPen(QPen(QColor(col.red(), col.green(), col.blue(), 50 + (i % 3) * 20), 1))
+            p.drawLine(QPointF(cx, cy), QPointF(cx + len_*math.cos(ang), cy + len_*math.sin(ang)))
+        # orbits
+        for rr, spd in ((0.4, 1.0), (0.62, -0.7), (0.85, 0.45)):
+            p.setPen(QPen(QColor(col.red(), col.green(), col.blue(), 90), 1.3))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawEllipse(QRectF(cx-r*rr, cy-r*rr, r*rr*2, r*rr*2))
+            ang = t * spd * 2
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(bright)
+            p.drawEllipse(QPointF(cx + r*rr*math.cos(ang), cy + r*rr*math.sin(ang)), 3.5, 3.5)
+        # particle cloud
+        for i in range(60):
+            ang = i * 2.399 + t * 0.5
+            rad = r * (0.2 + 0.7 * ((i * 17) % 100) / 100.0)
+            x = cx + rad * math.cos(ang)
+            y = cy + rad * math.sin(ang)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(bright.red(), bright.green(), bright.blue(), 100))
+            p.drawEllipse(QPointF(x, y), 1.6, 1.6)
+        g = QRadialGradient(cx, cy, r * 0.2)
+        g.setColorAt(0.0, QColor(bright.red(), bright.green(), bright.blue(), 200))
+        g.setColorAt(1.0, QColor(0, 0, 0, 0))
+        p.setBrush(QBrush(g))
+        p.drawEllipse(QRectF(cx-r*0.2, cy-r*0.2, r*0.4, r*0.4))
+
+    def _paint_radial(self, p: QPainter, cx: float, cy: float, r: float) -> None:
+        """Radial spikes with node beads (image bottom-left)."""
+        import math
+        col, bright, _ = self._hud_cols()
+        t = self._core_phase
+        amp = float(getattr(self, "_amp_disp", 0) or 0)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        n = 24
+        for i in range(n):
+            ang = i * math.tau / n + t * 0.15
+            pulse = 0.75 + 0.25 * math.sin(t * 2 + i * 0.5) + 0.1 * amp
+            x2 = cx + r * pulse * math.cos(ang)
+            y2 = cy + r * pulse * math.sin(ang)
+            p.setPen(QPen(QColor(col.red(), col.green(), col.blue(), 100), 1.5))
+            p.drawLine(QPointF(cx, cy), QPointF(x2, y2))
+            # beads along spoke
+            for b in (0.35, 0.55, 0.75, 0.95):
+                bx = cx + r * pulse * b * math.cos(ang)
+                by = cy + r * pulse * b * math.sin(ang)
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QColor(bright.red(), bright.green(), bright.blue(), int(80 + 100 * b)))
+                p.drawEllipse(QPointF(bx, by), 2.5, 2.5)
+        p.setBrush(QColor(bright.red(), bright.green(), bright.blue(), 180))
+        p.drawEllipse(QPointF(cx, cy), 6, 6)
+
+    def _paint_blueprint(self, p: QPainter, cx: float, cy: float, r: float) -> None:
+        """Technical blueprint rings + panels (image bottom-right)."""
+        import math
+        col, bright, _ = self._hud_cols()
+        t = self._core_phase
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        for rr in (0.95, 0.78, 0.58, 0.38):
+            p.setPen(QPen(QColor(col.red(), col.green(), col.blue(), 70), 1.2))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawEllipse(QRectF(cx-r*rr, cy-r*rr, r*rr*2, r*rr*2))
+        # dashed rotating arc
+        for i, (rr, span, spd) in enumerate(((0.88, 40, 0.5), (0.68, 55, -0.35), (0.48, 30, 0.7))):
+            ang = (t * spd * 60) % 360
+            p.setPen(QPen(QColor(bright.red(), bright.green(), bright.blue(), 160), 2))
+            p.drawArc(QRectF(cx-r*rr, cy-r*rr, r*rr*2, r*rr*2), int(ang*16), int(span*16))
+        # tick marks
+        for i in range(48):
+            ang = i * math.tau / 48
+            inner = r * (0.9 if i % 4 == 0 else 0.94)
+            outer = r * 0.98
+            p.setPen(QPen(QColor(col.red(), col.green(), col.blue(), 90 if i % 4 == 0 else 40), 1))
+            p.drawLine(
+                QPointF(cx + inner*math.cos(ang), cy + inner*math.sin(ang)),
+                QPointF(cx + outer*math.cos(ang), cy + outer*math.sin(ang)),
+            )
+        # panel blocks
+        for i in range(8):
+            ang = i * math.tau / 8 + t * 0.2
+            rr = r * 0.65
+            x, y = cx + rr*math.cos(ang), cy + rr*math.sin(ang)
+            p.setPen(QPen(QColor(col.red(), col.green(), col.blue(), 120), 1))
+            p.setBrush(QColor(col.red(), col.green(), col.blue(), 25))
+            p.drawRoundedRect(QRectF(x-8, y-5, 16, 10), 2, 2)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(bright.red(), bright.green(), bright.blue(), 150))
+        p.drawEllipse(QPointF(cx, cy), 4, 4)
+
+
     def _paint_armor(self, p: QPainter, cx: float, cy: float, r: float) -> None:
         """Iron Man-style holographic upper-body wireframe + arc reactor."""
         import math
@@ -1216,6 +1422,30 @@ class HudCanvas(QWidget):
             _r = min(W * 0.44, _band_h / 2.0)
             self._paint_sphere(p, cx, _band_t + _band_h / 2.0, _r)
 
+        elif self.hud_style == "neural":
+            _r = min(W * 0.46, _band_h / 2.0)
+            self._paint_neural(p, cx, _band_t + _band_h / 2.0, _r)
+
+        elif self.hud_style == "orbitals":
+            _r = min(W * 0.46, _band_h / 2.0)
+            self._paint_orbitals(p, cx, _band_t + _band_h / 2.0, _r)
+
+        elif self.hud_style == "ribbons":
+            _r = min(W * 0.46, _band_h / 2.0)
+            self._paint_ribbons(p, cx, _band_t + _band_h / 2.0, _r)
+
+        elif self.hud_style == "burst":
+            _r = min(W * 0.46, _band_h / 2.0)
+            self._paint_burst(p, cx, _band_t + _band_h / 2.0, _r)
+
+        elif self.hud_style == "radial":
+            _r = min(W * 0.46, _band_h / 2.0)
+            self._paint_radial(p, cx, _band_t + _band_h / 2.0, _r)
+
+        elif self.hud_style == "blueprint":
+            _r = min(W * 0.46, _band_h / 2.0)
+            self._paint_blueprint(p, cx, _band_t + _band_h / 2.0, _r)
+
         elif self.hud_style == "armor":
             _r = min(W * 0.42, _band_h / 2.0)
             self._paint_armor(p, cx, _band_t + _band_h / 2.0, _r)
@@ -1225,7 +1455,6 @@ class HudCanvas(QWidget):
             self._paint_rings(p, cx, _band_t + _band_h / 2.0, _r)
 
         else:
-            # reactor core — fallback
             _r = min(W * 0.46, _band_h / 2.0)
             self._paint_core(p, cx, _band_t + _band_h / 2.0, _r, W, _band_h)
 
@@ -5919,16 +6148,17 @@ class MainWindow(QMainWindow):
                 text-align: left; padding: 0 8px; }}
             QPushButton:hover {{ color: {C.WHITE}; border: 1px solid {C.BORDER_B}; }}"""
         labels = {
-            "sphere": ("HUD: HOLO SPHERE",
-                       "Clean holographic sphere."),
-            "core":   ("HUD: REACTOR CORE",
-                       "Arc reactor core."),
-            "armor":  ("HUD: ARMOR FRAME",
-                       "Holographic armor silhouette."),
-            "rings":  ("HUD: ORBITAL RINGS",
-                       "Minimal orbital rings."),
-            "face":   ("HUD: ANIMATED FACE",
-                       "Optional face (legacy)."),
+            "neural": ("HUD: NEURAL MESH", "Organic filament network."),
+            "orbitals": ("HUD: ORBITALS", "Multi-axis orbital rings."),
+            "ribbons": ("HUD: RIBBONS", "Flowing orbital ribbons."),
+            "burst": ("HUD: PARTICLE BURST", "Atom-style particle burst."),
+            "radial": ("HUD: RADIAL SPIKES", "Radial spikes with nodes."),
+            "blueprint": ("HUD: BLUEPRINT", "Technical blueprint rings."),
+            "sphere": ("HUD: HOLO SPHERE", "Geodesic sphere."),
+            "core": ("HUD: REACTOR CORE", "Arc reactor core."),
+            "armor": ("HUD: ARMOR", "Armor silhouette."),
+            "rings": ("HUD: RINGS", "Minimal rings."),
+            "face": ("HUD: FACE", "Legacy face."),
         }
         text, tip = labels.get(style_name, labels.get("sphere", ("HUD", "")))
         self._hud_btn.setText(text)
@@ -5938,7 +6168,7 @@ class MainWindow(QMainWindow):
     def _toggle_hud_style(self):
         """Cycle face → core → sphere → face. Instant, no reload."""
         from memory.config_manager import get_hud_style, save_hud_style
-        order = ("sphere", "core", "armor", "rings")
+        order = ("neural", "orbitals", "ribbons", "burst", "radial", "blueprint", "sphere", "core")
         cur = get_hud_style()
         try:
             idx = order.index(cur)
@@ -5952,7 +6182,7 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         self._refresh_hud_btn()
-        names = {"sphere": "holographic sphere", "core": "reactor core", "armor": "armor frame", "rings": "orbital rings", "face": "animated face"}
+        names = {"neural": "neural mesh", "orbitals": "multi orbitals", "ribbons": "flow ribbons", "burst": "particle burst", "radial": "radial spikes", "blueprint": "tech blueprint", "sphere": "holo sphere", "core": "reactor core", "armor": "armor", "rings": "rings", "face": "face"}
         self._log.append_log(f"SYS: HUD switched to the {names.get(want, want)}.")
 
     def _refresh_profile_btns(self) -> None:
