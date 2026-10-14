@@ -38,22 +38,6 @@ Voice, vision, desktop control, holographic HUD, and phone companion — one sys
 `https://github.com/ASDprogrammer521/Jarvis-ai/releases/latest`
 
 > Windows may show SmartScreen (unsigned build) → **More info → Run anyway**.
-
-### Publish a new release (for maintainers)
-
-```bash
-git tag v1.0.1
-git push origin v1.0.1
-```
-
-Or: **Actions → Build Windows EXE + Release → Run workflow** (optional tag input).
-
-Local build on Windows:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1
-```
-
 ---
 
 ## 🚀 Getting Started (from source)
