@@ -517,7 +517,7 @@ class MainWindow(QMainWindow):
         a.setDuration(320)
         a.setEasingCurve(QEasingCurve.Type.OutCubic)
         a.setStartValue(self.drawer.maximumWidth())
-        a.setEndValue(380 if show else 0)
+        a.setEndValue(500 if show else 0)
         a.start()
         self._drawer_anim = a
         if show:
@@ -1129,6 +1129,23 @@ class JarvisUI:
     }
 
     def __init__(self, face_path: str = ""):
+        # Hardware acceleration (GPU / OpenGL) before QApplication exists
+        try:
+            from PyQt6.QtCore import QCoreApplication
+            if QApplication.instance() is None:
+                QCoreApplication.setAttribute(
+                    Qt.ApplicationAttribute.AA_UseDesktopOpenGL, True
+                )
+                QCoreApplication.setAttribute(
+                    Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True
+                )
+        except Exception:
+            pass
+        try:
+            import os as _os
+            _os.environ.setdefault("QT_OPENGL", "desktop")
+        except Exception:
+            pass
         object.__setattr__(self, "_app", QApplication.instance() or QApplication(sys.argv))
         self._app.setApplicationName("Jarvis")
         self._app.setFont(font(10))

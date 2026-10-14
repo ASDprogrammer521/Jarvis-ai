@@ -11,15 +11,15 @@ TOOL = {
         "check for updates, or upgrade the app."
     ),
     "parameters": {
-        "type": "object",
+        "type": "OBJECT",
         "properties": {
             "action": {
-                "type": "string",
+                "type": "STRING",
                 "description": "check | update | set_repo",
                 "enum": ["check", "update", "set_repo"],
             },
             "repo": {
-                "type": "string",
+                "type": "STRING",
                 "description": "GitHub repo as owner/name (for set_repo), e.g. ASDcuber/Jarvis-ai",
             },
         },

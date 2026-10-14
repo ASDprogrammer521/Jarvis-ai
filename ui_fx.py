@@ -16,6 +16,13 @@ from PyQt6.QtWidgets import (
     QGraphicsOpacityEffect, QPushButton, QWidget,
 )
 
+try:
+    from PyQt6.QtOpenGLWidgets import QOpenGLWidget as _GLWidget
+    _HAS_GL = True
+except Exception:
+    _GLWidget = QWidget
+    _HAS_GL = False
+
 import ui_geo as geo
 from ui_theme import C, qcol
 
@@ -456,7 +463,7 @@ class ModalLayer(QWidget):
             super().keyPressEvent(e)
 
 
-class Stage3D(QWidget):
+class Stage3D(_GLWidget):
     MODELS = ("crystal", "globe", "knot", "helix", "face")
     model_changed = pyqtSignal(str)
 
@@ -465,6 +472,13 @@ class Stage3D(QWidget):
         self.setMinimumSize(320, 300)
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
+        # Prefer GPU path (OpenGL widget) when available
+        try:
+            self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+            self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        except Exception:
+            pass
+        self._gpu = bool(_HAS_GL)
         self.state = "INITIALISING"
         self.muted = False
         self.speaking = False
@@ -788,6 +802,11 @@ class Stage3D(QWidget):
         if not p.isActive():
             return
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        try:
+            p.setRenderHint(QPainter.RenderHint.VerticalSubpixelPositioning)
+        except Exception:
+            pass
         W, H = self.width(), self.height()
         amp = self._amp
         band_h = H * 0.78

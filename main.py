@@ -38,10 +38,22 @@ from google import genai
 from google.genai import types
 
 try:
+    from PyQt6.QtCore import Qt as _Qt, QCoreApplication as _QCore
     from PyQt6.QtWidgets import QApplication as _QApplication
     import sys as _sys_qt
     if _QApplication.instance() is None:
+        try:
+            _QCore.setAttribute(_Qt.ApplicationAttribute.AA_UseDesktopOpenGL, True)
+            _QCore.setAttribute(_Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
+        except Exception:
+            pass
+        try:
+            import os as _os_qt
+            _os_qt.environ.setdefault("QT_OPENGL", "desktop")
+        except Exception:
+            pass
         _QApplication(_sys_qt.argv)
+
 except Exception:
     pass
 
