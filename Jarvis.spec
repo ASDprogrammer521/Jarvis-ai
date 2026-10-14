@@ -1,5 +1,3 @@
-# -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec for Jarvis AI (Windows onedir — more reliable for PyQt6)
 import sys
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
@@ -106,3 +104,4 @@ coll = COLLECT(
     upx_exclude=[],
     name='Jarvis',
 )
+# by ASDcuber521

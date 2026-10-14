@@ -154,7 +154,7 @@ Top-left shows the live clock and date.
 ## 📁 Project structure
 
 ```text
-Mark-LIV-main/
+Jarvis-ai-main/
 ├── main.py                 # entry point
 ├── ui.py                   # user interface + HUD
 ├── setup.py                # dependency installer
