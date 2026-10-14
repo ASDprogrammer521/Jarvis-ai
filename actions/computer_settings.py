@@ -1,4 +1,3 @@
-#computer_settings.py
 import json
 import re
 import sys
@@ -24,13 +23,12 @@ except ImportError:
 from core import confirm
 from core.undo import push_undo
 
-_OS = platform.system()  # "Windows" | "Darwin" | "Linux"
+_OS = platform.system()
 
 if _OS == "Windows":
     _WIN_HIDE: dict = {"creationflags": subprocess.CREATE_NO_WINDOW}
 else:
     _WIN_HIDE: dict = {}
-
 
 def _get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -120,7 +118,6 @@ def volume_get() -> int | None:
     except Exception:
         return None
 
-
 def brightness_get() -> int | None:
     """Current brightness 0-100, or None where it cannot be read."""
     try:
@@ -143,7 +140,6 @@ def brightness_get() -> int | None:
         pass
     return None
 
-
 def brightness_set(value: int) -> None:
     """Set brightness to an absolute percentage. Only used to restore a value
     captured before a change, so it is undo's counterpart to the up/down pair."""
@@ -157,7 +153,6 @@ def brightness_set(value: int) -> None:
         )
     elif _OS == "Linux":
         subprocess.run(["brightnessctl", "set", f"{value}%"], capture_output=True)
-
 
 def volume_set(value: int):
     value = max(0, min(100, int(value)))
@@ -279,13 +274,12 @@ def snap_left():
     if _OS == "Windows":
         pyautogui.hotkey("win", "left")
     elif _OS == "Darwin":
-        # macOS has no built-in snap; try Rectangle app shortcut if installed
         try:
             subprocess.run(["open", "-a", "Rectangle"], capture_output=True, timeout=1)
         except Exception:
             pass
         pyautogui.hotkey("ctrl", "option", "left")
-    else:  # Linux
+    else:
         try:
             subprocess.run(["wmctrl", "-r", ":ACTIVE:", "-e", "0,0,0,960,1080"],
                 capture_output=True)
@@ -301,7 +295,7 @@ def snap_right():
         except Exception:
             pass
         pyautogui.hotkey("ctrl", "option", "right")
-    else:  # Linux
+    else:
         try:
             subprocess.run(["wmctrl", "-r", ":ACTIVE:", "-e", "0,960,0,960,1080"],
                 capture_output=True)
@@ -327,7 +321,6 @@ def open_task_manager():
             if subprocess.run(["which", cmd[0]], capture_output=True).returncode == 0:
                 subprocess.Popen(cmd)
                 break
-
 
 def focus_search():
     if _OS == "Darwin": pyautogui.hotkey("command", "l")
@@ -384,7 +377,6 @@ def reload_page_n(n: int):
         refresh_page()
         time.sleep(0.8)
 
-
 def scroll_up(amount: int = 500):    pyautogui.scroll(amount)
 def scroll_down(amount: int = 500):  pyautogui.scroll(-amount)
 
@@ -398,7 +390,6 @@ def scroll_bottom():
 
 def page_up():   pyautogui.press("pageup")
 def page_down(): pyautogui.press("pagedown")
-
 
 def copy():
     if _OS == "Darwin": pyautogui.hotkey("command", "c")
@@ -654,51 +645,18 @@ ACTION_MAP: dict[str, callable] = {
     "shutdown":            shutdown_computer,
 }
 
-# ── What needs a human, and what just needs an undo ──────────────────────────
-#
-# The old gate was `_DANGEROUS_ACTIONS = {"restart", "shutdown"}` checked against
-# a `confirmed` parameter the MODEL filled in — so the model confirmed its own
-# shutdowns, and everything else (switching off the WiFi this assistant is
-# talking over) had no gate at all.
-#
-# Two lists now, and the split is about reversibility, not about how alarming
-# the word sounds:
-#
-#   _IRREVERSIBLE — a human presses a button on the HUD. Nothing else.
-#   everything else — done immediately, with an undo pushed if it can be undone.
-#
-# Asking before every action is what makes an assistant unusable, and every
-# question costs a round trip. Undo is both faster and safer than a prompt.
 _IRREVERSIBLE = {
     "restart":     ("Restart this computer",
                     "Anything unsaved will be lost. The computer restarts in 10 seconds."),
     "shutdown":    ("Shut this computer down",
                     "Anything unsaved will be lost. The computer powers off in 10 seconds."),
-    # Not obviously destructive, and that is exactly why it was missed: turning
-    # the WiFi off cuts the assistant's own connection to the Live API, so it
-    # cannot be asked to turn it back on.
     "toggle_wifi": ("Switch WiFi off or on",
                     "If this switches WiFi off, JARVIS loses its connection and "
                     "cannot switch it back on by voice."),
 }
 
-# Kept so anything still importing the old name keeps working.
 _DANGEROUS_ACTIONS = set(_IRREVERSIBLE)
 
-
-# ── Local intent resolution ──────────────────────────────────────────────────
-#
-# This used to be an entire extra Gemini call, made INSIDE the tool: the Live
-# model called computer_settings, and computer_settings then asked a second
-# model which action was meant. Every "turn the volume down" paid for two round
-# trips — and when that second call failed, the fallback was
-# `description.lower().replace(" ", "_")`, which turns the Turkish for "turn it
-# down" into `sesi_kis`, i.e. straight to "Unknown action".
-#
-# Nothing here needs a language model. The Live model already understands the
-# sentence; it only needed the vocabulary, which the tool declaration now spells
-# out in full. What is left is spelling tolerance, and difflib does that in
-# microseconds instead of ~600 ms and a quota unit.
 _ALIASES = {
     "volume_up":       ("louder", "raise volume", "turn it up", "increase volume"),
     "volume_down":     ("quieter", "lower volume", "turn it down", "decrease volume"),
@@ -723,10 +681,8 @@ _ALIASES = {
 _VALUE_ACTIONS = {"volume_set", "type_text", "press_key", "reload_n",
                   "scroll_up", "scroll_down"}
 
-
 def _normalise(text: str) -> str:
     return (text or "").strip().lower().replace("-", "_").replace(" ", "_")
-
 
 def _detect_action(description: str) -> dict:
     """Resolve a free-text description to an action name, locally.
@@ -741,35 +697,29 @@ def _detect_action(description: str) -> dict:
 
     known = set(ACTION_MAP) | _VALUE_ACTIONS
 
-    # 1. Already an action name.
     if norm in known:
         return {"action": norm, "value": None}
 
     low = raw.lower()
 
-    # 2. "set volume to 30", "sesi 30 yap" — a number next to a volume word.
     num = re.search(r"(\d{1,3})\s*%?", low)
     if num and any(w in low for w in ("volume", "ses", "sound", "lautstark", "громкость")):
         return {"action": "volume_set", "value": max(0, min(100, int(num.group(1))))}
 
-    # 3. Alias phrases.
     for action, phrases in _ALIASES.items():
         if any(_normalise(p) == norm or p in low for p in phrases):
             return {"action": action, "value": None}
 
-    # 4. Fuzzy match on the action names — catches "fullscren", "volumeup".
     import difflib
     close = difflib.get_close_matches(norm, sorted(known), n=1, cutoff=0.72)
     if close:
         return {"action": close[0], "value": None}
 
-    # 5. Substring: "increase_the_brightness" contains "brightness".
     for action in sorted(known, key=len, reverse=True):
         if len(action) > 4 and (action in norm or norm in action):
             return {"action": action, "value": None}
 
     return {"action": "", "value": None}
-
 
 def _suggest(description: str) -> str:
     """What to tell the model when nothing matched. Names real actions so its
@@ -810,11 +760,6 @@ def computer_settings(
     if player:
         player.write_log(f"[Settings] {action}")
 
-    # ── The gate ─────────────────────────────────────────────────────────────
-    # A human presses a button, or this does not happen. The model can no longer
-    # write its own permission slip, and the action itself is handed to the UI
-    # rather than performed here — so returning early is not "declining", it is
-    # "parked until someone says yes".
     if action in _IRREVERSIBLE:
         title, detail = _IRREVERSIBLE[action]
         func = ACTION_MAP.get(action)
@@ -874,11 +819,6 @@ def computer_settings(
     if not func:
         return _suggest(raw_action or description)
 
-    # ── Capture "before" so the change can be taken back ─────────────────────
-    # Read-then-write is the whole mechanism for settings: there is no clever
-    # inverse to compute, just a value to remember. Where the platform will not
-    # tell us the current value, nothing is registered — an undo that restores
-    # a guess is worse than no undo at all.
     _before = None
     if action in ("volume_up", "volume_down", "mute", "unmute", "toggle_mute"):
         _before = ("volume", volume_get())
@@ -901,30 +841,17 @@ def computer_settings(
                 push_undo(f"brightness ({action})",
                           lambda b=old: (brightness_set(b), f"Brightness back to {b}%.")[1])
     elif action == "dark_mode":
-        # A pure toggle: calling it again is the undo.
         push_undo("dark mode toggled",
                   lambda: (dark_mode(), "Theme switched back.")[1])
 
     return f"Done: {action}."
 
-
-# ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "computer_settings",
     "description": "Controls the computer: volume, brightness, window management, keyboard shortcuts, typing text on screen, closing apps, fullscreen, dark mode, WiFi, restart, shutdown, scrolling, tab management, zoom, screenshots, lock screen, refresh/reload page. Use for ANY single computer control command. restart, shutdown and toggle_wifi put a confirmation on the user's screen and do NOT happen until they press it — never claim they are done. Volume, brightness and dark mode can be reversed with the `undo` tool.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            # The exact vocabulary, spelled out.
-            #
-            # This used to say only "The action to perform", so the model
-            # usually filled `description` instead — and computer_settings then
-            # made a SECOND Gemini call, inside the tool, purely to translate
-            # that sentence into one of these names. Every "turn the volume
-            # down" cost two model round trips.
-            #
-            # Naming the actions here costs ~600 characters once per session and
-            # removes a whole round trip from every computer command.
             "action": {
                 "type": "STRING",
                 "description": (
@@ -960,3 +887,5 @@ TOOL = {
     },
     "handler": computer_settings,
 }
+
+# by ASDcuber521

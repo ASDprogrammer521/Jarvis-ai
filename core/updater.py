@@ -17,8 +17,7 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 VERSION_FILE = BASE_DIR / "VERSION"
-DEFAULT_REPO = "ASDcuber/Jarvis-ai"  # owner/name — change in Settings / config
-
+DEFAULT_REPO = "ASDcuber/Jarvis-ai"
 
 def get_local_version() -> str:
     try:
@@ -28,14 +27,12 @@ def get_local_version() -> str:
         pass
     return "0.0.0"
 
-
 def get_repo() -> str:
     """owner/repo from config, or DEFAULT_REPO."""
     try:
         from memory.config_manager import load_api_keys
         repo = (load_api_keys().get("github_repo") or "").strip()
         if repo:
-            # accept full URL or owner/repo
             repo = repo.replace("https://github.com/", "").replace("http://github.com/", "")
             repo = repo.strip("/").removesuffix(".git")
             if repo.count("/") == 1:
@@ -43,7 +40,6 @@ def get_repo() -> str:
     except Exception:
         pass
     return DEFAULT_REPO
-
 
 def save_repo(repo: str) -> None:
     from memory.config_manager import load_api_keys, ensure_config_dir, CONFIG_FILE
@@ -53,7 +49,6 @@ def save_repo(repo: str) -> None:
     clean = clean.strip("/").removesuffix(".git")
     data["github_repo"] = clean
     CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
 
 def _http_json(url: str, timeout: int = 15) -> dict | list:
     req = urllib.request.Request(
@@ -66,12 +61,10 @@ def _http_json(url: str, timeout: int = 15) -> dict | list:
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
-
 def _http_bytes(url: str, timeout: int = 120) -> bytes:
     req = urllib.request.Request(url, headers={"User-Agent": "Jarvis-Updater"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.read()
-
 
 def check_for_updates() -> dict:
     """
@@ -84,7 +77,6 @@ def check_for_updates() -> dict:
     repo = get_repo()
     local = get_local_version()
     try:
-        # Prefer releases
         try:
             rel = _http_json(f"https://api.github.com/repos/{repo}/releases/latest")
             if isinstance(rel, dict) and rel.get("tag_name"):
@@ -109,10 +101,8 @@ def check_for_updates() -> dict:
             if e.code != 404:
                 raise
 
-        # Fallback: default branch latest commit + VERSION file on that branch
         repo_info = _http_json(f"https://api.github.com/repos/{repo}")
         branch = repo_info.get("default_branch") or "main"
-        # VERSION file raw
         remote = local
         try:
             raw = _http_bytes(
@@ -120,7 +110,6 @@ def check_for_updates() -> dict:
             )
             remote = raw.decode("utf-8").strip() or local
         except Exception:
-            # use short commit sha as remote marker
             commits = _http_json(
                 f"https://api.github.com/repos/{repo}/commits/{branch}"
             )
@@ -161,7 +150,6 @@ def check_for_updates() -> dict:
             "message": f"Update check failed: {e}",
         }
 
-
 def apply_update(zip_url: str | None = None) -> dict:
     """
     Download zipball and merge into BASE_DIR.
@@ -187,7 +175,6 @@ def apply_update(zip_url: str | None = None) -> dict:
             extract_to.mkdir()
             with zipfile.ZipFile(zpath, "r") as zf:
                 zf.extractall(extract_to)
-            # GitHub zipball has a single top-level folder
             roots = [p for p in extract_to.iterdir() if p.is_dir()]
             src_root = roots[0] if len(roots) == 1 else extract_to
 
@@ -205,7 +192,6 @@ def apply_update(zip_url: str | None = None) -> dict:
                         continue
                     shutil.copy2(item, dest)
 
-            # Write VERSION if present in package
             vsrc = src_root / "VERSION"
             if vsrc.exists():
                 shutil.copy2(vsrc, VERSION_FILE)
@@ -221,11 +207,9 @@ def apply_update(zip_url: str | None = None) -> dict:
     except Exception as e:
         return {"ok": False, "message": f"Update failed: {e}"}
 
-
 def _is_semver(v: str) -> bool:
     parts = v.lstrip("v").split(".")
     return len(parts) >= 2 and all(p.isdigit() for p in parts[:3] if p)
-
 
 def _version_newer(remote: str, local: str) -> bool:
     def norm(v: str):
@@ -243,3 +227,5 @@ def _version_newer(remote: str, local: str) -> bool:
     if _is_semver(remote) and _is_semver(local):
         return norm(remote) > norm(local)
     return remote != local
+
+# by ASDcuber521

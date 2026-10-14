@@ -27,7 +27,6 @@ TOOL = {
     },
 }
 
-
 def run(action: str = "check", repo: str = "", **kwargs) -> str:
     from core.updater import check_for_updates, apply_update, save_repo, get_repo, get_local_version
 
@@ -61,3 +60,5 @@ def run(action: str = "check", repo: str = "", **kwargs) -> str:
         return result.get("message") or str(result)
 
     return "Unknown action. Use check, update, or set_repo."
+
+# by ASDcuber521

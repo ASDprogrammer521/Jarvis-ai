@@ -19,7 +19,6 @@ META = {
     },
 }
 
-
 def _plugins_dir() -> Path:
     import sys
     if getattr(sys, "frozen", False):
@@ -33,11 +32,9 @@ def _plugins_dir() -> Path:
         return c
     return Path(__file__).resolve().parent.parent / "plugins"
 
-
 def _safe_name(name: str) -> str:
     n = re.sub(r"[^a-zA-Z0-9_\-]", "", (name or "").strip().removesuffix(".py"))
     return n[:64]
-
 
 def list_plugins() -> list[dict]:
     d = _plugins_dir()
@@ -61,7 +58,6 @@ def list_plugins() -> list[dict]:
         })
     return out
 
-
 def install_from_url(url: str) -> str:
     url = (url or "").strip()
     if not (url.startswith("http://") or url.startswith("https://")):
@@ -82,7 +78,6 @@ def install_from_url(url: str) -> str:
         return f"Installed plugin: {name}"
     except Exception as e:
         return f"Install failed: {e}"
-
 
 def run(action: str = "list", value: str = "", **_) -> str:
     action = (action or "list").lower().strip()
@@ -112,3 +107,5 @@ def run(action: str = "list", value: str = "", **_) -> str:
         cfg.save_plugin_enabled(name, False)
         return f"Disabled: {name}"
     return "Use action=list|enable|disable|install"
+
+# by ASDcuber521

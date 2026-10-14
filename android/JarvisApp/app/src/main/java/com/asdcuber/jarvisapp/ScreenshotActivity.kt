@@ -120,3 +120,5 @@ class ScreenshotActivity : Activity() {
         try { projection?.stop() } catch (_: Exception) {}
     }
 }
+
+// by ASDcuber521

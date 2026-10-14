@@ -32,11 +32,9 @@ def _get_os() -> str:
     except Exception:
         return "windows"
 
-
 def _require_pyautogui():
     if not _PYAUTOGUI:
         raise RuntimeError("PyAutoGUI not installed. Run: pip install pyautogui")
-
 
 def _paste_text(text: str) -> None:
     _require_pyautogui()
@@ -51,7 +49,6 @@ def _paste_text(text: str) -> None:
         time.sleep(0.1)
     else:
         pyautogui.write(text, interval=0.03)
-
 
 def _clear_and_paste(text: str) -> None:
     _require_pyautogui()
@@ -113,7 +110,6 @@ def _open_app(app_name: str) -> bool:
         print(f"[SendMessage] ⚠️ Could not open {app_name}: {e}")
         return False
 
-
 def _open_browser_url(url: str) -> bool:
     import webbrowser
     try:
@@ -158,10 +154,8 @@ def _send_telegram(receiver: str, message: str) -> str:
 def _send_signal(receiver: str, message: str) -> str:
     return _desktop_send("Signal", receiver, message)
 
-
 def _send_discord(receiver: str, message: str) -> str:
     return _desktop_send("Discord", receiver, message)
-
 
 def _send_instagram(receiver: str, message: str) -> str:
     _require_pyautogui()
@@ -190,13 +184,11 @@ def _send_instagram(receiver: str, message: str) -> str:
 
     return f"Message sent to {receiver} via Instagram."
 
-
 def _send_messenger(receiver: str, message: str) -> str:
     _require_pyautogui()
 
     if not _open_browser_url("https://www.messenger.com/"):
         return "Could not open Messenger in browser."
-
 
     _search_in_app(receiver)
     time.sleep(0.5)
@@ -221,14 +213,12 @@ _PLATFORM_MAP = [
     ({"messenger", "facebook", "fb"},         _send_messenger),
 ]
 
-
 def _resolve_platform(platform_str: str):
     key = platform_str.lower().strip()
     for keywords, handler in _PLATFORM_MAP:
         if any(k in key for k in keywords):
             return handler
     return lambda r, m: _desktop_send(platform_str.strip().title(), r, m)
-
 
 def send_message(
     parameters: dict,
@@ -265,8 +255,6 @@ def send_message(
 
     return result
 
-
-# ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "send_message",
     "description": "Sends a text message via WhatsApp, Telegram, or other messaging platform.",
@@ -294,3 +282,5 @@ TOOL = {
     },
     "handler": send_message,
 }
+
+# by ASDcuber521

@@ -5,18 +5,15 @@ import re
 import time
 from pathlib import Path
 
-
 def get_base_dir():
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent.parent
 
-
 BASE_DIR         = get_base_dir()
 API_CONFIG_PATH  = BASE_DIR / "config" / "api_keys.json"
 PROJECTS_DIR     = Path.home() / "Desktop" / "JarvisProjects"
 MAX_FIX_ATTEMPTS = 5
-# Model choice, timeout and fallback ladder all live in core/gemini.py.
 from core import gemini
 
 MODEL_PLANNER    = gemini.SMART
@@ -25,7 +22,6 @@ MODEL_WRITER     = gemini.SMART
 def _get_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
         return json.load(f)["gemini_api_key"]
-
 
 def _get_model(model_name: str = gemini.SMART):
     """Planning and writing whole files — the reasoning tier, and a long
@@ -39,18 +35,15 @@ def _get_model(model_name: str = gemini.SMART):
 
     return _W()
 
-
 def _strip_fences(text: str) -> str:
     text = text.strip()
     text = re.sub(r"^```[a-zA-Z]*\r?\n?", "", text)
     text = re.sub(r"\r?\n?```\s*$", "", text)
     return text.strip()
 
-
 def _is_rate_limit(error: Exception) -> bool:
     msg = str(error).lower()
     return "429" in msg or "quota" in msg or "resource_exhausted" in msg
-
 
 def _parse_traceback(output: str, project_files: list[str]) -> tuple[str | None, int | None]:
 
@@ -64,7 +57,6 @@ def _parse_traceback(output: str, project_files: list[str]) -> tuple[str | None,
                 return pf, int(line_str)
 
     return None, None
-
 
 def _classify_error(output: str) -> str:
 
@@ -88,7 +80,6 @@ def _classify_error(output: str) -> str:
 
     return "none"
 
-
 def _has_error(output: str, run_command: str) -> bool:
     
     low = output.lower()
@@ -104,7 +95,6 @@ def _has_error(output: str, run_command: str) -> bool:
 
 class RateLimitError(Exception):
     pass
-
 
 def _plan_project(description: str, language: str) -> dict:
     model = _get_model(MODEL_PLANNER)
@@ -580,7 +570,6 @@ def _build_project(
     if speak: speak(msg)
     return f"{msg}\n\nLast error:\n{last_output[:600]}"
 
-
 def dev_agent(
     parameters: dict,
     response=None,
@@ -606,8 +595,6 @@ def dev_agent(
         player       = player,
     )
 
-
-# ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "dev_agent",
     "description": "Builds complete multi-file projects from scratch: plans, writes files, installs deps, opens VSCode, runs and fixes errors.",
@@ -637,3 +624,5 @@ TOOL = {
     },
     "handler": dev_agent,
 }
+
+# by ASDcuber521

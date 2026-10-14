@@ -75,7 +75,7 @@ class JarvisLinkService : Service() {
         val key = intent?.getStringExtra(EXTRA_KEY) ?: return START_NOT_STICKY
         hostRaw = host
         keyRaw = key
-        // Persistent notification — keeps service alive in background
+
         startForeground(NOTIF_ID, buildNotification("Connecting…", connected = false))
         statusLine = "Connecting…"
         lastLog = "Connecting to $host"
@@ -90,7 +90,7 @@ class JarvisLinkService : Service() {
             val base = "http://$host"
 
             var token = key.trim().uppercase()
-            // Prefer saved session token for reconnect (pairing key is one-time)
+
             val prefs = getSharedPreferences("jarvis_link", Context.MODE_PRIVATE)
             val saved = prefs.getString("session_token", null)
             if (!saved.isNullOrBlank() && reconnectAttempts > 0) {
@@ -157,7 +157,7 @@ class JarvisLinkService : Service() {
                 try {
                     send(JSONObject(mapOf("type" to "hello", "client" to "jarvis_android")).toString())
                 } catch (_: Exception) {}
-                // Persistent: Jarvis Connected — stays in notification shade
+
                 updateNotification("Jarvis Connected", true)
             }
 
@@ -194,7 +194,7 @@ class JarvisLinkService : Service() {
                 statusLine = "Disconnected"
                 lastLog = "Disconnected ($code) ${reason ?: ""}"
                 updateNotification("Disconnected", false)
-                // Auto-reconnect
+
                 if (hostRaw.isNotBlank() && reconnectAttempts < maxReconnect) {
                     reconnectAttempts++
                     val delay = (3000L * reconnectAttempts.coerceAtMost(5))
@@ -233,7 +233,7 @@ class JarvisLinkService : Service() {
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(NotificationManager::class.java)
-            // LOW importance = ongoing, less noisy, but always visible
+
             val ch = NotificationChannel(
                 CHANNEL_ID,
                 "Jarvis Link",
@@ -257,7 +257,7 @@ class JarvisLinkService : Service() {
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentIntent(open)
-            .setOngoing(connected)           // cannot swipe away while linked
+            .setOngoing(connected)
             .setOnlyAlertOnce(true)
             .setPriority(
                 if (connected) NotificationCompat.PRIORITY_LOW
@@ -272,3 +272,5 @@ class JarvisLinkService : Service() {
         nm.notify(NOTIF_ID, buildNotification(text, connected))
     }
 }
+
+// by ASDcuber521

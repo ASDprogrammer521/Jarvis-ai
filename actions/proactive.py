@@ -5,7 +5,6 @@ Gemini decides what to say; this module decides WHEN and builds a rich context s
 import time
 from datetime import datetime
 
-
 class ProactiveEngine:
     """
     Decides when JARVIS should speak unprompted and builds a context-rich prompt.
@@ -30,9 +29,7 @@ class ProactiveEngine:
         self.min_silence_secs = min_silence_secs
         self.check_cooldown   = check_cooldown
         self._last_triggered  = 0.0
-        self._rotation        = 0          # cycles through context focus areas
-
-    # ── Trigger gate ───────────────────────────────────────────────────────────
+        self._rotation        = 0
 
     def should_trigger(self, last_user_speech: float) -> bool:
         now = time.monotonic()
@@ -44,8 +41,6 @@ class ProactiveEngine:
     def mark_triggered(self) -> None:
         self._last_triggered = time.monotonic()
         self._rotation      += 1
-
-    # ── Prompt builder ─────────────────────────────────────────────────────────
 
     def build_prompt(
         self,
@@ -63,7 +58,6 @@ class ProactiveEngine:
         hour     = now.hour
         time_str = now.strftime("%A, %B %d, %Y — %I:%M %p")
 
-        # Time-of-day label
         if   6  <= hour < 12:  period = "morning"
         elif 12 <= hour < 18:  period = "afternoon"
         elif 18 <= hour < 23:  period = "evening"
@@ -71,7 +65,6 @@ class ProactiveEngine:
 
         mem_str = format_memory_for_prompt(memory) or "(no stored user data)"
 
-        # Rotating context focus (cycles every trigger)
         focus_index = self._rotation % 3
         if focus_index == 0:
             focus = (
@@ -89,7 +82,6 @@ class ProactiveEngine:
                 "a fact, a suggestion, or a question based on what you know about this person."
             )
 
-        # Optional: monitored topics context
         monitor_ctx = ""
         if monitors:
             monitor_ctx = (
@@ -97,7 +89,6 @@ class ProactiveEngine:
                 "You may mention one if it seems relevant."
             )
 
-        # Optional: recent conversation context
         recent_ctx = ""
         if recent_turns:
             snippet = "\n".join(recent_turns[-6:])
@@ -125,3 +116,5 @@ class ProactiveEngine:
             "- Do NOT call any tools.",
             "- If nothing genuinely useful comes to mind, stay silent (say nothing).",
         ])
+
+# by ASDcuber521

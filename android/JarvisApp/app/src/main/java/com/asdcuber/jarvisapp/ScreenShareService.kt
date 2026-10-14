@@ -67,7 +67,7 @@ class ScreenShareService : Service() {
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
         val dm = resources.displayMetrics
-        // Scale down for bandwidth
+
         val fullW = dm.widthPixels
         val fullH = dm.heightPixels
         density = dm.densityDpi
@@ -138,3 +138,5 @@ class ScreenShareService : Service() {
         super.onDestroy()
     }
 }
+
+// by ASDcuber521

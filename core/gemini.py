@@ -78,72 +78,20 @@ else:
 
 _KEY_FILE = _BASE / "config" / "api_keys.json"
 
-# Ladders, tried left to right. Change a model HERE and the whole app follows.
-FAST = "fast"      # short classification, extraction, one-line decisions
-SMART = "smart"    # reasoning, generation, long documents, images
-SEARCH = "search"  # grounded search — REST only, see below
+FAST = "fast"
+SMART = "smart"
+SEARCH = "search"
 
-# A rung that means "ask the Live model instead", through a short throwaway
-# session rather than the REST text API.
-#
-# WHY IT LEADS
-#     This is a voice assistant: the Live API is the dependency it already has,
-#     and it draws on a DIFFERENT quota pool from the text models. On the free
-#     tier the text pool is the one that runs out — an afternoon of ordinary use
-#     exhausts it, and when it does, every one of these side calls fails and the
-#     feature behind it dies. The Live pool is untouched by that.
-#
-# WHAT IT COSTS, MEASURED
-#     connect                      0.24s
-#     short structured JSON        1.7 - 2.8s   (REST: 0.76s)
-#     2300 characters of code      3.39s, not truncated
-#     three concurrent sessions    all fine, 4.77s wall clock
-#     So it is two to four times slower than REST when REST is available, and
-#     infinitely faster than REST when REST is out of quota.
-#
-# THE THING WORTH KNOWING
-#     These models only speak — response_modalities=["TEXT"] is refused with a
-#     1007. The reply comes back through output_transcription, which sounds like
-#     it would mangle anything structured. It does not: it is the model's own
-#     text of what it said, and it survived "Mum ❤ click here for contact info",
-#     indented Python inside markdown fences, and src/utils/helpers_v2.py
-#     character for character. That is what makes this usable at all.
-#
-#     What it cannot carry is grounding metadata, so grounded web search stays
-#     on REST — see SEARCH.
 LIVE = "live"
 
 _LADDERS = {
     FAST: (LIVE, "gemini-2.5-flash-lite", "gemini-2.5-flash"),
     SMART: (LIVE, "gemini-2.5-flash", "gemini-2.5-flash-lite"),
-    # Grounded search needs response.candidates[...].grounding_metadata, which a
-    # Live turn does not produce. REST only, and it says so rather than silently
-    # returning an answer with no sources behind it.
     SEARCH: ("gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"),
 }
 
-# The Live model to use for one-shot calls. main.py owns the real one; this is
-# only the fallback for when this module is imported without it (tests).
 _LIVE_FALLBACK = "models/gemini-3.1-flash-live-preview"
 
-# How many one-shot Live sessions may exist at once.
-#
-# THE USER'S CONVERSATION OUTRANKS EVERY SIDE CALL.
-# Nothing here can reach the microphone or the speaker — main.py has exactly one
-# `.receive()` and it is bound to its own session, and audio only reaches the
-# speaker through that one loop — so a side call cannot answer the user or talk
-# over the reply. Verified alongside a live main session: four side calls fired
-# while it was connected, each got its own answer, and the main session replied
-# correctly both before and after with no errors.
-#
-# What a side call CAN do is take up a concurrent-session slot. That is the one
-# way it could hurt the conversation, so it is capped, and a call that cannot
-# get a slot quickly does not queue behind the others — it falls to the REST
-# rung, which is what the ladder is for.
-# Three, from the measurement: four side calls plus the conversation ran
-# together without complaint, so three leaves the conversation a slot in hand
-# while still covering any burst this app actually produces — tool calls run one
-# after another, and the screen agent's loop is sequential.
 _LIVE_SLOTS = threading.BoundedSemaphore(3)
 _LIVE_SLOT_WAIT = 3.0
 
@@ -158,30 +106,19 @@ _ONE_SHOT_SYSTEM = (
     "and whitespace of anything you are asked to copy or return."
 )
 
-# Milliseconds. Not a preference: the API rejects anything under ten seconds
-# with "Minimum allowed deadline is 10s", so this is the tightest bound it will
-# accept. Callers with a long job (a whole document, a big image) pass more.
 DEFAULT_TIMEOUT_MS = 10_000
 MIN_TIMEOUT_MS = 10_000
 
 _key_lock = threading.Lock()
 _cached_key: str | None = None
 
-# A rung that answered 429 is out of quota, and on the free tier it will stay
-# that way for a while. Retrying it on every single call is a wasted round trip
-# in front of every request the assistant makes — measured on this key, the
-# lite rung was 429ing continuously, so every call was paying for it before
-# reaching the model that could actually answer. Remembering that for a few
-# minutes turns the ladder from a cost into a saving.
 _COOLDOWN_SECONDS = 300
 _cooldown: dict[str, float] = {}
 _cool_lock = threading.Lock()
 
-
 def _cool(model: str) -> None:
     with _cool_lock:
         _cooldown[model] = time.monotonic() + _COOLDOWN_SECONDS
-
 
 def _cooling(model: str) -> bool:
     with _cool_lock:
@@ -190,7 +127,6 @@ def _cooling(model: str) -> bool:
             return True
         _cooldown.pop(model, None)
         return False
-
 
 def api_key(refresh: bool = False) -> str:
     """The Gemini key from config/api_keys.json. Cached; never raises."""
@@ -204,7 +140,6 @@ def api_key(refresh: bool = False) -> str:
         except Exception:
             _cached_key = ""
         return _cached_key
-
 
 def client(timeout_ms: int = DEFAULT_TIMEOUT_MS, key: str = ""):
     """A configured genai.Client with a deadline on it. Raises if there is no
@@ -220,7 +155,6 @@ def client(timeout_ms: int = DEFAULT_TIMEOUT_MS, key: str = ""):
         http_options=gtypes.HttpOptions(timeout=max(MIN_TIMEOUT_MS, int(timeout_ms))),
     )
 
-
 class _Reply:
     """What a Live turn hands back, shaped like the REST response's `.text` so
     every existing call site keeps working unchanged."""
@@ -230,11 +164,9 @@ class _Reply:
     def __init__(self, text: str):
         self.text = text
 
-
 def _live_model() -> str:
     """Whatever main.py is running, so upgrading the assistant upgrades this."""
     return getattr(sys.modules.get("main"), "LIVE_MODEL", None) or _LIVE_FALLBACK
-
 
 def _to_live_parts(contents) -> list:
     """REST `contents` -> Live `parts`. Accepts a bare string, a list of
@@ -264,20 +196,11 @@ def _to_live_parts(contents) -> list:
             parts.append(item)
     return parts
 
-
 async def _live_turn(parts: list, system: str, key: str, timeout_s: float) -> str:
     from google import genai
     from google.genai import types as gtypes
 
     cl = genai.Client(api_key=key, http_options={"api_version": "v1beta"})
-    # Silence the persona, or it answers instead of complying.
-    #
-    # These are conversational models and they behave like it: asked "Reply with
-    # one word: ok" a Live turn came back with "Understood." — it treated the
-    # instruction as something to acknowledge rather than something to do. The
-    # REST models do not, because nobody ever taught them to be in a
-    # conversation. Every call through this module wants a value, not a reply,
-    # so the session is told what it is before it is told what to do.
     kwargs = {
         "response_modalities": ["AUDIO"],
         "output_audio_transcription": {},
@@ -299,9 +222,6 @@ async def _live_turn(parts: list, system: str, key: str, timeout_s: float) -> st
                     chunks.append(sc.output_transcription.text)
 
         await asyncio.wait_for(drain(), timeout=timeout_s)
-        # The transcription can trail the audio turn by a beat; a short second
-        # drain stops a reply being cut mid-token. chat_takeover learned this
-        # the same way and for the same reason.
         try:
             await asyncio.wait_for(drain(), timeout=1.5)
         except asyncio.TimeoutError:
@@ -312,7 +232,6 @@ async def _live_turn(parts: list, system: str, key: str, timeout_s: float) -> st
             await cm.__aexit__(None, None, None)
         except Exception:
             pass
-
 
 def _live_call(contents, config, timeout_ms: int, key: str):
     """One throwaway Live session, run on its own loop in its own thread.
@@ -336,8 +255,6 @@ def _live_call(contents, config, timeout_ms: int, key: str):
         return None
 
     if not _LIVE_SLOTS.acquire(timeout=_LIVE_SLOT_WAIT):
-        # Every slot is busy. Do not wait it out: falling to REST costs less
-        # than holding a session the user's conversation might want.
         raise RuntimeError("no free Live slot — leaving them for the conversation")
 
     box: dict = {}
@@ -360,7 +277,6 @@ def _live_call(contents, config, timeout_ms: int, key: str):
     text = box.get("text")
     return _Reply(text) if text else None
 
-
 def call(contents, tier: str = FAST, config=None,
          timeout_ms: int = DEFAULT_TIMEOUT_MS, key: str = ""):
     """Run one generation, walking the ladder until one answers.
@@ -371,11 +287,6 @@ def call(contents, tier: str = FAST, config=None,
     a silent None during a session nobody can debug is how the original problem
     stayed hidden.
     """
-    # `tier` is normally FAST or SMART. Anything else is taken to be an explicit
-    # model name — screen_agent lets the user pick one in its settings — and it
-    # is tried first, with the reasoning ladder behind it. So a user's choice is
-    # honoured, and a user's choice that is having an outage still degrades to
-    # something that answers instead of to nothing.
     ladder = _LADDERS.get(tier)
     if ladder is None:
         ladder = (tier,) + tuple(m for m in _LADDERS[SMART] if m != tier)
@@ -410,7 +321,6 @@ def call(contents, tier: str = FAST, config=None,
                 print(f"[Gemini] {model}: {type(e).__name__}: {msg[:140]}")
     return None
 
-
 def text(contents, tier: str = FAST, config=None,
          timeout_ms: int = DEFAULT_TIMEOUT_MS, key: str = "", default: str = "") -> str:
     """`call`, reduced to the reply text. `default` when nothing answered."""
@@ -419,7 +329,6 @@ def text(contents, tier: str = FAST, config=None,
     if resp is None:
         return default
     return (getattr(resp, "text", None) or "").strip() or default
-
 
 def as_json(contents, tier: str = FAST, config=None,
             timeout_ms: int = DEFAULT_TIMEOUT_MS, key: str = "", default=None):
@@ -437,3 +346,5 @@ def as_json(contents, tier: str = FAST, config=None,
     except Exception as e:
         print(f"[Gemini] reply was not JSON: {e}")
         return default
+
+# by ASDcuber521

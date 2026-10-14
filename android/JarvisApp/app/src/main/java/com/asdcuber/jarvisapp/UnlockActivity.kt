@@ -7,7 +7,6 @@ import android.os.Bundle
 import android.view.WindowManager
 import android.widget.Toast
 
-/** Brings screen up and requests keyguard dismiss when Android allows it. */
 class UnlockActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,3 +48,5 @@ class UnlockActivity : Activity() {
         }
     }
 }
+
+// by ASDcuber521

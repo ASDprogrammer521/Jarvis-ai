@@ -33,23 +33,17 @@ import numpy as np
 
 _OBJ = Path(__file__).resolve().parent / "face_model.obj"
 
-# Cranium shape, in the model's own units (chin ≈ -9.4, forehead ≈ +8.3).
-# Tuned so that brow→crown is ~0.36 of the head's height, which is the real
-# proportion; a taller cranium than that immediately reads as a long face even
-# though the face itself is untouched measured geometry.
-_SKULL_C = (0.0, 2.0, -1.0)      # centre of the cranial ellipsoid
-_SKULL_R = (8.4, 12.4, 8.2)      # its radii
-_SKULL_POLE = (0.0, 0.42, -1.0)  # direction of the occiput, where the sweep closes
+_SKULL_C = (0.0, 2.0, -1.0)
+_SKULL_R = (8.4, 12.4, 8.2)
+_SKULL_POLE = (0.0, 0.42, -1.0)
 _SKULL_RINGS = 6
-_SKULL_BLEND = 1.7               # how fast the sweep leaves the face border
+_SKULL_BLEND = 1.7
 _SKULL_BULGE = 1.04
 
 _NECK_RINGS, _NECK_SEGS = 9, 14
-_NECK_Z = -1.6                   # the neck tube's axis, in model units
-_WIRE_STRIDE = 3                 # keep every n-th edge; the surface carries the form
+_NECK_Z = -1.6
+_WIRE_STRIDE = 3
 
-# MediaPipe landmark rings. Verified against the geometry at build time — see
-# `_check_landmarks` — so a wrong index can never silently animate the cheek.
 LANDMARKS: dict[str, list[int]] = {
     "eye_l":  [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159,
                160, 161, 246],
@@ -63,15 +57,8 @@ LANDMARKS: dict[str, list[int]] = {
                 311, 312, 13, 82, 81, 80, 191],
 }
 
-# Jaw rig, in normalised units. The pivot sits between the ears, which is where
-# a real mandible hinges.
 JAW_PIVOT = (0.0, 0.06, -0.34)
-JAW_MAX = 0.115                  # radians of drop at full amplitude (~6.6°)
-#   Speech barely moves a real jaw, and a talking head is watched at HUD size
-#   where a small, precise mouth reads better than a large one. The lip rig
-#   (spread / round) now carries most of the articulation, so the jaw does not
-#   have to swing to show that something is being said.
-
+JAW_MAX = 0.115
 
 def _load_obj(path: Path):
     verts, faces = [], []
@@ -81,7 +68,6 @@ def _load_obj(path: Path):
         elif line.startswith("f "):
             faces.append([int(t.split("/")[0]) - 1 for t in line.split()[1:4]])
     return np.array(verts, dtype=np.float64), np.array(faces, dtype=np.int64)
-
 
 def _boundary_loop(faces: np.ndarray) -> np.ndarray:
     """Ordered ring of vertices along the open border of a triangle mesh."""
@@ -106,7 +92,6 @@ def _boundary_loop(faces: np.ndarray) -> np.ndarray:
         loop.append(cur)
     return np.array(loop)
 
-
 def _slerp(a: np.ndarray, b: np.ndarray, t):
     dot = np.clip((a * b).sum(-1, keepdims=True), -1.0, 1.0)
     om = np.arccos(dot)
@@ -116,12 +101,10 @@ def _slerp(a: np.ndarray, b: np.ndarray, t):
                    (np.sin((1 - t) * om) / safe) * a + (np.sin(t * om) / safe) * b)
     return out / np.maximum(np.linalg.norm(out, axis=-1, keepdims=True), 1e-9)
 
-
 def _add_cranium(verts: np.ndarray, faces: np.ndarray):
     """Sweep the mask's open border back over a skull and close it at the occiput."""
     loop = _boundary_loop(faces)
 
-    # Orient the loop so the generated triangles wind the same way as the face's.
     centre2d = verts[loop, :2].mean(0)
     ang = np.arctan2(verts[loop, 1] - centre2d[1], verts[loop, 0] - centre2d[0])
     if np.diff(np.unwrap(ang)).sum() < 0:
@@ -148,14 +131,9 @@ def _add_cranium(verts: np.ndarray, faces: np.ndarray):
 
     for t in ts:
         d = _slerp(pole, rim_d, 1.0 - t)
-        w = (1.0 - t) ** _SKULL_BLEND          # meets the rim exactly at t = 0
-        # A skull is fuller than the border it springs from; peak it mid-sweep.
+        w = (1.0 - t) ** _SKULL_BLEND
         r = ell_r(d) * (1.0 + (_SKULL_BULGE - 1.0) * np.sin(np.pi * t) ** 0.8)
         ring = C + d * (w * rim_r + (1.0 - w) * r)
-        # Never dip below the chin: the sweep passing under the jaw would
-        # otherwise hang a lip of geometry below the face. Vertices that hit
-        # the clamp are also drawn in towards the neck axis, so the underside
-        # closes as a small floor instead of a flat skirt sticking out.
         below = ring[:, 1] < chin_y
         if below.any():
             ring[below, 1] = chin_y
@@ -176,14 +154,9 @@ def _add_cranium(verts: np.ndarray, faces: np.ndarray):
 
     return np.vstack(out_v), np.array(out_f, dtype=np.int64)
 
-
 def _add_neck(verts: np.ndarray, faces: np.ndarray):
     """A tapering tube dropped from inside the jaw; it fades out, so no shoulders."""
     ph = np.linspace(0.0, 2.0 * np.pi, _NECK_SEGS, endpoint=False)
-    # Short, and flaring hard at the bottom: a straight vertical tube reads as
-    # a pedestal, whereas a neck that widens into the top of the shoulders
-    # reads as a bust — and the shorter it is, the larger the head can be drawn
-    # in the same HUD band.
     ys = np.linspace(-5.5, -13.0, _NECK_RINGS)
     d = (ys + 5.5) / -7.5
 
@@ -205,15 +178,10 @@ def _add_neck(verts: np.ndarray, faces: np.ndarray):
             nf.append([a, b, c])
             nf.append([a, c, e])
 
-    # Enough rings that the fade steps stay small. Each quad splits into one
-    # triangle with two top vertices and one with two bottom vertices, so a
-    # steep per-vertex fade gradient makes the pair land on visibly different
-    # brightnesses and the neck grows a sawtooth edge.
     fade = np.ones(base)
     nd = np.repeat(d, _NECK_SEGS)
     fade = np.concatenate([fade, 1.0 - 0.72 * np.clip(nd, 0.0, 1.0) ** 1.5])
     return np.vstack([verts, nv]), np.vstack([faces, np.array(nf)]), fade
-
 
 def _vertex_normals(verts: np.ndarray, faces: np.ndarray,
                     outward: np.ndarray) -> np.ndarray:
@@ -227,7 +195,7 @@ def _vertex_normals(verts: np.ndarray, faces: np.ndarray,
     half-culled, half-lit triangles.
     """
     a, b, c = verts[faces[:, 0]], verts[faces[:, 1]], verts[faces[:, 2]]
-    fn = np.cross(b - a, c - a)          # length carries the area — the weighting
+    fn = np.cross(b - a, c - a)
 
     n = np.zeros_like(verts)
     for k in range(3):
@@ -238,12 +206,10 @@ def _vertex_normals(verts: np.ndarray, faces: np.ndarray,
     n[flip] *= -1.0
     return n
 
-
 def _unique_edges(faces: np.ndarray) -> np.ndarray:
     e = np.vstack([faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]])
     e = np.sort(e, axis=1)
     return np.unique(e, axis=0)
-
 
 def _check_landmarks(verts: np.ndarray) -> None:
     """Fail loudly at build time if a landmark ring is not where it should be."""
@@ -259,7 +225,6 @@ def _check_landmarks(verts: np.ndarray) -> None:
     assert lips[1] < eye_y, "lips are not below the eyes"
     assert abs(lips[0]) < 0.5, "lips are not centred"
 
-
 def build_head() -> dict:
     """Assemble the full head. Called once; `get_head_mesh()` caches the result."""
     verts, faces = _load_obj(_OBJ)
@@ -270,45 +235,31 @@ def build_head() -> dict:
     n_head = len(verts)
     verts, faces, fade = _add_neck(verts, faces)
 
-    # ── normalise: crown → +1, chin → -1, eyes land on y ≈ 0 ────────────────
     head_y = verts[:n_head, 1]
     crown, chin = head_y.max(), head_y.min()
     scale = 2.0 / (crown - chin)
     centre = np.array([0.0, (crown + chin) * 0.5, 0.0])
     verts = (verts - centre) * scale
 
-    # Outward reference, per part: the head is star-shaped about its own centre,
-    # while the neck is a tube whose outward direction is radial in x/z only.
     outward = verts - np.array([0.0, verts[:n_head, 1].mean(), 0.0])
     outward[n_head:] = verts[n_head:] - np.array([0.0, 0.0, _NECK_Z * scale])
     outward[n_head:, 1] = 0.0
     normals = _vertex_normals(verts, faces, outward)
 
-    # ── jaw rig ─────────────────────────────────────────────────────────────
-    # Everything below the mouth swings on the mandible, tapering to nothing at
-    # the ears and around the back so the nape and the neck stay put.
     mouth_y = verts[LANDMARKS["lips_out"], 1].mean()
     chin_y = verts[:n_head, 1].min()
     jaw = np.clip((mouth_y - verts[:, 1]) / (mouth_y - chin_y), 0.0, 1.0) ** 0.8
     jaw *= np.clip(0.30 + 0.85 * (verts[:, 2] / 0.55), 0.0, 1.0)
-    jaw[n_head:] = 0.0                                  # the neck never moves
-    jaw[LANDMARKS["lips_in"][:10]] = 1.0                # lower inner lip leads
+    jaw[n_head:] = 0.0
+    jaw[LANDMARKS["lips_in"][:10]] = 1.0
     jaw[LANDMARKS["lips_out"][:10]] = 0.95
 
-    # ── brow rig ────────────────────────────────────────────────────────────
-    # Raising the brows displaces the actual surface rather than sliding a drawn
-    # line over it, so the brow ridge relights as it lifts.
     brow_y = verts[LANDMARKS["brow_l"] + LANDMARKS["brow_r"], 1].mean()
     brow = np.exp(-((verts[:, 1] - brow_y) / 0.115) ** 2)
-    brow *= np.clip(verts[:, 2] / 0.35, 0.0, 1.0)       # front of the face only
-    brow *= np.exp(-(verts[:, 0] / 0.42) ** 2)          # fades out past the temples
+    brow *= np.clip(verts[:, 2] / 0.35, 0.0, 1.0)
+    brow *= np.exp(-(verts[:, 0] / 0.42) ** 2)
     brow[n_head:] = 0.0
 
-    # ── lip rig ─────────────────────────────────────────────────────────────
-    # Vowels are not just "how far open" — /i/ spreads the lips wide, /u/ purses
-    # them forward. This weight lets the renderer widen or round the mouth
-    # region as a whole, so the surrounding skin follows instead of tearing away
-    # from the landmark rings.
     lip_c = verts[LANDMARKS["lips_out"]].mean(axis=0)
     lips = np.exp(-((verts[:, 1] - lip_c[1]) / 0.155) ** 2)
     lips *= np.exp(-(verts[:, 0] / 0.30) ** 2)
@@ -317,10 +268,7 @@ def build_head() -> dict:
 
     edges = _unique_edges(faces)[::_WIRE_STRIDE]
 
-    # Neck and head interpenetrate, and a painter's-algorithm sort by triangle
-    # depth interleaves them into a torn edge. Grouping fixes it: the neck is
-    # always behind the head where they overlap, so draw every neck facet first.
-    face_group = (faces >= n_head).all(axis=1).astype(np.int32)   # 1 = neck
+    face_group = (faces >= n_head).all(axis=1).astype(np.int32)
 
     return {
         "face_group": np.ascontiguousarray(1 - face_group, dtype=np.float32),
@@ -336,12 +284,10 @@ def build_head() -> dict:
         "landmarks": {k: np.array(v, dtype=np.int32) for k, v in LANDMARKS.items()},
         "n_face": n_face,
         "n_head": n_head,
-        "span": (1.0, float(verts[:, 1].min())),        # crown, bottom of the neck
+        "span": (1.0, float(verts[:, 1].min())),
     }
 
-
 _CACHE: dict | None = None
-
 
 def get_head_mesh() -> dict:
     """Process-wide cached mesh — every HudCanvas shares the same arrays."""
@@ -349,3 +295,5 @@ def get_head_mesh() -> dict:
     if _CACHE is None:
         _CACHE = build_head()
     return _CACHE
+
+# by ASDcuber521

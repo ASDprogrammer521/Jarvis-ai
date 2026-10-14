@@ -17,7 +17,6 @@ def _base_dir() -> Path:
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent.parent
 
-
 def _get_os() -> str:
     _sys = platform.system()
     if _sys == "Darwin":
@@ -26,12 +25,10 @@ def _get_os() -> str:
         return "linux"
     return "windows"
 
-
 def _scripts_dir() -> Path:
     d = Path.home() / ".jarvis" / "reminders"
     d.mkdir(parents=True, exist_ok=True)
     return d
-
 
 def _sanitise(text: str, max_len: int = 200) -> str:
     return (
@@ -106,7 +103,7 @@ if not notified:
         pass
 """
 
-    else:  # linux
+    else:
         notify_block = f"""
 message = {msg_literal}
 notified = False
@@ -140,7 +137,7 @@ except Exception:
     pass
 """
     script_path.write_text(script_body, encoding="utf-8")
-    script_path.chmod(0o600)   # owner read/write only
+    script_path.chmod(0o600)
     return script_path
 
 def _schedule_windows(target_dt: datetime, task_name: str,
@@ -198,7 +195,6 @@ def _schedule_windows(target_dt: datetime, task_name: str,
 
     return task_name
 
-
 def _schedule_mac(target_dt: datetime, task_name: str,
                   script_path: Path) -> str:
     agents_dir = Path.home() / "Library" / "LaunchAgents"
@@ -247,7 +243,6 @@ def _schedule_mac(target_dt: datetime, task_name: str,
         return ""
 
     return label
-
 
 def _schedule_linux(target_dt: datetime, task_name: str,
                     script_path: Path) -> str:
@@ -336,8 +331,6 @@ def reminder(
     friendly_time = target_dt.strftime("%B %d at %I:%M %p")
     return f"Reminder set for {friendly_time}."
 
-
-# ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "reminder",
     "description": "Sets a timed reminder using Task Scheduler.",
@@ -365,3 +358,5 @@ TOOL = {
     },
     "handler": reminder,
 }
+
+# by ASDcuber521

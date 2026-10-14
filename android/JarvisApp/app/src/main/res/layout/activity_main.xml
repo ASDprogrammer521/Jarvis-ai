@@ -5,8 +5,6 @@
     android:orientation="vertical"
     android:background="#05070C"
     android:padding="0dp">
-
-    <!-- Top bar -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="56dp"
@@ -14,7 +12,6 @@
         android:gravity="center_vertical"
         android:paddingHorizontal="18dp"
         android:background="#080D16">
-
         <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
@@ -24,7 +21,6 @@
             android:textSize="16sp"
             android:textStyle="bold"
             android:letterSpacing="0.2" />
-
         <TextView
             android:id="@+id/statusText"
             android:layout_width="wrap_content"
@@ -37,20 +33,16 @@
             android:paddingHorizontal="12dp"
             android:paddingVertical="6dp" />
     </LinearLayout>
-
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:fillViewport="true"
         android:padding="14dp">
-
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical">
-
-            <!-- Connect card -->
             <LinearLayout
                 android:id="@+id/connectCard"
                 android:layout_width="match_parent"
@@ -58,7 +50,6 @@
                 android:orientation="vertical"
                 android:background="@drawable/bg_card"
                 android:padding="16dp">
-
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -67,7 +58,6 @@
                     android:textSize="11sp"
                     android:textStyle="bold"
                     android:letterSpacing="0.12" />
-
                 <EditText
                     android:id="@+id/hostInput"
                     android:layout_width="match_parent"
@@ -81,7 +71,6 @@
                     android:textColorHint="#6A8499"
                     android:textSize="14sp"
                     android:singleLine="true" />
-
                 <EditText
                     android:id="@+id/keyInput"
                     android:layout_width="match_parent"
@@ -95,7 +84,6 @@
                     android:textColorHint="#6A8499"
                     android:textSize="14sp"
                     android:singleLine="true" />
-
                 <Button
                     android:id="@+id/connectBtn"
                     android:layout_width="match_parent"
@@ -106,7 +94,6 @@
                     android:textStyle="bold"
                     android:background="@drawable/bg_btn_primary"
                     android:stateListAnimator="@null" />
-
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -114,7 +101,6 @@
                     android:text="Same Wi‑Fi required. Get a fresh key from Jarvis → Remote Control."
                     android:textColor="#6A8499"
                     android:textSize="11sp" />
-
                 <Button
                     android:id="@+id/adminBtn"
                     android:layout_width="match_parent"
@@ -126,9 +112,6 @@
                     android:background="@drawable/bg_btn_ghost"
                     android:stateListAnimator="@null" />
             </LinearLayout>
-
-
-            <!-- Quick actions -->
             <HorizontalScrollView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -150,8 +133,6 @@
                     <Button android:id="@+id/qPcOff" android:layout_width="wrap_content" android:layout_height="40dp" android:text="PC Off" android:textSize="11sp" android:textColor="#FF8A9A" android:background="@drawable/bg_btn_ghost" android:stateListAnimator="@null"/>
                 </LinearLayout>
             </HorizontalScrollView>
-
-            <!-- Live log -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -160,7 +141,6 @@
                 android:background="@drawable/bg_card"
                 android:padding="16dp"
                 android:minHeight="220dp">
-
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -169,7 +149,6 @@
                     android:textSize="11sp"
                     android:textStyle="bold"
                     android:letterSpacing="0.12" />
-
                 <TextView
                     android:id="@+id/logView"
                     android:layout_width="match_parent"
@@ -182,8 +161,6 @@
             </LinearLayout>
         </LinearLayout>
     </ScrollView>
-
-    <!-- Bottom chat bar -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -191,7 +168,6 @@
         android:gravity="center_vertical"
         android:padding="12dp"
         android:background="#080D16">
-
         <ImageButton
             android:id="@+id/attachBtn"
             android:layout_width="44dp"
@@ -201,7 +177,6 @@
             android:contentDescription="Attach file"
             android:scaleType="centerInside"
             android:padding="10dp" />
-
         <EditText
             android:id="@+id/chatInput"
             android:layout_width="0dp"
@@ -216,7 +191,6 @@
             android:textColor="#FFFFFF"
             android:textColorHint="#6A8499"
             android:textSize="14sp" />
-
         <ImageButton
             android:id="@+id/sendBtn"
             android:layout_width="48dp"
@@ -228,3 +202,4 @@
             android:padding="12dp" />
     </LinearLayout>
 </LinearLayout>
+<!-- by ASDcuber521 -->

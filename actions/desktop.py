@@ -1,4 +1,3 @@
-#desktop.py
 import os
 import sys
 import json
@@ -15,8 +14,7 @@ try:
 except ImportError:
     _PYAUTOGUI = False
 
-_OS = platform.system()  # "Windows" | "Darwin" | "Linux"
-
+_OS = platform.system()
 
 def _get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -69,7 +67,6 @@ def _build_sandbox() -> dict:
             import winreg
             sandbox["ctypes"] = ctypes
             sandbox["winreg"] = type("winreg", (), {
-                # Sadece okuma
                 "OpenKey":      winreg.OpenKey,
                 "QueryValueEx": winreg.QueryValueEx,
                 "HKEY_CURRENT_USER": winreg.HKEY_CURRENT_USER,
@@ -79,12 +76,10 @@ def _build_sandbox() -> dict:
 
     return sandbox
 
-
 def _execute_generated_code(code: str, player=None) -> str:
     if not code or code.strip() == "UNSAFE":
         return "This action cannot be performed safely."
 
-    # Kod temizleme
     if code.startswith("```"):
         lines = code.split("\n")
         code  = "\n".join(lines[1:-1]).strip()
@@ -99,7 +94,6 @@ def _execute_generated_code(code: str, player=None) -> str:
     except Exception as e:
         print(f"[Desktop] Exec error: {e}\nCode:\n{code[:300]}")
         return f"Execution error: {e}"
-
 
 def _ask_gemini_for_desktop_action(task: str) -> str:
 
@@ -197,7 +191,6 @@ def set_wallpaper(image_path: str) -> str:
                 ], capture_output=True)
 
             elif "kde" in desktop_env:
-                # KDE Plasma
                 script = f"""
 var allDesktops = desktops();
 for (var i = 0; i < allDesktops.length; i++) {{
@@ -236,7 +229,6 @@ for (var i = 0; i < allDesktops.length; i++) {{
     except Exception as e:
         return f"Could not set wallpaper: {e}"
 
-
 def set_wallpaper_from_url(url: str) -> str:
     try:
         import urllib.request
@@ -251,7 +243,6 @@ def set_wallpaper_from_url(url: str) -> str:
         return result
     except Exception as e:
         return f"Could not download wallpaper: {e}"
-
 
 def get_current_wallpaper() -> str:
     try:
@@ -305,7 +296,6 @@ _SKIP_EXTENSIONS = {
     "Linux":   {".desktop"},
 }
 
-
 def organize_desktop(mode: str = "by_type") -> str:
     desktop       = _get_desktop()
     skip_exts     = _SKIP_EXTENSIONS.get(_OS, set())
@@ -348,7 +338,6 @@ def organize_desktop(mode: str = "by_type") -> str:
         result += f"\n{len(skipped)} file(s) skipped (name conflict)."
     return result
 
-
 def list_desktop() -> str:
     desktop = _get_desktop()
     items   = []
@@ -373,7 +362,6 @@ def list_desktop() -> str:
         return "Desktop is empty."
     return f"Desktop ({len(items)} items):\n" + "\n".join(items)
 
-
 def clean_desktop() -> str:
     desktop     = _get_desktop()
     skip_exts   = _SKIP_EXTENSIONS.get(_OS, set())
@@ -393,7 +381,6 @@ def clean_desktop() -> str:
             moved += 1
 
     return f"Desktop cleaned: {moved} files archived to '{archive_dir.name}'."
-
 
 def get_desktop_stats() -> str:
     desktop    = _get_desktop()
@@ -481,8 +468,6 @@ def desktop_control(
         print(f"[Desktop] Error: {e}")
         return f"Desktop control error: {e}"
 
-
-# ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "desktop_control",
     "description": "Controls the desktop: wallpaper, organize, clean, list, stats.",
@@ -516,3 +501,5 @@ TOOL = {
     },
     "handler": desktop_control,
 }
+
+# by ASDcuber521

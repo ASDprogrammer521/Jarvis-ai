@@ -34,23 +34,19 @@ try:
 except ImportError:
     _PIL = False
 
-
 def _base_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent.parent
 
-
 _BASE        = _base_dir()
 _CONFIG_PATH = _BASE / "config" / "api_keys.json"
-
 
 def _load_config() -> dict:
     try:
         return json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
     except Exception:
         return {}
-
 
 def _save_config_key(key: str, value) -> None:
     try:
@@ -60,15 +56,12 @@ def _save_config_key(key: str, value) -> None:
     except Exception as e:
         print(f"[Vision] ⚠️  Could not save config key '{key}': {e}")
 
-
 def _get_os() -> str:
     return _load_config().get("os_system", "windows").lower()
-
 
 _IMG_MAX_W = 1280
 _IMG_MAX_H = 720
 _JPEG_Q    = 82
-
 
 def _compress(img_bytes: bytes, source_format: str = "PNG") -> tuple[bytes, str]:
     if not _PIL:
@@ -84,20 +77,18 @@ def _compress(img_bytes: bytes, source_format: str = "PNG") -> tuple[bytes, str]
         print(f"[Vision] ⚠️  Image compress failed: {e}")
         return img_bytes, f"image/{source_format.lower()}"
 
-
 def _capture_screen() -> tuple[bytes, str]:
 
     if not _MSS:
         raise RuntimeError("mss is not installed. Run: pip install mss")
 
     with mss.mss() as sct:
-        monitors = sct.monitors          # [0] = all combined, [1..n] = real screens
+        monitors = sct.monitors
         target   = monitors[1] if len(monitors) > 1 else monitors[0]
         shot     = sct.grab(target)
         png      = mss.tools.to_png(shot.rgb, shot.size)
 
     return _compress(png, "PNG")
-
 
 def _cv2_backend() -> int:
     """Return the best OpenCV camera backend for the current OS."""
@@ -109,7 +100,6 @@ def _cv2_backend() -> int:
     if os_name == "mac":
         return cv2.CAP_AVFOUNDATION
     return cv2.CAP_ANY
-
 
 def _probe_camera(index: int, backend: int, warmup: int = 5) -> bool:
 
@@ -127,7 +117,6 @@ def _probe_camera(index: int, backend: int, warmup: int = 5) -> bool:
         return False
     return bool(np.mean(frame) > 8)
 
-
 def _detect_camera_index() -> int:
 
     backend = _cv2_backend()
@@ -143,13 +132,11 @@ def _detect_camera_index() -> int:
     _save_config_key("camera_index", 0)
     return 0
 
-
 def _get_camera_index() -> int:
     cfg = _load_config()
     if "camera_index" in cfg:
         return int(cfg["camera_index"])
     return _detect_camera_index()
-
 
 def _capture_camera() -> tuple[bytes, str]:
     if not _CV2:
@@ -181,3 +168,5 @@ def _capture_camera() -> tuple[bytes, str]:
 
     _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, _JPEG_Q])
     return buf.tobytes(), "image/jpeg"
+
+# by ASDcuber521

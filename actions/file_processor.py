@@ -25,14 +25,12 @@ import tempfile
 from pathlib import Path
 from datetime import datetime
 
-# Model choice, timeout and fallback ladder all live in core/gemini.py.
 from core import gemini
 
 def _get_api_key() -> str:
     config_path = Path(__file__).resolve().parent.parent / "config" / "api_keys.json"
     with open(config_path, "r", encoding="utf-8") as f:
         return json.load(f)["gemini_api_key"]
-
 
 def _gemini_client(tier: str = gemini.SMART):
     """Summarising documents and reading images — the reasoning tier, with a
@@ -45,7 +43,6 @@ def _gemini_client(tier: str = gemini.SMART):
             return resp
 
     return _W()
-
 
 def _detect_type(path: Path) -> str:
     ext = path.suffix.lower().lstrip(".")
@@ -71,7 +68,6 @@ def _detect_type(path: Path) -> str:
     if ext == "xml":       return "xml"
     if ext in ("pptx", "ppt"): return "pptx"
     return "unknown"
-
 
 def _file_size_str(path: Path) -> str:
     size = path.stat().st_size
@@ -316,7 +312,6 @@ def _process_text_doc(path: Path, file_type: str, action: str,
     except Exception as e:
         return f"AI processing failed: {e}"
 
-
 def _process_data(path: Path, file_type: str, action: str,
                   params: dict, speak=None) -> str:
     try:
@@ -413,7 +408,6 @@ def _process_data(path: Path, file_type: str, action: str,
         return response.text.strip()
     except Exception as e:
         return f"Processing failed: {e}"
-
 
 def _process_json(path: Path, action: str, params: dict, speak=None) -> str:
     action = action or "analyze"
@@ -588,7 +582,6 @@ def _process_audio(path: Path, action: str, params: dict, speak=None) -> str:
 
 def _process_video(path: Path, action: str, params: dict, speak=None) -> str:
     action = action or "info"
-
 
     def _ffmpeg_available() -> bool:
         try:
@@ -840,8 +833,6 @@ def file_processor(parameters: dict, player=None, speak=None) -> str:
         traceback.print_exc()
         return f"Processing failed: {e}"
 
-
-# ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "file_processor",
     "description": "Processes any file that the user has uploaded or dropped onto the interface. Use this when the user refers to an uploaded file and wants an action on it. Supports: images (describe/ocr/resize/compress/convert), PDFs (summarize/extract_text/to_word), Word docs & text files (summarize/fix/reformat/translate), CSV/Excel (analyze/stats/filter/sort/convert), JSON/XML (validate/format/analyze), code files (explain/review/fix/optimize/run/document/test), audio (transcribe/trim/convert/info), video (trim/extract_audio/extract_frame/compress/transcribe/info), archives (list/extract), presentations (summarize/extract_text). ALWAYS call this tool when a file has been uploaded and the user gives a command about it. If the user's command is ambiguous, pick the most logical action for that file type.",
@@ -921,3 +912,5 @@ TOOL = {
     },
     "handler": file_processor,
 }
+
+# by ASDcuber521

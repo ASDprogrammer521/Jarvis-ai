@@ -41,3 +41,5 @@ dependencies {
     implementation("org.java-websocket:Java-WebSocket:1.5.6")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 }
+
+// by ASDcuber521

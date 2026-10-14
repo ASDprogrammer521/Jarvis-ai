@@ -24,13 +24,9 @@ import threading
 from pathlib import Path
 from typing import Callable
 
-# Pretrained openwakeword model that listens for "Hey Jarvis".
 WAKE_MODEL = "hey_jarvis"
-# Score in [0,1]; above this counts as a detection. Tunable per environment.
 DEFAULT_THRESHOLD = 0.5
-# Mic frames arrive at 16 kHz int16; this is just the detector's input rate.
 SAMPLE_RATE = 16000
-
 
 def is_installed() -> bool:
     """True if the openwakeword package is importable (no model check)."""
@@ -39,7 +35,6 @@ def is_installed() -> bool:
         return importlib.util.find_spec("openwakeword") is not None
     except Exception:
         return False
-
 
 def is_ready() -> bool:
     """True if openwakeword is installed AND its model files are present on disk.
@@ -66,7 +61,6 @@ def is_ready() -> bool:
     except Exception:
         return False
 
-
 def install_and_download(logger: Callable[[str], None] = print,
                          notify: Callable[[str], None] | None = None) -> tuple[bool, str]:
     """
@@ -86,7 +80,6 @@ def install_and_download(logger: Callable[[str], None] = print,
             if r.returncode != 0:
                 tail = (r.stderr or r.stdout or "").strip().splitlines()[-1:] or [""]
                 return False, f"pip install failed: {tail[0][:160]}"
-        # Download the pretrained melspectrogram/embedding + wake models.
         logger("Wake word: downloading models…")
         _tell("Wake word: downloading models…")
         try:
@@ -94,7 +87,7 @@ def install_and_download(logger: Callable[[str], None] = print,
             try:
                 _u.download_models([WAKE_MODEL])
             except TypeError:
-                _u.download_models()   # older signature downloads the default set
+                _u.download_models()
         except Exception as e:
             return False, f"model download failed: {e}"
 
@@ -104,7 +97,6 @@ def install_and_download(logger: Callable[[str], None] = print,
         return True, "Wake word installed and ready."
     except Exception as e:
         return False, f"setup error: {e}"
-
 
 class WakeWordDetector:
     """
@@ -120,8 +112,6 @@ class WakeWordDetector:
         self._on_detect = on_detect
         self._threshold = threshold
         self._logger    = logger
-        # See PluginRegistry: `logger` is the console and gets everything,
-        # `notify` is the activity log and gets only what the user must act on.
         self._notify    = notify or (lambda _msg: None)
         self._queue: queue.Queue = queue.Queue(maxsize=50)
         self._thread: threading.Thread | None = None
@@ -151,7 +141,6 @@ class WakeWordDetector:
 
     def stop(self) -> None:
         self._running = False
-        # unblock the thread if it's waiting on the queue
         try:
             self._queue.put_nowait(None)
         except Exception:
@@ -169,7 +158,6 @@ class WakeWordDetector:
         if not self._running:
             return
         try:
-            # frame_int16 is a numpy int16 array (possibly 2-D mono) — flatten to 1-D
             data = frame_int16[:, 0].copy() if getattr(frame_int16, "ndim", 1) > 1 else frame_int16.copy()
             self._queue.put_nowait(data)
         except queue.Full:
@@ -187,14 +175,12 @@ class WakeWordDetector:
                 scores = self._model.predict(np.asarray(frame, dtype=np.int16))
                 score = 0.0
                 if isinstance(scores, dict):
-                    # match the jarvis model regardless of exact key suffix
                     for k, v in scores.items():
                         if "jarvis" in k.lower():
                             score = max(score, float(v))
                     if score == 0.0 and scores:
                         score = max(float(v) for v in scores.values())
                 if score >= self._threshold:
-                    # drain any backlog so we don't double-fire on the same utterance
                     self._drain()
                     try:
                         self._on_detect()
@@ -209,3 +195,5 @@ class WakeWordDetector:
                 self._queue.get_nowait()
         except Exception:
             pass
+
+# by ASDcuber521

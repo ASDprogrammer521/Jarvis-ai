@@ -16,7 +16,6 @@ META = {
     },
 }
 
-
 def run(action: str = "list", value: str = "", **_) -> str:
     action = (action or "list").lower().strip()
     if action == "list":
@@ -31,3 +30,5 @@ def run(action: str = "list", value: str = "", **_) -> str:
         cfg.set_active_profile(name)
         return f"Active profile: {name}. Some UI options apply on next relevant action."
     return "Use action=list or set"
+
+# by ASDcuber521

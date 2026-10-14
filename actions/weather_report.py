@@ -1,7 +1,6 @@
 import webbrowser
 from urllib.parse import quote_plus
 
-
 def weather_action(
     parameters: dict,
     player=None,
@@ -41,7 +40,6 @@ def weather_action(
 
     return msg
 
-
 def _log(message: str, player=None) -> None:
     print(f"[Weather] {message}")
     if player:
@@ -50,8 +48,6 @@ def _log(message: str, player=None) -> None:
         except Exception:
             pass
 
-
-# ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "weather_report",
     "description": "Gives the weather report to user",
@@ -69,3 +65,5 @@ TOOL = {
     },
     "handler": weather_action,
 }
+
+# by ASDcuber521

@@ -26,7 +26,7 @@
     background-image: radial-gradient(circle at 50% 0%, rgba(99,102,241,0.08) 0%, transparent 60%);
   }
   
-  /* Top Bar */
+  
   .top {
     padding: 16px 20px; display: flex; align-items: center;
     justify-content: space-between; flex-shrink: 0;
@@ -53,7 +53,7 @@
   .status.on .dot { background: var(--green); animation: pulseDot 2s infinite; }
   @keyframes pulseDot { 0%,100%{transform: scale(1); opacity:1} 50%{transform: scale(1.4); opacity:0.5} }
 
-  /* Main Container */
+  
   .main { 
     flex: 1; padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; 
     overflow-y: auto; scroll-behavior: smooth; 
@@ -61,7 +61,7 @@
   .main::-webkit-scrollbar { width: 4px; }
   .main::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
-  /* Cards */
+  
   .card {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: 16px; padding: 16px; backdrop-filter: blur(10px);
@@ -72,7 +72,7 @@
   
   .card h3 { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 12px; font-weight: 700; }
 
-  /* Inputs & Buttons */
+  
   input, button { font: inherit; border: none; outline: none; }
   input {
     width: 100%; background: rgba(255,255,255,0.03); color: var(--text); border-radius: 12px;
@@ -100,14 +100,14 @@
 
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   
-  /* Log Box */
+  
   .log {
     flex: 1; min-height: 120px; max-height: 40vh; overflow-y: auto;
     font-size: 13px; line-height: 1.6; color: var(--muted); white-space: pre-wrap;
     font-family: monospace;
   }
 
-  /* Footer Ask Bar */
+  
   .ask {
     display: flex; gap: 10px; padding: 14px 20px 20px; flex-shrink: 0;
     background: rgba(5,7,11,0.85); backdrop-filter: blur(12px);
@@ -312,3 +312,4 @@ function sendMsg() {
 </script>
 </body>
 </html>
+<!-- by ASDcuber521 -->

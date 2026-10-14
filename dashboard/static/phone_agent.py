@@ -19,7 +19,6 @@ except ImportError:
     print("Install: pip install websocket-client")
     sys.exit(1)
 
-
 def main():
     if len(sys.argv) < 3:
         print("Usage: python phone_agent.py <PC-IP> <PAIRING-KEY>")
@@ -77,6 +76,7 @@ def main():
         print("\nBye.")
         ws.close()
 
-
 if __name__ == "__main__":
     main()
+
+# by ASDcuber521

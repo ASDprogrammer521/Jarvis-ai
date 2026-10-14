@@ -8,7 +8,7 @@ import time
 
 import psutil
 
-_OS = platform.system()  # "Windows" | "Darwin" | "Linux"
+_OS = platform.system()
 
 DEFAULT_THRESHOLDS = {
     "cpu":  90.0,
@@ -20,10 +20,8 @@ DEFAULT_THRESHOLDS = {
 _COOLDOWN   = 300
 _CPU_STREAK = 3
 
-# ── NVML DLL cache (Windows: nvml.dll, Linux: libnvidia-ml.so.1) ─────────────
 _nvml_lib: object = None
-_nvml_ok:  object = None   # None=untested  True=works  False=unavailable
-
+_nvml_ok:  object = None
 
 def _nvml_gpu() -> float:
     """GPU utilisation via NVML — zero subprocess on all platforms."""
@@ -68,9 +66,7 @@ def _nvml_gpu() -> float:
         _nvml_ok = False
         return -1.0
 
-
 def _get_gpu_usage() -> float:
-    # pynvml — subprocess-free, works everywhere if installed
     try:
         import pynvml  # type: ignore
         pynvml.nvmlInit()
@@ -81,9 +77,7 @@ def _get_gpu_usage() -> float:
 
     return _nvml_gpu()
 
-
 def _get_cpu_temp() -> float:
-    # psutil — works on Linux; occasionally Windows with proper drivers
     try:
         temps = psutil.sensors_temperatures()
         for name in ["coretemp", "k10temp", "cpu_thermal", "acpitz",
@@ -96,7 +90,6 @@ def _get_cpu_temp() -> float:
     except Exception:
         pass
 
-    # Windows: wmi module (pure Python COM, zero subprocess)
     if _OS == "Windows":
         try:
             import wmi  # type: ignore
@@ -108,7 +101,6 @@ def _get_cpu_temp() -> float:
             pass
 
     return -1.0
-
 
 def get_system_status() -> dict:
     """Snapshot of current system metrics for the system_status tool."""
@@ -132,7 +124,6 @@ def get_system_status() -> dict:
         "uptime":        f"{uptime_h}h {uptime_m}m",
         "process_count": len(psutil.pids()),
     }
-
 
 class SystemMonitor:
     """
@@ -198,3 +189,5 @@ class SystemMonitor:
             self._record("gpu")
 
         return " ".join(alerts) if alerts else None
+
+# by ASDcuber521

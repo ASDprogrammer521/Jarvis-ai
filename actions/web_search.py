@@ -1,24 +1,16 @@
-#web_search.py
 import json
 import sys
 import threading
 import time
 from pathlib import Path
 
-# ── Gemini grounding quota circuit breaker ────────────────────────────────────
-# The google_search grounding tool has its own small quota, separate from plain
-# generation.  Once it is spent every call returns 429 — so retrying it at the
-# top of every search only adds a dead round-trip before the DDG fallback runs.
-# After a quota error, skip Gemini entirely for a cooldown period.
-_QUOTA_COOLDOWN_SEC  = 900          # 15 minutes
+_QUOTA_COOLDOWN_SEC  = 900
 _quota_blocked_until = 0.0
 _quota_lock          = threading.Lock()
-
 
 def _gemini_available() -> bool:
     with _quota_lock:
         return time.monotonic() >= _quota_blocked_until
-
 
 def _note_gemini_error(exc: Exception) -> None:
     """Trip the breaker when the error is a quota / rate-limit rejection."""
@@ -34,17 +26,14 @@ def _note_gemini_error(exc: Exception) -> None:
                 f"{_QUOTA_COOLDOWN_SEC // 60} min and serving results from DDG."
             )
 
-
 class _QuotaCooldown(RuntimeError):
     """Raised instead of calling Gemini while the quota breaker is open."""
-
 
 def _log_gemini_failure(context: str, exc: Exception) -> None:
     """Log a Gemini failure — silently when it is just the expected cooldown."""
     if isinstance(exc, _QuotaCooldown):
-        return          # announced once when the breaker tripped; not a warning
+        return
     print(f"[WebSearch] \u26a0\ufe0f {context} failed ({exc}) — using DDG instead")
-
 
 def _run_bounded(fn, timeout: float, label: str = "task"):
     """Run fn() in a daemon thread; return its result, or None if it overruns."""
@@ -68,15 +57,12 @@ def _get_base_dir() -> Path:
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent.parent
 
-
 BASE_DIR        = _get_base_dir()
 API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
-
 
 def _get_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
         return json.load(f)["gemini_api_key"]
-
 
 def _gemini_search(query: str) -> str:
     if not _gemini_available():
@@ -84,8 +70,6 @@ def _gemini_search(query: str) -> str:
 
     from core import gemini
 
-    # Grounded search reads a live page, so it gets a longer deadline than the
-    # default — but it still HAS one, and it still walks the fallback ladder.
     try:
         response = gemini.call(query, tier=gemini.SEARCH,
                                config={"tools": [{"google_search": {}}]},
@@ -106,7 +90,6 @@ def _gemini_search(query: str) -> str:
         raise ValueError("Gemini returned an empty response.")
     return text
 
-
 def _get_ddgs():
     """
     Returns the DDGS class.  The package was renamed duckduckgo-search -> ddgs;
@@ -126,7 +109,6 @@ def _get_ddgs():
         )
         return DDGS
 
-
 def _ddg_search(query: str, max_results: int = 6) -> list[dict]:
     DDGS = _get_ddgs()
     results = []
@@ -141,7 +123,6 @@ def _ddg_search(query: str, max_results: int = 6) -> list[dict]:
     except Exception as e:
         print(f"[WebSearch] ⚠️ DDG text() failed: {e}")
     return results
-
 
 def _ddg_news(query: str, max_results: int = 8) -> list[dict]:
     """DDG news search — returns actual articles, not website homepages."""
@@ -158,12 +139,9 @@ def _ddg_news(query: str, max_results: int = 8) -> list[dict]:
                 })
     except Exception as e:
         print(f"[WebSearch] ⚠️ DDG news() failed ({e}) — falling back to text search")
-    # Also covers the legacy-package case, where news() returns an empty list
-    # instead of raising.
     if not results:
         results = _ddg_search(query, max_results=max_results)
     return results
-
 
 def _format_ddg(query: str, results: list[dict]) -> str:
     if not results:
@@ -176,7 +154,6 @@ def _format_ddg(query: str, results: list[dict]) -> str:
         if r.get("url"):     lines.append(f"   Source: {r['url']}")
         lines.append("")
     return "\n".join(lines).strip()
-
 
 def _format_news(query: str, results: list[dict]) -> str:
     if not results:
@@ -195,9 +172,6 @@ def _format_news(query: str, results: list[dict]) -> str:
             lines.append(f"   {r['url']}")
         lines.append("")
     return "\n".join(lines).strip()
-
-
-# ── Briefing helper ────────────────────────────────────────────────────────────
 
 def _gemini_headlines(n: int = 5) -> tuple[list[str], str]:
     """
@@ -227,7 +201,6 @@ def _gemini_headlines(n: int = 5) -> tuple[list[str], str]:
         line = line.strip()
         if not line:
             continue
-        # Only accept lines that begin with a number — skips preamble/closing sentences
         if not re.match(r'^[\d]+[.\)\-]', line):
             continue
         clean = re.sub(r'^[\d]+[.\)\-]\s*', '', line)
@@ -237,9 +210,6 @@ def _gemini_headlines(n: int = 5) -> tuple[list[str], str]:
 
     return headlines[:n], raw.strip()
 
-
-# ── Modes ──────────────────────────────────────────────────────────────────────
-
 def _search(query: str) -> str:
     """Default search — Gemini grounded, DDG fallback."""
     try:
@@ -248,7 +218,6 @@ def _search(query: str) -> str:
         _log_gemini_failure("Gemini search", e)
         results = _ddg_search(query)
         return _format_ddg(query, results)
-
 
 def _news(query: str) -> str:
     """
@@ -283,7 +252,6 @@ def _news(query: str) -> str:
 
     return f"No news found for: {query}"
 
-
 def _research(query: str) -> str:
     """
     Deep dive — asks Gemini for a comprehensive answer with context.
@@ -300,7 +268,6 @@ def _research(query: str) -> str:
         results = _ddg_search(query, max_results=10)
         return _format_ddg(query, results)
 
-
 def _price(query: str) -> str:
     """Product price lookup — searches for current market prices."""
     price_query = f"current price of {query} — how much does it cost today"
@@ -310,7 +277,6 @@ def _price(query: str) -> str:
         _log_gemini_failure("Gemini price", e)
         results = _ddg_search(f"{query} price buy", max_results=6)
         return _format_ddg(query, results)
-
 
 def _compare(items: list[str], aspect: str) -> str:
     query = (
@@ -338,9 +304,6 @@ def _compare(items: list[str], aspect: str) -> str:
             if r.get("url"):
                 lines.append(f"    {r['url']}")
     return "\n".join(lines)
-
-
-# ── Public entry point ─────────────────────────────────────────────────────────
 
 def web_search(
     parameters:     dict,
@@ -380,8 +343,6 @@ def web_search(
         print(f"[WebSearch] ❌ All backends failed: {e}")
         return f"Search failed: {e}"
 
-
-# ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "web_search",
     "description": "Searches the web. Use for ANY question about current facts, events, prices, or topics — always prefer this over guessing. Modes: 'search' (default), 'news' (latest headlines on a topic), 'research' (deep comprehensive answer), 'price' (product cost lookup), 'compare' (side-by-side comparison of items).",
@@ -414,3 +375,5 @@ TOOL = {
     },
     "handler": web_search,
 }
+
+# by ASDcuber521

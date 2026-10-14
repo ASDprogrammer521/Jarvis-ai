@@ -36,37 +36,28 @@ from typing import Callable
 
 _OS = platform.system()
 
-# The default chord. Ctrl+Space is free in most desktop environments and is the
-# same finger shape on every keyboard layout, which matters for a worldwide app.
 DEFAULT_CHORD = ("ctrl", "space")
 
-# Windows virtual-key codes for the names we accept.
 _VK = {
     "ctrl": 0x11, "shift": 0x10, "alt": 0x12,
     "space": 0x20, "f8": 0x77, "f9": 0x78, "f10": 0x79,
     "capslock": 0x14, "insert": 0x2D,
 }
 
-# Qt key sequence text for the same chord, used by the windowed fallback.
 _QT_NAME = {"ctrl": "Ctrl", "shift": "Shift", "alt": "Alt", "space": "Space",
             "f8": "F8", "f9": "F9", "f10": "F10",
             "capslock": "CapsLock", "insert": "Ins"}
 
 _POLL_HZ = 30.0
-# A key has to be down this long before we call it speech. It stops a stray
-# brush of the chord from opening the microphone.
 _DEBOUNCE_S = 0.06
-
 
 def chord_label(chord=DEFAULT_CHORD) -> str:
     """Human-readable name of the chord, for the UI and the logs."""
     return "+".join(_QT_NAME.get(k, k.title()) for k in chord)
 
-
 def qt_sequence(chord=DEFAULT_CHORD) -> str:
     """The same chord as a QKeySequence string."""
     return "+".join(_QT_NAME.get(k, k.title()) for k in chord)
-
 
 class PushToTalk:
     """Calls `on_change(held: bool)` whenever the chord is pressed or released.
@@ -83,8 +74,6 @@ class PushToTalk:
         self._held = False
         self._scope = "window"
 
-    # ── state ───────────────────────────────────────────────────────────────
-
     @property
     def held(self) -> bool:
         return self._held
@@ -97,8 +86,6 @@ class PushToTalk:
     @property
     def label(self) -> str:
         return chord_label(self._chord)
-
-    # ── lifecycle ───────────────────────────────────────────────────────────
 
     def start(self) -> str:
         """Begin watching. Returns the scope actually achieved."""
@@ -120,13 +107,9 @@ class PushToTalk:
             t.join(timeout=1.0)
         self._set_held(False)
 
-    # ── the windowed fallback drives this directly ──────────────────────────
-
     def set_held(self, held: bool) -> None:
         """Feed a press/release from a Qt shortcut (non-Windows, or no hook)."""
         self._set_held(bool(held))
-
-    # ── internals ───────────────────────────────────────────────────────────
 
     def _can_poll(self) -> bool:
         try:
@@ -143,7 +126,7 @@ class PushToTalk:
         try:
             self._on_change(held)
         except Exception:
-            pass          # a listener fault must never kill the watcher
+            pass
 
     def _poll_loop(self) -> None:
         import ctypes
@@ -154,10 +137,9 @@ class PushToTalk:
 
         while not self._stop.is_set():
             try:
-                # The high bit of the return value is "currently down".
                 down = all(user32.GetAsyncKeyState(c) & 0x8000 for c in codes)
             except Exception:
-                break     # driver or session teardown — fall back to windowed
+                break
             now = time.monotonic()
             if down:
                 if down_since == 0.0:
@@ -171,3 +153,5 @@ class PushToTalk:
 
         self._set_held(False)
         self._scope = "window"
+
+# by ASDcuber521

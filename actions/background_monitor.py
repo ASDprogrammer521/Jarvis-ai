@@ -9,14 +9,9 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-
-# ── Blocked categories (never monitor regardless of what user says) ────────────
-
 _BLOCKED = {
-    # Brand / asset names — spelled the same in every language
     "bitcoin", "ethereum", "dogecoin", "solana", "binance",
     "nft", "blockchain", "defi", "altcoin", "memecoin", "coin", "token",
-    # spellings of the "crypto" root across different languages
     "crypto", "kripto", "cripto", "krypto", "крипто", "仮想通貨", "暗号資産",
     "cryptocurrency",
 }
@@ -25,17 +20,11 @@ def _is_blocked(topic: str) -> bool:
     t = topic.lower()
     return any(word in t for word in _BLOCKED)
 
-
-# ── Slug / hash helpers ────────────────────────────────────────────────────────
-
 def _slug(topic: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", topic.lower().strip())[:40].strip("_")
 
 def _title_hash(title: str) -> str:
     return hashlib.md5(title.encode("utf-8", errors="ignore")).hexdigest()[:12]
-
-
-# ── Memory I/O ─────────────────────────────────────────────────────────────────
 
 def _load() -> dict:
     from memory.memory_manager import load_memory
@@ -52,9 +41,6 @@ def _save(monitors: dict) -> None:
             json.dumps(memory, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
-
-
-# ── Public API ─────────────────────────────────────────────────────────────────
 
 def add_monitor(topic: str) -> str:
     topic = topic.strip()
@@ -76,17 +62,14 @@ def add_monitor(topic: str) -> str:
     print(f"[Monitor] ➕ Added: {topic}")
     return f"Now monitoring: {topic}"
 
-
 def remove_monitor(topic: str) -> str:
     topic = topic.strip().lower()
     monitors = _load()
-    # exact slug match first
     slug = _slug(topic)
     if slug in monitors:
         label = monitors.pop(slug)["topic"]
         _save(monitors)
         return f"Stopped monitoring: {label}"
-    # partial match fallback
     for key, val in list(monitors.items()):
         if topic in val.get("topic", "").lower():
             label = monitors.pop(key)["topic"]
@@ -94,10 +77,8 @@ def remove_monitor(topic: str) -> str:
             return f"Stopped monitoring: {label}"
     return f"Not found in monitored topics: {topic}"
 
-
 def list_monitors() -> list[str]:
     return [v.get("topic", k) for k, v in _load().items()]
-
 
 def check_all() -> list[str]:
     """
@@ -116,7 +97,7 @@ def check_all() -> list[str]:
 
     for slug, data in monitors.items():
         if data.get("last_check") == today:
-            continue                     # already checked today
+            continue
 
         topic = data.get("topic", slug)
         try:
@@ -136,7 +117,7 @@ def check_all() -> list[str]:
             changed = True
 
             if h == data.get("last_hash"):
-                continue                 # same headline as last check — no alert
+                continue
 
             monitors[slug]["last_hash"] = h
 
@@ -157,3 +138,5 @@ def check_all() -> list[str]:
         _save(monitors)
 
     return alerts
+
+# by ASDcuber521

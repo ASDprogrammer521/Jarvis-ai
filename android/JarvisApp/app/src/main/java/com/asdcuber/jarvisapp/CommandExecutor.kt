@@ -158,7 +158,6 @@ object CommandExecutor {
         val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) ==
             PackageManager.PERMISSION_GRANTED
 
-        // Prefer real call when permission granted
         if (granted) {
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -167,7 +166,7 @@ object CommandExecutor {
                     tm.placeCall(uri, null)
                     return "Calling $number"
                 }
-            } catch (_: Exception) { /* fall through */ }
+            } catch (_: Exception) {  }
 
             try {
                 val call = Intent(Intent.ACTION_CALL, Uri.parse("tel:$number"))
@@ -175,11 +174,10 @@ object CommandExecutor {
                 context.startActivity(call)
                 return "Calling $number"
             } catch (e: Exception) {
-                // fall through to dialer
+
             }
         }
 
-        // Fallback: open dialer with number filled (user taps Call)
         return try {
             val dial = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number"))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -202,7 +200,7 @@ object CommandExecutor {
     }
 
     private fun sendSms(context: Context, value: String): String {
-        // formats: "number|message" or just number
+
         val parts = value.split("|", limit = 2)
         val number = parts[0].filter { it.isDigit() || it == '+' }
         val body = if (parts.size > 1) parts[1].trim() else ""
@@ -235,8 +233,7 @@ object CommandExecutor {
     }
 
     private fun unlockOrWake(context: Context): String {
-        // Full PIN/pattern unlock is blocked by Android security.
-        // We can: turn screen on + try dismiss keyguard when no secure lock.
+
         return try {
             val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
             @Suppress("DEPRECATION")
@@ -250,7 +247,7 @@ object CommandExecutor {
             try {
                 val km = context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    // Needs activity callback for secure keyguard — open trampoline
+
                     val i = Intent(context, UnlockActivity::class.java)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     context.startActivity(i)
@@ -312,7 +309,7 @@ object CommandExecutor {
             context.startActivity(i)
             "Screenshot UI opened — allow screen capture on the phone"
         } catch (e: Exception) {
-            // Trampoline: open MainActivity which immediately starts ScreenshotActivity
+
             val trampoline = Intent(context, MainActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 putExtra("jarvis_action", "screenshot")
@@ -327,11 +324,6 @@ object CommandExecutor {
         }
     }
 
-    /**
-     * Android 10+ blocks startActivity from background even from FGS.
-     * Strategy: always post a heads-up notification with the real Intent,
-     * and also try startActivity (works when app is visible / some OEMs).
-     */
     private fun launchFromBackground(context: Context, intent: Intent, label: String): String {
         intent.addFlags(
             Intent.FLAG_ACTIVITY_NEW_TASK or
@@ -345,7 +337,7 @@ object CommandExecutor {
         } catch (_: Exception) {
             started = false
         }
-        // Always notify — background starts are often silently dropped
+
         postNotice(context, "Jarvis: $label", "Tap to open", intent)
         return if (started) {
             "Tried to open $label (if not open, tap the notification)"
@@ -444,3 +436,5 @@ object CommandExecutor {
         }
     }
 }
+
+// by ASDcuber521

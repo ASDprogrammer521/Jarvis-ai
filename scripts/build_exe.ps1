@@ -1,5 +1,3 @@
-# Build Jarvis Windows package (run on Windows with Python 3.11+)
-# Usage:  powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1
 
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path $PSScriptRoot -Parent)
@@ -25,3 +23,4 @@ Compress-Archive -Path "dist\Jarvis\*" -DestinationPath $zipName -Force
 
 Write-Host "Done: $zipName"
 Write-Host "Users extract the zip and run Jarvis.exe (Python not required)."
+# by ASDcuber521

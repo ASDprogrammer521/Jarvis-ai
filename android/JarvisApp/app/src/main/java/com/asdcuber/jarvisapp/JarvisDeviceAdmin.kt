@@ -9,3 +9,5 @@ class JarvisDeviceAdmin : DeviceAdminReceiver() {
         super.onEnabled(context, intent)
     }
 }
+
+// by ASDcuber521

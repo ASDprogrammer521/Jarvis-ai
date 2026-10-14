@@ -64,7 +64,6 @@ _APP_ALIASES: dict[str, dict[str, str]] = {
     "epic games":         {"Windows": "EpicGamesLauncher",       "Darwin": "Epic Games Launcher",  "Linux": "legendary"},
 }
 
-
 def _normalize(raw: str) -> str:
     key = raw.lower().strip()
 
@@ -114,7 +113,6 @@ def _launch_windows(app_name: str) -> bool:
         print(f"[open_app] Start Menu search failed: {e}")
 
     return False
-
 
 def _launch_macos(app_name: str) -> bool:
 
@@ -167,7 +165,6 @@ def _launch_macos(app_name: str) -> bool:
 
     return False
 
-
 _LINUX_TERMINAL_FALLBACKS = [
     "x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal",
     "xterm", "lxterminal", "mate-terminal", "tilix", "alacritty", "kitty",
@@ -175,7 +172,6 @@ _LINUX_TERMINAL_FALLBACKS = [
 
 def _launch_linux(app_name: str) -> bool:
 
-    # terminal emulators: try common ones in order
     if app_name in ("x-terminal-emulator", "gnome-terminal", "terminal"):
         for term in _LINUX_TERMINAL_FALLBACKS:
             if shutil.which(term):
@@ -230,7 +226,6 @@ def _launch_linux(app_name: str) -> bool:
 
     return False
 
-
 _OS_LAUNCHERS = {
     "Windows": _launch_windows,
     "Darwin":  _launch_macos,
@@ -272,8 +267,6 @@ def open_app(
         print(f"[open_app] Error: {e}")
         return f"Failed to open {app_name}: {e}"
 
-
-# ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "open_app",
     "description": "Opens any application on the computer. Use this whenever the user asks to open, launch, or start any app, website, or program. Always call this tool — never just say you opened it.",
@@ -291,3 +284,5 @@ TOOL = {
     },
     "handler": open_app,
 }
+
+# by ASDcuber521

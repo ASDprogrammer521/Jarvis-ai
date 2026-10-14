@@ -50,16 +50,13 @@ def is_configured() -> bool:
     key = get_gemini_key()
     return bool(key and len(key) > 15)
 
-
 def get_assistant_name() -> str:
     """Return the configured assistant name, or 'JARVIS' if not set."""
     return load_api_keys().get("assistant_name", "JARVIS") or "JARVIS"
 
-
 def get_user_name() -> str:
     """Return the configured user name for addressing."""
     return load_api_keys().get("user_name", "")
-
 
 def save_assistant_config(assistant_name: str, user_name: str) -> None:
     """Persist assistant name and user name to config."""
@@ -74,20 +71,14 @@ def save_assistant_config(assistant_name: str, user_name: str) -> None:
     data["user_name"] = user_name.strip()
     CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
 
-
-# ── Assistant voice ──────────────────────────────────────────────────────────
-# Gemini Live prebuilt voices. Names are proper nouns — identical in every
-# language, so this list is safe to show verbatim in any locale.
 AVAILABLE_VOICES = ["Charon", "Puck", "Kore", "Fenrir", "Aoede"]
 DEFAULT_VOICE    = "Charon"
-
 
 def get_voice() -> str:
     """Return the configured Live voice, falling back to the default if unset
     or if the stored value is not a voice we recognise."""
     v = load_api_keys().get("voice_name", DEFAULT_VOICE) or DEFAULT_VOICE
     return v if v in AVAILABLE_VOICES else DEFAULT_VOICE
-
 
 def save_voice(voice_name: str) -> None:
     """Persist the chosen Live voice. Unknown names collapse to the default so a
@@ -103,11 +94,9 @@ def save_voice(voice_name: str) -> None:
     data["voice_name"] = v if v in AVAILABLE_VOICES else DEFAULT_VOICE
     CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
 
-
 def get_wake_word_enabled() -> bool:
     """Whether local wake-word gating is on (assistant sleeps until 'Hey Jarvis')."""
     return load_api_keys().get("wake_word_enabled", False)
-
 
 def save_wake_word_enabled(enabled: bool) -> None:
     ensure_config_dir()
@@ -120,40 +109,29 @@ def save_wake_word_enabled(enabled: bool) -> None:
     data["wake_word_enabled"] = bool(enabled)
     CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
 
-
 def get_push_to_talk_enabled() -> bool:
     """Hold-a-key-to-speak. When on, the mic is closed unless the chord is held."""
     return load_api_keys().get("push_to_talk_enabled", False)
 
-
 def save_push_to_talk_enabled(enabled: bool) -> None:
     _save_flag("push_to_talk_enabled", enabled)
 
-
 HUD_STYLES = ("neural", "orbitals", "ribbons", "burst", "radial", "blueprint", "sphere", "core", "armor", "rings", "face")
-
 
 def get_hud_style() -> str:
     """Which centrepiece the HUD draws: animated head, reactor core, or
     Iron-Man-style holographic sphere.
 
     Taste, not capability — all three render in the same software painter and
-    cost about the same. Defaults to the head because that is what MARK LIV
+    cost about the same. Defaults to the head because that is what ASDcuber521
     shipped with; the choice survives a restart.
     """
     v = str(load_api_keys().get("hud_style", "orbitals")).strip().lower()
     return v if v in HUD_STYLES else "orbitals"
 
-
 def save_hud_style(style: str) -> None:
     s = str(style or "").strip().lower()
     _save_flag("hud_style", s if s in HUD_STYLES else "sphere")
-
-
-# ── Live-session tuning ──────────────────────────────────────────────────────
-# Everything here is optional and has a working default, so an untouched
-# config behaves exactly like a configured one. Each value is also a way out:
-# if a future model dislikes one of these, set it back and nothing else changes.
 
 def get_thinking_enabled() -> bool:
     """Whether the Live model may spend tokens thinking before it answers.
@@ -164,10 +142,8 @@ def get_thinking_enabled() -> bool:
     """
     return bool(load_api_keys().get("thinking_enabled", False))
 
-
 def save_thinking_enabled(enabled: bool) -> None:
     _save_flag("thinking_enabled", enabled)
-
 
 def get_turn_tuning() -> dict:
     """How eagerly the server decides you have stopped speaking.
@@ -197,11 +173,9 @@ def get_turn_tuning() -> dict:
         "enabled":    bool(cfg.get("enabled", False)),
         "silence_ms": _int("silence_ms", 550, 200, 3000),
         "prefix_ms":  _int("prefix_ms", 150, 0, 1000),
-        # "high" = quicker to decide speech has ended.
         "end_sensitivity":   str(cfg.get("end_sensitivity", "high")).lower(),
         "start_sensitivity": str(cfg.get("start_sensitivity", "default")).lower(),
     }
-
 
 def save_turn_tuning(values: dict) -> None:
     ensure_config_dir()
@@ -217,7 +191,6 @@ def save_turn_tuning(values: dict) -> None:
     data["turn_tuning"] = cur
     CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
 
-
 def get_proactive_audio_enabled() -> bool:
     """Whether the model gets to decide an utterance was not aimed at it and
     stay quiet.
@@ -230,13 +203,10 @@ def get_proactive_audio_enabled() -> bool:
     """
     return bool(load_api_keys().get("proactive_audio", True))
 
-
 def save_proactive_audio_enabled(enabled: bool) -> None:
     _save_flag("proactive_audio", enabled)
 
-
 MEDIA_RESOLUTIONS = ("default", "low", "medium", "high")
-
 
 def get_media_resolution() -> str:
     """How finely the model tokenises the screenshots and camera frames it is
@@ -246,11 +216,9 @@ def get_media_resolution() -> str:
     v = str(load_api_keys().get("media_resolution", "medium")).strip().lower()
     return v if v in MEDIA_RESOLUTIONS else "medium"
 
-
 def save_media_resolution(value: str) -> None:
     v = str(value or "").strip().lower()
     _save_flag("media_resolution", v if v in MEDIA_RESOLUTIONS else "medium")
-
 
 def _save_flag(key: str, value) -> None:
     """Read-modify-write one key without disturbing the rest of the config."""
@@ -264,10 +232,8 @@ def _save_flag(key: str, value) -> None:
     data[key] = bool(value) if isinstance(value, bool) else value
     CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
 
-
 def get_brief_enabled() -> bool:
     return load_api_keys().get("morning_brief_enabled", True)
-
 
 def save_brief_enabled(enabled: bool) -> None:
     ensure_config_dir()
@@ -279,14 +245,6 @@ def save_brief_enabled(enabled: bool) -> None:
             data = {}
     data["morning_brief_enabled"] = enabled
     CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
-
-
-# ── Audio devices ────────────────────────────────────────────────────────────
-# Stored as device NAMES, not sounddevice indices. Indices shift every time a
-# USB device is plugged in or removed, so a saved index silently starts pointing
-# at a different microphone. The empty string means "system default", which is
-# both the factory setting and what an unresolvable saved device falls back to —
-# so unplugging a headset degrades to the built-in speakers instead of crashing.
 
 def _patch_config(**fields) -> None:
     """Read-modify-write one or more keys in api_keys.json.
@@ -304,47 +262,33 @@ def _patch_config(**fields) -> None:
     data.update(fields)
     CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
 
-
 def get_input_device() -> str:
     """Microphone device name, or '' for the system default."""
     return (load_api_keys().get("input_device", "") or "").strip()
 
-
 def save_input_device(name: str) -> None:
     _patch_config(input_device=(name or "").strip())
-
 
 def get_output_device() -> str:
     """Speaker device name, or '' for the system default."""
     return (load_api_keys().get("output_device", "") or "").strip()
 
-
 def save_output_device(name: str) -> None:
     _patch_config(output_device=(name or "").strip())
-
 
 def get_plugin_enabled(plugin_name: str) -> bool:
     """Plugins are enabled by default the moment they're discovered (opt-out model)."""
     return load_api_keys().get("plugins_enabled", {}).get(plugin_name, True)
 
-
-# ── Per-plugin settings ("tokens" / connection details) ───────────────────────
-# Generic store so a plugin can declare its own config fields (PLUGIN_SETTINGS)
-# and the settings UI renders + persists them WITHOUT any core edit — keeping the
-# drop-in model intact. Values live under plugin_config[<namespace>][<key>].
-# A namespace defaults to the plugin name, but a suite of plugins (e.g. the
-# several printer plugins) can share ONE namespace.
 def get_plugin_config(namespace: str) -> dict:
     """All stored values for a namespace (empty dict if none set yet)."""
     cfg = load_api_keys().get("plugin_config")
     val = cfg.get(namespace) if isinstance(cfg, dict) else None
     return dict(val) if isinstance(val, dict) else {}
 
-
 def get_plugin_setting(namespace: str, key: str, default=None):
     """A single value from a namespace, or `default` if unset."""
     return get_plugin_config(namespace).get(key, default)
-
 
 def save_plugin_config(namespace: str, values: dict) -> None:
     """Merge `values` into a namespace's stored config (read-modify-write, like
@@ -367,7 +311,6 @@ def save_plugin_config(namespace: str, values: dict) -> None:
     data["plugin_config"] = pc
     CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
 
-
 def save_plugin_enabled(plugin_name: str, enabled: bool) -> None:
     ensure_config_dir()
     data: dict = {}
@@ -383,7 +326,6 @@ def save_plugin_enabled(plugin_name: str, enabled: bool) -> None:
     data["plugins_enabled"] = plugins_cfg
     CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
 
-# ── Profiles (home / work / game) ─────────────────────────────────────────────
 _DEFAULT_PROFILES = {
     "home": {"hud": "sphere", "talk_mode": "push", "sys_monitor": True},
     "work": {"hud": "core", "talk_mode": "open", "sys_monitor": True},
@@ -428,3 +370,5 @@ def list_profiles() -> list[str]:
     if not isinstance(profiles, dict) or not profiles:
         return list(_DEFAULT_PROFILES.keys())
     return list(profiles.keys())
+
+# by ASDcuber521

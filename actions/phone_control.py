@@ -13,12 +13,8 @@ import subprocess
 import time
 from pathlib import Path
 
-
-
-
 def _adb_available() -> bool:
     return shutil.which("adb") is not None
-
 
 def _run_adb(args: list[str], timeout: int = 20) -> tuple[bool, str]:
     try:
@@ -35,7 +31,6 @@ def _run_adb(args: list[str], timeout: int = 20) -> tuple[bool, str]:
     except Exception as e:
         return False, str(e)
 
-
 def _ensure_adb() -> list[str]:
     """Refresh device list; try wireless connect if we know phone IP."""
     try:
@@ -51,7 +46,6 @@ def _ensure_adb() -> list[str]:
         pass
     return _devices_raw()
 
-
 def _devices_raw() -> list[str]:
     if not _adb_available():
         return []
@@ -65,7 +59,6 @@ def _devices_raw() -> list[str]:
             devs.append(parts[0])
     return devs
 
-
 def _get_dashboard():
     """Access the running DashboardServer instance."""
     try:
@@ -75,7 +68,6 @@ def _get_dashboard():
             return d
     except Exception:
         pass
-    # Fallback: walk loaded modules for Jarvis engine
     try:
         import sys
         for mod in list(sys.modules.values()):
@@ -94,19 +86,16 @@ def _get_dashboard():
         pass
     return None
 
-
 def _phone_web_linked(dash) -> bool:
     try:
         return bool(dash and dash.phone_linked())
     except Exception:
         return False
 
-
 def _push_phone(dash, payload: dict) -> int:
     """Send JSON to all linked phones; works from Gemini tool thread."""
     if dash is None:
         return 0
-    # Preferred: thread-safe helper on DashboardServer
     if hasattr(dash, "send_to_phones_sync"):
         try:
             n = int(dash.send_to_phones_sync(payload) or 0)
@@ -114,7 +103,6 @@ def _push_phone(dash, payload: dict) -> int:
                 return n
         except Exception as e:
             print(f"[phone_control] sync push failed: {e}")
-    # Fallback async bridge
     try:
         loop = getattr(dash, "_loop", None)
         if loop is not None and loop.is_running():
@@ -124,9 +112,7 @@ def _push_phone(dash, payload: dict) -> int:
         print(f"[phone_control] loop push failed: {e}")
     return 0
 
-
 def run(action: str = "status", value: str = "", **kwargs) -> str:
-    # Support both TOOL.run style and legacy phone_control(parameters) style
     if isinstance(action, dict):
         parameters = action
         action = (parameters.get("action") or "status").strip().lower()
@@ -161,7 +147,6 @@ def run(action: str = "status", value: str = "", **kwargs) -> str:
             return "Phone ready. " + " ".join(parts)
         return "No phone linked. " + " ".join(parts)
 
-    # ── Web / Jarvis App path (primary — no ADB required) ─────────────────
     if web_ok:
         if action in ("notify", "message", "say", "alert"):
             text = value or "Message from Jarvis"
@@ -229,7 +214,7 @@ def run(action: str = "status", value: str = "", **kwargs) -> str:
 
         if action in ("screenshot", "screen"):
             if adb_ok:
-                pass  # fall through to ADB screencap below
+                pass
             else:
                 n = _push_phone(dash, {"type": "phone_cmd", "action": "screenshot"})
                 return (
@@ -250,7 +235,6 @@ def run(action: str = "status", value: str = "", **kwargs) -> str:
             n = _push_phone(dash, {"type": "phone_cmd", "action": "call", "value": num, "number": num})
             return f"Call request sent for {num} ({n})." if n else "Phone not linked."
 
-    # ── ADB path ──────────────────────────────────────────────────────────
     if not adb_ok and not web_ok:
         return "No phone linked and no ADB device."
 
@@ -295,7 +279,6 @@ def run(action: str = "status", value: str = "", **kwargs) -> str:
             return f"SMS request sent ({n})." if n else "Phone not linked."
 
         if action in ("screenshot", "screen"):
-            # Prefer ADB screencap (no on-phone permission dialog)
             adb_devs = _ensure_adb()
             if adb_devs:
                 from pathlib import Path as _P
@@ -329,7 +312,6 @@ def run(action: str = "status", value: str = "", **kwargs) -> str:
             return f"Lock requested ({n})." if n else "Phone not linked."
 
         if action in ("send_file", "file_to_phone"):
-            # value = path on PC
             path = (value or "").strip().strip('"')
             from pathlib import Path as _P
             fp = _P(path)
@@ -427,8 +409,6 @@ def run(action: str = "status", value: str = "", **kwargs) -> str:
 
     return f"Unknown or unsupported phone action '{action}'."
 
-
-# Legacy entry point some loaders expect
 def phone_control(parameters: dict, player=None, session_memory=None) -> str:
     return run(parameters if isinstance(parameters, dict) else {"action": "status"})
 
@@ -460,3 +440,5 @@ TOOL = {
     },
     "handler": run,
 }
+
+# by ASDcuber521

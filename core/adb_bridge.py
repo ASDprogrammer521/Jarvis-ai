@@ -19,10 +19,8 @@ _phone_ip: Optional[str] = None
 _connected_serial: Optional[str] = None
 _ports_try = (5555, 37099, 5556, 5037)
 
-
 def adb_bin() -> Optional[str]:
     return shutil.which("adb")
-
 
 def _run(args: list[str], timeout: int = 15) -> tuple[bool, str]:
     bin_path = adb_bin()
@@ -42,7 +40,6 @@ def _run(args: list[str], timeout: int = 15) -> tuple[bool, str]:
     except Exception as e:
         return False, str(e)
 
-
 def devices() -> list[str]:
     ok, out = _run(["devices"])
     if not ok and not out:
@@ -54,20 +51,16 @@ def devices() -> list[str]:
             devs.append(parts[0])
     return devs
 
-
 def is_ready() -> bool:
     return bool(devices())
-
 
 def set_phone_ip(ip: str | None) -> None:
     global _phone_ip
     with _lock:
         _phone_ip = (ip or "").strip() or None
 
-
 def get_phone_ip() -> Optional[str]:
     return _phone_ip
-
 
 def connect_wireless(ip: str | None = None, ports: tuple[int, ...] | None = None) -> str:
     """Try adb connect to phone IP on common wireless ports."""
@@ -85,12 +78,10 @@ def connect_wireless(ip: str | None = None, ports: tuple[int, ...] | None = None
         serial = f"{target_ip}:{port}"
         ok, out = _run(["connect", serial], timeout=8)
         last = out or ("ok" if ok else "fail")
-        # adb connect returns 0 even on "failed to connect" sometimes — check devices
         devs = devices()
         if serial in devs or any(target_ip in d for d in devs):
             _connected_serial = next((d for d in devs if target_ip in d), serial)
             return f"ADB linked: {_connected_serial}"
-    # USB device already present?
     devs = devices()
     if devs:
         _connected_serial = devs[0]
@@ -101,14 +92,13 @@ def connect_wireless(ip: str | None = None, ports: tuple[int, ...] | None = None
         "or USB once then: adb tcpip 5555"
     )
 
-
 def disconnect_all_wireless() -> str:
     """Disconnect wireless adb endpoints (keeps USB if any)."""
     global _connected_serial
     devs = devices()
     msgs = []
     for d in devs:
-        if ":" in d:  # wireless serial ip:port
+        if ":" in d:
             ok, out = _run(["disconnect", d], timeout=5)
             msgs.append(f"disconnect {d}: {out or ('ok' if ok else 'fail')}")
     if _phone_ip:
@@ -118,18 +108,15 @@ def disconnect_all_wireless() -> str:
         return "No wireless ADB session to close."
     return "; ".join(msgs)
 
-
 def on_phone_app_linked(client_ip: str | None) -> str:
     """Called when Jarvis App WebSocket connects."""
     if client_ip:
         set_phone_ip(client_ip)
     return connect_wireless(client_ip)
 
-
 def on_phone_app_unlinked() -> str:
     """Called when last remote client disconnects."""
     return disconnect_all_wireless()
-
 
 def shell(cmd: str, serial: str | None = None, timeout: int = 20) -> tuple[bool, str]:
     devs = devices()
@@ -137,7 +124,6 @@ def shell(cmd: str, serial: str | None = None, timeout: int = 20) -> tuple[bool,
         return False, "No ADB device"
     ser = serial or _connected_serial or devs[0]
     return _run(["-s", ser, "shell", cmd], timeout=timeout)
-
 
 def screencap_to(local_path: str) -> tuple[bool, str]:
     devs = devices()
@@ -151,3 +137,5 @@ def screencap_to(local_path: str) -> tuple[bool, str]:
     ok2, msg2 = _run(["-s", ser, "pull", remote, local_path], timeout=20)
     _run(["-s", ser, "shell", "rm", remote], timeout=5)
     return ok2, msg2 if not ok2 else local_path
+
+# by ASDcuber521

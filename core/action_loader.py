@@ -38,21 +38,12 @@ _NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,63}$")
 _DEFAULT_PARAMS = {"type": "OBJECT", "properties": {}}
 _CTX_KEYS = ("player", "speak", "response", "session_memory")
 
-
-# A tool may declare that the model should NOT be held up waiting for it.
-# `behavior` goes to the API with the declaration; `scheduling` decides when the
-# eventual result is allowed back into the conversation:
-#   WHEN_IDLE  — wait for a gap in the speech (the sane default)
-#   SILENT     — record it, do not prompt a reply (the tool already announced)
-#   INTERRUPT  — cut in immediately (only when the answer cannot wait)
 _BEHAVIORS = ("BLOCKING", "NON_BLOCKING")
 _SCHEDULING = ("WHEN_IDLE", "SILENT", "INTERRUPT")
-
 
 def _opt_upper(value, allowed: tuple[str, ...]) -> Optional[str]:
     v = str(value or "").strip().upper()
     return v if v in allowed else None
-
 
 @dataclass
 class ActionRecord:
@@ -63,17 +54,15 @@ class ActionRecord:
     file: str = ""
     valid: bool = False
     error: str = ""
-    behavior: Optional[str] = None     # None = the API's default (blocking)
-    scheduling: Optional[str] = None   # None = the API's default (WHEN_IDLE)
-
+    behavior: Optional[str] = None
+    scheduling: Optional[str] = None
 
 class ActionRegistry:
     def __init__(self, actions: dict[str, ActionRecord], logger: Callable[[str], None]):
-        self._actions = actions          # name -> ActionRecord, VALID entries only
+        self._actions = actions
         self._all_records: list[ActionRecord] = []
         self._logger = logger
 
-    # -- called by main.py at LiveConnectConfig build time --
     def get_tool_declarations(self) -> list[dict]:
         out = []
         for rec in self._actions.values():
@@ -95,7 +84,6 @@ class ActionRegistry:
     def names(self) -> set[str]:
         return set(self._actions.keys())
 
-    # -- called by main.py from _execute_tool --
     def run(self, name: str, parameters: dict, ctx: dict | None = None) -> str:
         rec = self._actions.get(name)
         if rec is None or not rec.valid:
@@ -106,7 +94,6 @@ class ActionRegistry:
             self._logger(f"Action '{name}' crashed during run(): {e}")
             traceback.print_exc()
             return f"Tool '{name}' failed: {e}"
-
 
 def _call_handler(fn: Callable, parameters: dict, ctx: dict) -> str:
     """Invoke the handler passing only the context kwargs it actually declares
@@ -119,7 +106,6 @@ def _call_handler(fn: Callable, parameters: dict, ctx: dict) -> str:
         if has_var_kw or key in sig.parameters:
             kwargs[key] = ctx.get(key)
     return fn(parameters=parameters, **kwargs)
-
 
 def _validate(module, filename: str) -> ActionRecord:
     """Returns an ActionRecord; .valid=False + .error set on any problem. Never raises."""
@@ -153,7 +139,6 @@ def _validate(module, filename: str) -> ActionRecord:
                         behavior=_opt_upper(tool.get("behavior"), _BEHAVIORS),
                         scheduling=_opt_upper(tool.get("scheduling"), _SCHEDULING))
 
-
 def discover_actions(actions_dir: Path, reserved_names: set[str] | None = None,
                      logger: Callable[[str], None] = print) -> ActionRegistry:
     """
@@ -168,14 +153,12 @@ def discover_actions(actions_dir: Path, reserved_names: set[str] | None = None,
     valid: dict[str, ActionRecord] = {}
     all_records: list[ActionRecord] = []
 
-    files = sorted(actions_dir.glob("*.py"), key=lambda p: p.name)  # deterministic order
+    files = sorted(actions_dir.glob("*.py"), key=lambda p: p.name)
     for path in files:
         if path.name.startswith("_"):
             continue
         try:
             module_name = f"actions.{path.stem}"
-            # Reuse the already-imported module when present so handlers are the
-            # same objects the rest of the app holds.
             module = sys.modules.get(module_name)
             if module is None:
                 spec = importlib.util.spec_from_file_location(module_name, path)
@@ -190,7 +173,7 @@ def discover_actions(actions_dir: Path, reserved_names: set[str] | None = None,
                     raise
 
             if getattr(module, "TOOL", None) is None:
-                continue   # not an action file — a helper/capture-only module
+                continue
 
             rec = _validate(module, path.name)
 
@@ -212,10 +195,11 @@ def discover_actions(actions_dir: Path, reserved_names: set[str] | None = None,
             valid[rec.name] = rec
             logger(f"Action loaded: {rec.name} ({path.name})")
         else:
-            # Only log a rejection if the file actually tried to be an action.
             logger(f"Action rejected: {path.name} — {rec.error}")
 
     registry = ActionRegistry(valid, logger)
     registry._all_records = all_records
     logger(f"Action discovery complete: {len(valid)} active.")
     return registry
+
+# by ASDcuber521

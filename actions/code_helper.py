@@ -5,7 +5,6 @@ import re
 import time
 from pathlib import Path
 
-
 def get_base_dir():
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent
@@ -15,16 +14,11 @@ BASE_DIR           = get_base_dir()
 API_CONFIG_PATH    = BASE_DIR / "config" / "api_keys.json"
 DESKTOP            = Path.home() / "Desktop"
 MAX_BUILD_ATTEMPTS = 3
-# Model choice lives in core/gemini.py, and so does the timeout and the
-# fallback ladder. Writing a model name here is what left this file hanging
-# forever whenever that one alias was unwell.
 from core import gemini
-
 
 def _get_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
         return json.load(f)["gemini_api_key"]
-
 
 def _get_gemini(tier: str = gemini.SMART):
     """Writing and fixing code is the reasoning tier; a 60s deadline because a
@@ -38,13 +32,11 @@ def _get_gemini(tier: str = gemini.SMART):
 
     return _W()
 
-
 def _clean_code(text: str) -> str:
     text = text.strip()
     text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
     text = re.sub(r"\n?```$", "", text)
     return text.strip()
-
 
 def _resolve_save_path(output_path: str, language: str) -> Path:
     ext_map = {
@@ -62,7 +54,6 @@ def _resolve_save_path(output_path: str, language: str) -> Path:
     ext = ext_map.get((language or "python").lower(), ".py")
     return DESKTOP / f"jarvis_code{ext}"
 
-
 def _read_file(file_path: str) -> tuple[str, str]:
     if not file_path:
         return "", "No file path provided."
@@ -74,7 +65,6 @@ def _read_file(file_path: str) -> tuple[str, str]:
     except Exception as e:
         return "", f"Could not read file: {e}"
 
-
 def _save_file(path: Path, content: str) -> str:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -83,19 +73,16 @@ def _save_file(path: Path, content: str) -> str:
     except Exception as e:
         return f"Could not save: {e}"
 
-
 def _preview(code: str, lines: int = 10) -> str:
     all_lines = code.splitlines()
     preview   = "\n".join(all_lines[:lines])
     suffix    = f"\n... ({len(all_lines) - lines} more lines)" if len(all_lines) > lines else ""
     return preview + suffix
 
-
 def _has_error(output: str) -> bool:
     error_signals = ["error", "exception", "traceback", "syntaxerror",
                      "nameerror", "typeerror", "stderr", "failed", "crash"]
     return any(s in output.lower() for s in error_signals)
-
 
 def _take_screenshot() -> Path | None:
     try:
@@ -109,14 +96,11 @@ def _take_screenshot() -> Path | None:
         print(f"[Code] ⚠️ Screenshot failed: {e}")
         return None
 
-
 def _image_to_base64(path: Path) -> str:
     import base64
     return base64.b64encode(path.read_bytes()).decode("utf-8")
 
-
 _VALID_INTENTS = {"write", "edit", "explain", "run", "build", "screen_debug", "optimize"}
-
 
 def _detect_intent(description: str, file_path: str, code: str) -> str:
     """
@@ -157,7 +141,6 @@ def _detect_intent(description: str, file_path: str, code: str) -> str:
         except Exception as e:
             print(f"[Code] Intent classification failed ({e}) — structural fallback")
 
-    # Structural fallback — not tied to any language
     if file_exists:
         return "edit" if desc else "explain"
     if code:
@@ -187,7 +170,6 @@ Code:"""
     _save_file(path, code)
     return code, path
 
-
 def _fix_code(code: str, error_output: str, description: str) -> str:
     model  = _get_gemini()
     prompt = f"""You are an expert debugger.
@@ -206,7 +188,6 @@ Fixed code:"""
 
     response = model.generate_content(prompt)
     return _clean_code(response.text)
-
 
 def _run_file(path: Path, args: list, timeout: int) -> str:
     interpreters = {
@@ -242,7 +223,6 @@ def _run_file(path: Path, args: list, timeout: int) -> str:
         return f"Interpreter not found: {interp[0]}."
     except Exception as e:
         return f"Execution error: {e}"
-
 
 def _build(description, language, output_path, args, timeout, speak=None, player=None) -> str:
     if not description:
@@ -309,7 +289,6 @@ def _write_action(description, language, output_path, player) -> str:
     except Exception as e:
         return f"Could not generate code: {e}"
 
-
 def _edit_action(file_path, instruction, player) -> str:
     if not file_path:
         return "Please provide a file path to edit, sir."
@@ -345,7 +324,6 @@ Updated code:"""
     print(f"[Code] ✅ Edited: {file_path}")
     return f"File edited. {status}\n\nPreview:\n{_preview(edited)}"
 
-
 def _explain_action(file_path, code, player) -> str:
     if file_path and not code:
         code, err = _read_file(file_path)
@@ -373,7 +351,6 @@ Explanation:"""
     except Exception as e:
         return f"Could not explain code: {e}"
 
-
 def _run_action(file_path, args, timeout, player) -> str:
     if not file_path:
         return "Please provide a file path to run, sir."
@@ -383,7 +360,6 @@ def _run_action(file_path, args, timeout, player) -> str:
     if player:
         player.write_log(f"[Code] Running {p.name}...")
     return _run_file(p, args, timeout)
-
 
 def _optimize_action(file_path, code, language, output_path, player) -> str:
 
@@ -420,7 +396,6 @@ Optimized code:"""
     except Exception as e:
         return f"Could not optimize code: {e}"
 
-    # Kaydet
     if file_path:
         save_path = Path(file_path)
     else:
@@ -440,7 +415,6 @@ Optimized code:"""
         f"Preview:\n{_preview(optimized)}"
     )
 
-
 def _screen_debug_action(description, file_path, player, speak=None) -> str:
 
     if player:
@@ -448,11 +422,9 @@ def _screen_debug_action(description, file_path, player, speak=None) -> str:
 
     print("[Code] 📸 Capturing screen for debug...")
 
-
     screenshot_path = _take_screenshot()
     if not screenshot_path:
         return "Could not take screenshot, sir. Please make sure PyAutoGUI is installed."
-
 
     file_content = ""
     if file_path:
@@ -521,7 +493,6 @@ Be specific and actionable. If you see an error message, quote it exactly."""
             pass
         return f"Screen analysis failed: {e}"
 
-
 def code_helper(
     parameters: dict,
     response=None,
@@ -584,8 +555,6 @@ def code_helper(
     else:
         return f"Unknown action: '{action}'. Use write, edit, explain, run, build, optimize, or screen_debug."
 
-
-# ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "code_helper",
     "description": "Writes, edits, explains, runs, or builds code files.",
@@ -631,3 +600,5 @@ TOOL = {
     },
     "handler": code_helper,
 }
+
+# by ASDcuber521

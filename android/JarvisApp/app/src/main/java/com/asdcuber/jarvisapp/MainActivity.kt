@@ -62,7 +62,6 @@ class MainActivity : AppCompatActivity() {
 
         requestStartupPermissions()
 
-        // Deep-link from notification (screenshot etc.)
         handleJarvisAction(intent)
 
         connectBtn.setOnClickListener {
@@ -104,7 +103,6 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        // Quick actions
         findViewById<Button>(R.id.qYoutube).setOnClickListener {
             localOrSend("open youtube") { CommandExecutor.handle(this, org.json.JSONObject(mapOf("action" to "open_app", "value" to "youtube"))) }
         }
@@ -115,7 +113,7 @@ class MainActivity : AppCompatActivity() {
             appendLog(CommandExecutor.handle(this, org.json.JSONObject(mapOf("action" to "home"))))
         }
         findViewById<Button>(R.id.qNotif).setOnClickListener {
-            // Open notification access settings if needed
+
             try {
                 startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             } catch (_: Exception) {}
@@ -280,7 +278,7 @@ class MainActivity : AppCompatActivity() {
                         appendLog("File sent: $name")
                     } else {
                         val size = querySize(uri)
-                        // Try base64 for small files (<400KB)
+
                         if (size in 1..400_000) {
                             val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
                             if (bytes != null) {
@@ -319,7 +317,6 @@ class MainActivity : AppCompatActivity() {
         }
         return -1L
     }
-
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
@@ -370,3 +367,5 @@ class MainActivity : AppCompatActivity() {
         logView.append(line + "\n")
     }
 }
+
+// by ASDcuber521

@@ -1,4 +1,3 @@
-#computer_control.py
 import io
 import json
 import platform
@@ -34,7 +33,6 @@ def _base_dir() -> Path:
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent.parent
 
-
 _BASE         = _base_dir()
 _CONFIG_PATH  = _BASE / "config" / "api_keys.json"
 _MEMORY_PATH  = _BASE / "memory" / "long_term.json"
@@ -52,7 +50,6 @@ def _platform_os() -> str:
 
 def _get_os() -> str:
     return _load_config().get("os_system", _platform_os()).lower()
-
 
 def _get_api_key() -> str:
     return _load_config().get("gemini_api_key", "")
@@ -88,7 +85,6 @@ _LAST_NAMES = [
     "Davis", "Wilson", "Moore", "Taylor", "Anderson", "Thomas", "Jackson",
 ]
 _DOMAINS = ["gmail.com", "yahoo.com", "outlook.com", "proton.me", "mail.com"]
-
 
 def _random_data(data_type: str) -> str:
     dt = data_type.lower().strip()
@@ -160,7 +156,6 @@ def _type(text: str, interval: float = 0.03) -> str:
     pyautogui.typewrite(text, interval=interval)
     return f"Typed: {text[:60]}{'…' if len(text) > 60 else ''}"
 
-
 def _smart_type(text: str, clear_first: bool = True) -> str:
     _require_pyautogui()
     if clear_first:
@@ -177,7 +172,6 @@ def _smart_type(text: str, clear_first: bool = True) -> str:
     pyautogui.typewrite(text, interval=0.04)
     return f"Smart-typed: {text[:60]}{'…' if len(text) > 60 else ''}"
 
-
 def _click(x=None, y=None, button: str = "left", clicks: int = 1) -> str:
     _require_pyautogui()
     if x is not None and y is not None:
@@ -186,18 +180,15 @@ def _click(x=None, y=None, button: str = "left", clicks: int = 1) -> str:
     pyautogui.click(button=button, clicks=clicks)
     return f"Clicked at current position [{button}]"
 
-
 def _hotkey(*keys) -> str:
     _require_pyautogui()
     pyautogui.hotkey(*keys)
     return f"Hotkey: {'+'.join(keys)}"
 
-
 def _press(key: str) -> str:
     _require_pyautogui()
     pyautogui.press(key)
     return f"Pressed: {key}"
-
 
 def _scroll(direction: str = "down", amount: int = 3) -> str:
     _require_pyautogui()
@@ -206,12 +197,10 @@ def _scroll(direction: str = "down", amount: int = 3) -> str:
     pyautogui.scroll(clicks) if vertical else pyautogui.hscroll(clicks)
     return f"Scrolled {direction} ×{amount}"
 
-
 def _move(x: int, y: int, duration: float = 0.3) -> str:
     _require_pyautogui()
     pyautogui.moveTo(x, y, duration=duration)
     return f"Mouse → ({x}, {y})"
-
 
 def _drag(x1: int, y1: int, x2: int, y2: int, duration: float = 0.5) -> str:
     _require_pyautogui()
@@ -219,14 +208,12 @@ def _drag(x1: int, y1: int, x2: int, y2: int, duration: float = 0.5) -> str:
     pyautogui.dragTo(x2, y2, duration=duration, button="left")
     return f"Dragged ({x1},{y1}) → ({x2},{y2})"
 
-
 def _clipboard_get() -> str:
     if _PYPERCLIP:
         return pyperclip.paste()
     _hotkey("ctrl", "c")
     time.sleep(0.2)
     return "(copied — pyperclip unavailable for read)"
-
 
 def _clipboard_paste(text: str) -> str:
     if _PYPERCLIP:
@@ -238,14 +225,12 @@ def _clipboard_paste(text: str) -> str:
         return f"Pasted: {text[:60]}{'…' if len(text) > 60 else ''}"
     return "pyperclip not available"
 
-
 def _screenshot(save_path: str | None = None) -> str:
     _require_pyautogui()
     path = _safe_screenshot_path(save_path)
     img  = pyautogui.screenshot()
     img.save(str(path))
     return f"Screenshot saved: {path}"
-
 
 def _clear_field() -> str:
     _require_pyautogui()
@@ -512,8 +497,6 @@ def computer_control(
         print(f"[ComputerControl] ❌ {action}: {e}")
         return f"computer_control '{action}' failed: {e}"
 
-
-# ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "computer_control",
     "description": "Direct computer control: type, click, hotkeys, scroll, move mouse, screenshots, find elements on screen.",
@@ -587,3 +570,5 @@ TOOL = {
     },
     "handler": computer_control,
 }
+
+# by ASDcuber521

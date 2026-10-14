@@ -1,4 +1,3 @@
-#youtube_video.py
 import json
 import re
 import sys
@@ -35,12 +34,10 @@ except ImportError:
 
 from config import get_os, is_windows, is_mac, is_linux
 
-
 def _get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent.parent
-
 
 BASE_DIR        = _get_base_dir()
 API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
@@ -56,11 +53,9 @@ HEADERS = {
 
 _YT_VIDEO_FILTER = "EgIQAQ%3D%3D"
 
-
 def _get_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
         return json.load(f)["gemini_api_key"]
-
 
 def _open_url(url: str) -> None:
     try:
@@ -111,10 +106,8 @@ def _extract_video_id(url: str) -> str | None:
     )
     return match.group(1) if match else None
 
-
 def _is_valid_youtube_url(url: str) -> bool:
     return bool(re.search(r"(youtube\.com|youtu\.be)", url or ""))
-
 
 def _ask_for_url(prompt_text: str = "YouTube video URL:") -> str | None:
     try:
@@ -131,7 +124,6 @@ def _ask_for_url(prompt_text: str = "YouTube video URL:") -> str | None:
     except Exception as e:
         print(f"[YouTube] ⚠️ URL dialog failed: {e}")
         return None
-
 
 def _get_transcript(video_id: str) -> str | None:
     if not _TRANSCRIPT_OK:
@@ -165,15 +157,12 @@ def _get_transcript(video_id: str) -> str | None:
         print(f"[YouTube] ⚠️ Transcript fetch failed: {e}")
         return None
 
-
 def _summarize_with_gemini(transcript: str, video_url: str) -> str:
     from google.genai import types
     from core import gemini
 
     max_chars = 80000
     truncated = transcript[:max_chars] + ("..." if len(transcript) > max_chars else "")
-    # A whole transcript can be 80k characters, hence the long deadline — but a
-    # deadline there is, and the ladder in core/gemini.py picks the model.
     response = gemini.call(
         f"Please summarize this YouTube video transcript:\n\n{truncated}",
         tier=gemini.SMART,
@@ -191,7 +180,6 @@ def _summarize_with_gemini(transcript: str, video_url: str) -> str:
     if response is None:
         return "I couldn't reach Gemini to summarise that transcript, sir."
     return (response.text or "").strip()
-
 
 def _save_summary(content: str, video_url: str) -> str:
     ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -220,7 +208,6 @@ def _save_summary(content: str, video_url: str) -> str:
         print(f"[YouTube] ⚠️ Could not open text editor: {e}")
 
     return str(filepath)
-
 
 def _scrape_video_info(video_id: str) -> dict:
     if not _REQUESTS_OK:
@@ -253,7 +240,6 @@ def _scrape_video_info(video_id: str) -> dict:
     except Exception as e:
         print(f"[YouTube] ⚠️ Info scrape failed: {e}")
         return {}
-
 
 def _scrape_trending(region: str = "TR", max_results: int = 8) -> list[dict]:
     if not _REQUESTS_OK:
@@ -307,7 +293,6 @@ def _handle_play(parameters: dict, player) -> str:
     _open_url(fallback_url)
     return f"Opened YouTube search for: {query} (manual selection required)"
 
-
 def _handle_summarize(parameters: dict, player, speak) -> str:
     if not _TRANSCRIPT_OK:
         return "youtube-transcript-api is not installed. Run: pip install youtube-transcript-api"
@@ -348,7 +333,6 @@ def _handle_summarize(parameters: dict, player, speak) -> str:
 
     return summary
 
-
 def _handle_get_info(parameters: dict, player, speak) -> str:
     url = parameters.get("url", "").strip()
     if not url:
@@ -378,7 +362,6 @@ def _handle_get_info(parameters: dict, player, speak) -> str:
         speak(f"Here's the video info, sir. {result.replace(chr(10), '. ')}")
 
     return result
-
 
 def _handle_trending(parameters: dict, player, speak) -> str:
     region = parameters.get("region", "TR").upper()
@@ -410,7 +393,6 @@ _ACTION_MAP = {
     "trending":  _handle_trending,
 }
 
-
 def youtube_video(
     parameters:     dict,
     response=None,
@@ -440,8 +422,6 @@ def youtube_video(
         print(f"[YouTube] ❌ Error in {action}: {e}")
         return f"YouTube {action} failed, sir: {e}"
 
-
-# ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "youtube_video",
     "description": "Controls YouTube. Use for: playing videos, summarizing a video's content, getting video info, or showing trending videos.",
@@ -473,3 +453,5 @@ TOOL = {
     },
     "handler": youtube_video,
 }
+
+# by ASDcuber521

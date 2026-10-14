@@ -22,17 +22,12 @@ from memory.config_manager import get_plugin_enabled, get_plugin_config
 _NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,63}$")
 _DEFAULT_PARAMS = {"type": "OBJECT", "properties": {}}
 
-# Optional, and the same contract actions use: a plugin that takes a moment can
-# say so, and the model carries on talking instead of waiting on it. See
-# core/action_loader.py for what each value means.
 _BEHAVIORS = ("BLOCKING", "NON_BLOCKING")
 _SCHEDULING = ("WHEN_IDLE", "SILENT", "INTERRUPT")
-
 
 def _opt_upper(value, allowed: tuple[str, ...]) -> Optional[str]:
     v = str(value or "").strip().upper()
     return v if v in allowed else None
-
 
 @dataclass
 class PluginRecord:
@@ -43,24 +38,18 @@ class PluginRecord:
     file: str = ""
     valid: bool = False
     error: str = ""
-    settings: Optional[dict] = None   # optional PLUGIN_SETTINGS schema (config fields)
-    behavior: Optional[str] = None    # None = the API's default (blocking)
-    scheduling: Optional[str] = None  # None = the API's default (WHEN_IDLE)
-
+    settings: Optional[dict] = None
+    behavior: Optional[str] = None
+    scheduling: Optional[str] = None
 
 class PluginRegistry:
     def __init__(self, plugins: dict[str, PluginRecord], logger: Callable[[str], None],
                  notify: Callable[[str], None] | None = None):
-        self._plugins = plugins          # name -> PluginRecord, VALID entries only
-        self._all_records: list[PluginRecord] = []   # valid + invalid, for UI listing
+        self._plugins = plugins
+        self._all_records: list[PluginRecord] = []
         self._logger = logger
-        # Where user-facing notices go. `logger` is the console transcript and
-        # carries everything; `notify` reaches the activity log, so only things
-        # the user has to know about are sent to it. Defaults to dropping them,
-        # which keeps every existing single-sink caller working unchanged.
         self._notify = notify or (lambda _msg: None)
 
-    # -- called by main.py at LiveConnectConfig build time --
     def get_tool_declarations(self) -> list[dict]:
         decls = []
         for name, rec in self._plugins.items():
@@ -83,7 +72,6 @@ class PluginRegistry:
         rec = self._plugins.get(name)
         return rec.scheduling if rec else None
 
-    # -- called by main.py from _execute_tool's else branch --
     def run(self, name: str, parameters: dict, player=None, session_memory=None) -> str:
         rec = self._plugins.get(name)
         if rec is None or not rec.valid:
@@ -98,7 +86,6 @@ class PluginRegistry:
             traceback.print_exc()
             return f"Sir, the '{name}' plugin failed: {e}"
 
-    # -- called by ui.py's settings tab to render per-plugin config forms --
     def settings_schemas(self) -> list[dict]:
         """One entry per settings SECTION, for enabled plugins that declare a
         PLUGIN_SETTINGS schema. Sections are deduped by namespace so a suite of
@@ -120,11 +107,10 @@ class PluginRegistry:
                 "title":     rec.settings.get("title") or rec.name,
                 "fields":    rec.settings.get("fields", []),
                 "values":    get_plugin_config(ns),
-                "action":    rec.settings.get("action"),   # optional test/connect button
+                "action":    rec.settings.get("action"),
             })
         return out
 
-    # -- called by ui.py's Plugin Manager overlay --
     def list_for_ui(self) -> list[dict]:
         out = []
         for rec in self._all_records:
@@ -138,7 +124,6 @@ class PluginRegistry:
             })
         return out
 
-
 def _call_run(run_fn, parameters, player, session_memory):
     """Invoke run() passing only the kwargs it actually declares (or all of them
     if it has **kwargs), so a minimal `def run(parameters):` plugin still works."""
@@ -150,7 +135,6 @@ def _call_run(run_fn, parameters, player, session_memory):
     if has_var_kw or "session_memory" in sig.parameters:
         kwargs["session_memory"] = session_memory
     return run_fn(parameters, **kwargs)
-
 
 def _validate(module, filename: str) -> PluginRecord:
     """Returns a PluginRecord; .valid=False + .error set on any problem. Never raises."""
@@ -180,8 +164,6 @@ def _validate(module, filename: str) -> PluginRecord:
         return PluginRecord(name=name, file=filename,
                              error="Missing callable run(parameters, ...) function.")
 
-    # Optional, self-describing settings schema (rendered by the settings UI).
-    # A malformed schema is ignored, never fatal — the plugin still loads.
     settings = getattr(module, "PLUGIN_SETTINGS", None)
     if not (isinstance(settings, dict) and isinstance(settings.get("fields"), list)):
         settings = None
@@ -190,7 +172,6 @@ def _validate(module, filename: str) -> PluginRecord:
                          run=run_fn, file=filename, valid=True, error="", settings=settings,
                          behavior=_opt_upper(plugin_meta.get("behavior"), _BEHAVIORS),
                          scheduling=_opt_upper(plugin_meta.get("scheduling"), _SCHEDULING))
-
 
 def _load_error(path: Path, plugins_dir: Path, exc: Exception) -> str:
     """Turn an import failure into something the person who downloaded the file
@@ -217,7 +198,6 @@ def _load_error(path: Path, plugins_dir: Path, exc: Exception) -> str:
                     f"pip install {missing[0]}")
     return f"Failed to load: {exc}"
 
-
 def discover_plugins(plugins_dir: Path, core_tool_names: set[str],
                       logger: Callable[[str], None] = print,
                       notify: Callable[[str], None] | None = None) -> PluginRegistry:
@@ -232,7 +212,7 @@ def discover_plugins(plugins_dir: Path, core_tool_names: set[str],
     valid: dict[str, PluginRecord] = {}
     all_records: list[PluginRecord] = []
 
-    files = sorted(plugins_dir.glob("*.py"), key=lambda p: p.name)  # deterministic order
+    files = sorted(plugins_dir.glob("*.py"), key=lambda p: p.name)
     for path in files:
         if path.name.startswith("_"):
             continue
@@ -277,9 +257,8 @@ def discover_plugins(plugins_dir: Path, core_tool_names: set[str],
     rejected = len(all_records) - len(valid)
     logger(f"Plugin discovery complete: {len(valid)} active, "
            f"{rejected} rejected, {len(all_records)} total.")
-    # The activity log is the user's conversation, not a boot transcript: a
-    # plugin that loaded correctly is not news, so only a failure surfaces there
-    # — and then as one line, because the per-plugin detail is on the console.
     if rejected:
         notify(f"{rejected} plugin(s) could not be loaded — see the console.")
     return registry
+
+# by ASDcuber521

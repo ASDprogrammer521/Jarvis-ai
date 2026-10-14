@@ -153,7 +153,6 @@
   </div>
 
   <script>
-    // Try auto-reconnect with stored device token (set on first QR login)
     (async function() {
       const devTok = localStorage.getItem('jarvis_device_token');
       if (!devTok) return;
@@ -172,7 +171,6 @@
           return;
         }
       } catch (_) {}
-      // Device token rejected (server restarted) — clear it and show normal form
       localStorage.removeItem('jarvis_device_token');
       document.getElementById('reconnecting').style.display = 'none';
     })();
@@ -222,3 +220,4 @@
   </script>
 </body>
 </html>
+<!-- by ASDcuber521 -->
