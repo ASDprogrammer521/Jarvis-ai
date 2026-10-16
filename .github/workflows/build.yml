@@ -1,0 +1,94 @@
+name: Build Python to EXE
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip wheel
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Build with PyInstaller (Jarvis.spec)
+        shell: pwsh
+        run: |
+          if (Test-Path Jarvis.spec) {
+            python -m PyInstaller Jarvis.spec --noconfirm --clean
+          } else {
+            python -m PyInstaller --noconsole --name Jarvis --collect-all PyQt6 main.py
+          }
+
+      - name: Package zip
+        shell: pwsh
+        run: |
+          $ver = "1.0.0"
+          if (Test-Path "VERSION") { $ver = (Get-Content VERSION -Raw).Trim() }
+          $short = $env:GITHUB_SHA.Substring(0, 7)
+          $name = "Jarvis-Windows-x64-v$ver-$short.zip"
+          if (Test-Path "dist\Jarvis") {
+            Compress-Archive -Path "dist\Jarvis\*" -DestinationPath $name -Force
+          } elseif (Test-Path "dist\Jarvis.exe") {
+            Compress-Archive -Path "dist\Jarvis.exe" -DestinationPath $name -Force
+          } else {
+            Get-ChildItem -Recurse dist | Select-Object FullName
+            throw "No dist output found"
+          }
+          echo "ZIP_NAME=$name" >> $env:GITHUB_ENV
+          echo "VERSION=$ver" >> $env:GITHUB_ENV
+          echo "TAG_NAME=v$ver-$short" >> $env:GITHUB_ENV
+          Get-Item $name | Format-List Name, Length
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jarvis-Windows-x64
+          path: Jarvis-Windows-x64-*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}-${{ github.sha }}
+          name: Jarvis Windows v${{ env.VERSION }}
+          body: |
+            Built from commit `${{ github.sha }}` on `${{ github.ref_name }}`.
+
+            **No Python install required.**
+
+            1. Download the `.zip` asset
+            2. Extract the archive
+            3. Run `Jarvis.exe`
+            4. On first launch, enter your Gemini API key
+
+            - SmartScreen may warn (unsigned build): More info → Run anyway
+            - Keep the whole extracted folder together (DLLs next to the EXE)
+
+            **By ASDcuber**
+          files: Jarvis-Windows-x64-*.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+# by ASDcuber521
