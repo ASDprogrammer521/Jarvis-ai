@@ -10,21 +10,21 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import (
     QBrush, QColor, QFont, QImage, QLinearGradient, QPainter, QPainterPath, QPen,
-    QPolygonF, QRadialGradient,
+    QGradient, QPolygonF, QRadialGradient, QSurfaceFormat,
 )
 from PyQt6.QtWidgets import (
-    QGraphicsOpacityEffect, QPushButton, QWidget,
+    QPushButton, QWidget,
 )
 
-try:
-    from PyQt6.QtOpenGLWidgets import QOpenGLWidget as _GLWidget
-    _HAS_GL = True
-except Exception:
-    _GLWidget = QWidget
-    _HAS_GL = False
-
 import ui_geo as geo
-from ui_theme import C, qcol
+from ui_theme import C, qcol, read_cfg
+
+try:
+    from PyQt6.QtOpenGLWidgets import QOpenGLWidget as _GLW
+except Exception:
+    _GLW = None
+
+GL_ENABLED = bool(_GLW is not None and read_cfg().get("hw_accel", True))
 
 try:
     from core.avatar import HoloAvatar
@@ -43,20 +43,7 @@ def mix(a: QColor, b: QColor, t: float) -> QColor:
 
 
 def fade_in(w: QWidget, ms: int = 320) -> None:
-    try:
-        fx = QGraphicsOpacityEffect(w)
-        fx.setOpacity(0.0)
-        w.setGraphicsEffect(fx)
-        a = QPropertyAnimation(fx, b"opacity", w)
-        a.setDuration(ms)
-        a.setStartValue(0.0)
-        a.setEndValue(1.0)
-        a.setEasingCurve(QEasingCurve.Type.OutCubic)
-        a.finished.connect(lambda: w.setGraphicsEffect(None))
-        a.start()
-        w._fade_anim = a
-    except Exception:
-        pass
+    return None
 
 
 def slide_to(w: QWidget, end: QPoint, ms: int = 320) -> None:
@@ -68,22 +55,39 @@ def slide_to(w: QWidget, end: QPoint, ms: int = 320) -> None:
     w._slide_anim = a
 
 
-class Backdrop(QWidget):
+_BackdropBase = _GLW if GL_ENABLED else QWidget
+
+
+def samples_for(q: str) -> int:
+    return 0 if q == "lite" else 4 if q == "high" else 2
+
+
+class Backdrop(_BackdropBase):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
+        if GL_ENABLED:
+            fmt = QSurfaceFormat()
+            fmt.setSamples(samples_for(str(read_cfg().get("quality") or "auto")))
+            self.setFormat(fmt)
+        else:
+            self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
         self.aurora = True
         self.stars = True
         self.speed = 1.0
+        self.paused = False
+        self.stage = None
         self._t = 0.0
+        self._last_t = time.time()
         self._tick_n = 0
+        self._slow = 0
+        self._dirty = True
         self._small: QImage | None = None
         rng = np.random.default_rng(11)
-        self._stars = rng.random((140, 4))
+        self._stars = rng.random((120, 4))
         self._tm = QTimer(self)
         self._tm.timeout.connect(self._tick)
-        self._tm.start(40)
+        self._tm.start(250 if GL_ENABLED else 125)
 
     def small(self) -> QImage | None:
         return self._small
@@ -94,44 +98,107 @@ class Backdrop(QWidget):
         except Exception:
             return True
 
+    def _advance_time(self) -> None:
+        now = time.time()
+        dt = min(0.25, now - self._last_t)
+        self._last_t = now
+        self._t += dt * self.speed
+
     def _tick(self) -> None:
-        if not self._alive():
+        if self.paused or not self._alive():
             return
+        try:
+            active = self.window().isActiveWindow()
+        except Exception:
+            active = True
+        if not active:
+            self._slow = (self._slow + 1) % 8
+            if self._slow:
+                return
+        if not (self.aurora or self.stars) and not self._dirty:
+            return
+        forced = self._dirty
+        self._dirty = False
         self._tick_n += 1
-        self._t += 0.040 * self.speed
+        self._advance_time()
         self._render_small()
-        self.update()
-        if self._tick_n % 3 == 0:
+        if not GL_ENABLED:
+            self.update()
+        if forced or GL_ENABLED or self._tick_n % 2 == 0:
             for c in self.findChildren(GlassCard):
                 if c.isVisible():
                     c.update()
+
+    def _specs(self):
+        return ((C.PRI, .30, .50, .20, .27), (C.ACC, .70, .60, .27, .31),
+                (C.ACC2, .50, .90, .31, .21), (C.PRI_DIM, .15, .80, .23, .35))
+
+    def _blob(self, i: int, spec, W: float, H: float):
+        col, ax, ay, sp, sp2 = spec
+        t = self._t
+        cx = W * (ax + 0.30 * math.sin(t * sp + i * 1.7))
+        cy = H * (ay * 0.7 + 0.30 * math.cos(t * sp2 + i * 2.3))
+        return col, cx, cy, max(W, H) * 0.55
+
+    def _vignette(self, p, W: float, H: float) -> None:
+        v = QRadialGradient(W / 2, H / 2, max(W, H) * 0.75)
+        v.setColorAt(0.55, QColor(0, 0, 0, 0))
+        v.setColorAt(1.0, QColor(0, 0, 0, 150))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(v))
+        p.drawRect(QRectF(0, 0, W, H))
 
     def _render_small(self) -> None:
         W, H = max(2, self.width() // 6), max(2, self.height() // 6)
         if self._small is None or self._small.width() != W or self._small.height() != H:
             self._small = QImage(W, H, QImage.Format.Format_RGB32)
-        img = self._small
-        p = QPainter(img)
+        p = QPainter(self._small)
         p.fillRect(0, 0, W, H, qcol(C.BG))
         if self.aurora:
-            t = self._t
-            specs = ((C.PRI, .30, .50, .20, .27), (C.ACC, .70, .60, .27, .31),
-                     (C.ACC2, .50, .90, .31, .21), (C.PRI_DIM, .15, .80, .23, .35))
-            m = max(W, H)
-            for i, (col, ax, ay, sp, sp2) in enumerate(specs):
-                cx = W * (ax + 0.30 * math.sin(t * sp + i * 1.7))
-                cy = H * (ay * 0.7 + 0.30 * math.cos(t * sp2 + i * 2.3))
-                g = QRadialGradient(cx, cy, m * 0.55)
-                c0 = qcol(col, 95)
-                g.setColorAt(0.0, c0)
+            for i, spec in enumerate(self._specs()):
+                col, cx, cy, r = self._blob(i, spec, W, H)
+                g = QRadialGradient(cx, cy, r)
+                g.setColorAt(0.0, qcol(col, 95))
                 g.setColorAt(0.55, qcol(col, 28))
                 g.setColorAt(1.0, qcol(col, 0))
                 p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(QBrush(g))
                 p.drawRect(0, 0, W, H)
+        self._vignette(p, W, H)
         p.end()
 
-    def paintEvent(self, _):
+    def _draw_aurora_gl(self, p, W: float, H: float) -> None:
+        p.fillRect(QRectF(0, 0, W, H), qcol(C.BG))
+        if self.aurora:
+            lite = bool(self.stage is not None and self.stage.lite)
+            p.setPen(Qt.PenStyle.NoPen)
+            for i, spec in enumerate(self._specs()[:2 if lite else 4]):
+                col, cx, cy, r = self._blob(i, spec, W, H)
+                g = QRadialGradient(cx, cy, r)
+                g.setColorAt(0.0, qcol(col, 95))
+                g.setColorAt(0.55, qcol(col, 28))
+                g.setColorAt(1.0, qcol(col, 0))
+                p.setBrush(QBrush(g))
+                p.drawEllipse(QPointF(cx, cy), r, r)
+        self._vignette(p, W, H)
+
+    def paint_stars(self, p, ox: float = 0.0, oy: float = 0.0, w: float | None = None, h: float | None = None):
+        if not self.stars:
+            return
+        BW, BH = max(1, self.width()), max(1, self.height())
+        t = self._t
+        p.setPen(Qt.PenStyle.NoPen)
+        for x, y, d, ph in self._stars:
+            px = (x * BW + t * 6 * (0.3 + d)) % BW - ox
+            py = (y * BH - t * 3 * d) % BH - oy
+            if w is not None and not (-4 <= px <= w + 4 and -4 <= py <= h + 4):
+                continue
+            tw = 0.5 + 0.5 * math.sin(t * 1.3 + ph * 20)
+            r = 0.5 + 1.4 * d
+            p.setBrush(qcol("#ffffff", int(30 + 150 * d * tw)))
+            p.drawEllipse(QPointF(px, py), r, r)
+
+    def _paint_software(self, e) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -139,24 +206,37 @@ class Backdrop(QWidget):
             p.drawImage(QRectF(self.rect()), self._small)
         else:
             p.fillRect(self.rect(), qcol(C.BG))
-        W, H = self.width(), self.height()
-        if self.stars:
-            t = self._t
-            p.setPen(Qt.PenStyle.NoPen)
-            for x, y, d, ph in self._stars:
-                px = (x * W + t * 6 * (0.3 + d)) % W
-                py = (y * H - t * 3 * d) % H
-                tw = 0.5 + 0.5 * math.sin(t * 1.3 + ph * 20)
-                col = qcol("#ffffff", int(30 + 150 * d * tw))
-                r = 0.5 + 1.4 * d
-                p.setBrush(col)
-                p.drawEllipse(QPointF(px, py), r, r)
-        v = QRadialGradient(W / 2, H / 2, max(W, H) * 0.75)
-        v.setColorAt(0.55, QColor(0, 0, 0, 0))
-        v.setColorAt(1.0, QColor(0, 0, 0, 150))
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(v))
-        p.drawRect(self.rect())
+        self.paint_stars(p)
+
+    def _paint_gl(self) -> None:
+        t0 = time.perf_counter()
+        p = QPainter(self)
+        if not p.isActive():
+            return
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self._advance_time()
+        W, H = float(self.width()), float(self.height())
+        self._draw_aurora_gl(p, W, H)
+        self.paint_stars(p)
+        st = self.stage
+        if st is not None and st.external and st.isVisible():
+            tl = st.mapTo(self, QPoint(0, 0))
+            p.save()
+            p.translate(tl.x(), tl.y())
+            p.setClipRect(QRectF(0, 0, st.width(), st.height()))
+            st._paint_scene(p, st.width(), st.height())
+            p.restore()
+        p.end()
+        if st is not None:
+            st._frame_done((time.perf_counter() - t0) * 1000.0)
+
+    if GL_ENABLED:
+        def paintGL(self):
+            self._paint_gl()
+    else:
+        def paintEvent(self, e):
+            self._paint_software(e)
+
 
 
 class GlassCard(QWidget):
@@ -343,6 +423,7 @@ class GlowButton(QPushButton):
 
 class ModalLayer(QWidget):
     closed = pyqtSignal()
+    opened = pyqtSignal()
 
     def __init__(self, host: QWidget):
         super().__init__(host)
@@ -351,7 +432,6 @@ class ModalLayer(QWidget):
         self._bg: QImage | None = None
         self._k = 0.0
         self._content: QWidget | None = None
-        self._fx: QGraphicsOpacityEffect | None = None
         self._dismissable = True
         self._closing = False
         self._an = QVariantAnimation(self)
@@ -369,7 +449,7 @@ class ModalLayer(QWidget):
         self.setGeometry(host.rect())
         self.hide()
         try:
-            img = host.grab().toImage()
+            img = self._snapshot(host)
             sw, sh = img.width(), img.height()
             small = img.scaled(max(2, sw // 16), max(2, sh // 16),
                                Qt.AspectRatioMode.IgnoreAspectRatio,
@@ -382,9 +462,6 @@ class ModalLayer(QWidget):
         self._closing = False
         content.setParent(self)
         content.setFixedSize(min(w, max(240, host.width() - 40)), min(h, max(200, host.height() - 40)))
-        self._fx = QGraphicsOpacityEffect(content)
-        self._fx.setOpacity(0.0)
-        content.setGraphicsEffect(self._fx)
         self._content = content
         content.show()
         self._k = 0.0
@@ -396,17 +473,49 @@ class ModalLayer(QWidget):
         self._an.setStartValue(0.0)
         self._an.setEndValue(1.0)
         self._an.start()
+        self.opened.emit()
+
+    @staticmethod
+    def _flat(img: QImage) -> bool:
+        w, h = img.width(), img.height()
+        if w < 8 or h < 8:
+            return True
+        lo, hi = [255, 255, 255], [0, 0, 0]
+        for gx in range(1, 6):
+            for gy in range(1, 6):
+                c = img.pixelColor(int(w * gx / 6), int(h * gy / 6))
+                for i, v in enumerate((c.red(), c.green(), c.blue())):
+                    lo[i] = min(lo[i], v)
+                    hi[i] = max(hi[i], v)
+        return max(hi[i] - lo[i] for i in range(3)) < 10
+
+    def _snapshot(self, host: QWidget) -> QImage:
+        if hasattr(host, "grabFramebuffer"):
+            try:
+                base = host.grabFramebuffer()
+                if not base.isNull():
+                    p = QPainter(base)
+                    for ch in host.children():
+                        if isinstance(ch, QWidget) and ch is not self and ch.isVisible():
+                            ch.render(p, ch.pos())
+                    p.end()
+                    if not self._flat(base):
+                        return base
+            except Exception:
+                pass
+        img = host.grab().toImage()
+        if self._flat(img) and hasattr(host, "small") and host.small() is not None:
+            return host.small()
+        return img
 
     def _drop_content(self):
         if self._content is not None:
             try:
-                self._content.setGraphicsEffect(None)
                 self._content.hide()
                 self._content.deleteLater()
             except Exception:
                 pass
         self._content = None
-        self._fx = None
 
     def _place(self):
         c = self._content
@@ -414,8 +523,6 @@ class ModalLayer(QWidget):
             return
         dy = (1.0 - self._k) * 26
         c.move(int((self.width() - c.width()) / 2), int((self.height() - c.height()) / 2 + dy))
-        if self._fx is not None:
-            self._fx.setOpacity(self._k)
 
     def _on_k(self, v):
         self._k = float(v)
@@ -463,7 +570,7 @@ class ModalLayer(QWidget):
             super().keyPressEvent(e)
 
 
-class Stage3D(_GLWidget):
+class Stage3D(QWidget):
     MODELS = ("crystal", "globe", "knot", "helix", "face")
     model_changed = pyqtSignal(str)
 
@@ -472,13 +579,18 @@ class Stage3D(_GLWidget):
         self.setMinimumSize(320, 300)
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-        # Prefer GPU path (OpenGL widget) when available
-        try:
-            self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
-            self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
-        except Exception:
-            pass
-        self._gpu = bool(_HAS_GL)
+        self.external = GL_ENABLED
+        if not self.external:
+            self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
+        self.quality = "auto"
+        self.paused = False
+        self.lite = False
+        self.fps = 0.0
+        self._fc = 0
+        self._fct = time.time()
+        self._ms = 8.0
+        self._bar_cache: dict = {}
+        self._bd: Backdrop | None = None
         self.state = "INITIALISING"
         self.muted = False
         self.speaking = False
@@ -505,16 +617,16 @@ class Stage3D(_GLWidget):
         self._vis_i = None
         self._ripples: list[float] = []
         self._next_ripple = 0.0
-        self._blink = True
-        self._blink_t = 0.0
         self._cm = np.array(QColor(C.PRI).getRgb()[:3], dtype=np.float64)
         self._ca = np.array(QColor(C.ACC).getRgb()[:3], dtype=np.float64)
         self._ico = geo.icosahedron()
-        self._globe = geo.fib_sphere(380)
+        self._globe = geo.fib_sphere(300)
+        self._globe_ang = np.arctan2(self._globe[:, 2], self._globe[:, 0])
         self._rings = [geo.circle(90, .0, .0), geo.circle(90, 1.05, .6), geo.circle(90, -.9, -.5)]
-        self._knot = geo.torus_knot(520)
+        self._knot = geo.torus_knot(360)
         self._helix = geo.helix(120)
         self._halo = geo.circle(46, .35, .0)
+        self._ticks = np.linspace(0, 2 * math.pi, 72, endpoint=False)
         self._tm = QTimer(self)
         self._tm.timeout.connect(self._step)
         self._tm.start(24)
@@ -588,6 +700,8 @@ class Stage3D(_GLWidget):
         return QColor(C.PRI), QColor(C.ACC)
 
     def _alive(self) -> bool:
+        if self.paused:
+            return False
         try:
             return self.isVisible() and not self.window().isMinimized()
         except Exception:
@@ -635,11 +749,6 @@ class Stage3D(_GLWidget):
             self._next_ripple = now + 0.75
         self._ripples = [r for r in self._ripples if self._t - r < 2.2]
 
-        self._blink_t += dt
-        if self._blink_t > 0.7:
-            self._blink = not self._blink
-            self._blink_t = 0.0
-
         if self._avatar is not None and self.model == "face":
             try:
                 self._avatar.step(dt, self._amp, speaking=self.speaking, muted=self.muted,
@@ -648,8 +757,67 @@ class Stage3D(_GLWidget):
                                   v_hop=(sched[2] if sched is not None else 0.02))
             except Exception:
                 pass
+        active = (self.speaking or self._amp > 0.02 or self._drag is not None
+                  or bool(self._ripples) or self._visemes is not None)
+        try:
+            focused = self.window().isActiveWindow()
+        except Exception:
+            focused = True
+        if self.lite:
+            want = 40 if active else 80
+        else:
+            want = 33 if active else 50
+        if not focused or self.paused:
+            want = 200
+        if self._tm.interval() != want:
+            self._tm.setInterval(want)
         if self._alive():
-            self.update()
+            self._request_paint()
+
+    def _backdrop(self):
+        if self._bd is None:
+            w = self.parentWidget()
+            while w is not None and not isinstance(w, Backdrop):
+                w = w.parentWidget()
+            self._bd = w
+        return self._bd
+
+    def _request_paint(self) -> None:
+        if self.external:
+            bd = self._backdrop()
+            if bd is not None:
+                bd.update()
+                return
+        self.update()
+
+    def _frame_done(self, ms: float) -> None:
+        self._ms += (ms - self._ms) * 0.08
+        self._fc += 1
+        now = time.time()
+        if now - self._fct >= 1.0:
+            self.fps = self._fc / (now - self._fct)
+            self._fc = 0
+            self._fct = now
+        if self.quality == "lite":
+            self.lite = True
+        elif self.quality == "high":
+            self.lite = False
+        elif self._ms > 22:
+            self.lite = True
+        elif self._ms < 9:
+            self.lite = False
+
+    def _paint_bg(self, p, W, H):
+        bd = self._backdrop()
+        img = bd.small() if bd is not None else None
+        if img is None or img.isNull() or bd.width() <= 0:
+            p.fillRect(0, 0, W, H, qcol(C.BG))
+            return
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        tl = self.mapTo(bd, QPoint(0, 0))
+        k = img.width() / bd.width()
+        p.drawImage(QRectF(0, 0, W, H), img, QRectF(tl.x() * k, tl.y() * k, W * k, H * k))
+        bd.paint_stars(p, tl.x(), tl.y(), W, H)
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
@@ -694,9 +862,12 @@ class Stage3D(_GLWidget):
             col = mix(self._col("m"), self._col("a"), mixc)
             col.setAlpha(int((50 + 205 * t) * alpha))
             p.setPen(QPen(col, base * (0.55 + 0.9 * t), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            p.drawPoints(QPolygonF([QPointF(float(a), float(c)) for a, c in zip(sx[sel], sy[sel])]))
+            xy = np.column_stack((sx[sel], sy[sel])).tolist()
+            p.drawPoints(QPolygonF([QPointF(a, c) for a, c in xy]))
 
     def _lines(self, p, sx, sy, z, idx, width: float, alpha: float = 1.0, mixc: float = 0.0):
+        if len(idx) == 0:
+            return
         zm = (z[idx[:, 0]] + z[idx[:, 1]]) / 2
         b = geo.depth_bucket(zm)
         for k in range(4):
@@ -707,8 +878,9 @@ class Stage3D(_GLWidget):
             col = mix(self._col("m"), self._col("a"), mixc)
             col.setAlpha(int((35 + 190 * t) * alpha))
             p.setPen(QPen(col, width * (0.6 + 0.7 * t), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            p.drawLines([QLineF(float(sx[idx[i, 0]]), float(sy[idx[i, 0]]),
-                                float(sx[idx[i, 1]]), float(sy[idx[i, 1]])) for i in sel])
+            ii = idx[sel]
+            seg = np.column_stack((sx[ii[:, 0]], sy[ii[:, 0]], sx[ii[:, 1]], sy[ii[:, 1]])).tolist()
+            p.drawLines([QLineF(a, c, d, e) for a, c, d, e in seg])
 
     def _chain(self, n: int, closed: bool = True) -> np.ndarray:
         a = np.arange(n)
@@ -716,25 +888,75 @@ class Stage3D(_GLWidget):
         idx = np.stack([a, b], 1)
         return idx if closed else idx[:-1]
 
+    def _hud_rings(self, p, cx: float, cy: float, rb: float) -> None:
+        t = self._t
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        rect = QRectF(cx - rb, cy - rb, 2 * rb, 2 * rb)
+        p.setPen(QPen(self._col("m", 34), 1.0))
+        p.drawEllipse(QPointF(cx, cy), rb, rb)
+        p.setPen(QPen(self._col("m", 175), 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        base = int(t * 22 * 16)
+        for k in range(3):
+            p.drawArc(rect, (base + k * 120 * 16) % (360 * 16), 36 * 16)
+        if self.lite:
+            return
+        r2 = rb * 0.88
+        rect2 = QRectF(cx - r2, cy - r2, 2 * r2, 2 * r2)
+        p.setPen(QPen(self._col("a", 130), 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        for k in range(2):
+            p.drawArc(rect2, (-int(t * 36 * 16) + k * 180 * 16) % (360 * 16), 64 * 16)
+        ang = self._ticks + t * 0.12
+        cs, sn = np.cos(ang).tolist(), np.sin(ang).tolist()
+        ri = rb * 1.06
+        long_i, short_o, long_o = 6, rb * 1.11, rb * 1.16
+        segs = []
+        for i, (c, s) in enumerate(zip(cs, sn)):
+            ro = long_o if i % long_i == 0 else short_o
+            segs.append(QLineF(cx + ri * c, cy + ri * s, cx + ro * c, cy + ro * s))
+        p.setPen(QPen(self._col("m", 80), 1.0))
+        p.drawLines(segs)
+
+    def _sparks(self, p, cx, cy, R, yaw, n: int = 3, trail: int = 7):
+        pts = []
+        for k in range(n):
+            for j in range(trail):
+                a = self._t * (1.3 + 0.25 * k) - j * 0.075 + k * 2.1
+                pts.append((math.cos(a), 0.0, math.sin(a)))
+        r = geo.rotate(np.array(pts), yaw * 0.3, 0.55)
+        sx, sy, z, _ = geo.project(r, cx, cy, R)
+        for j in range(trail):
+            self._dots(p, sx[j::trail], sy[j::trail], z[j::trail], 5.5 * (1 - j * 0.09), (1 - j / trail), 0.9)
+
     def _draw_crystal(self, p, cx, cy, R, yaw, pitch, amp):
         v, faces, edges = self._ico
         s = 1.0 + amp * 0.16
         r1 = geo.rotate(v * s, yaw, pitch)
         sx, sy, z, f = geo.project(r1, cx, cy, R)
         light = np.array([0.4, 0.6, 0.7])
-        tri = r1[faces]
-        nrm = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
-        nrm /= (np.linalg.norm(nrm, axis=1)[:, None] + 1e-9)
-        order = np.argsort(tri[:, :, 2].mean(axis=1))
-        p.setPen(Qt.PenStyle.NoPen)
-        for i in order:
-            lum = abs(float(nrm[i] @ light))
-            col = mix(self._col("m"), self._col("a"), lum)
-            col.setAlpha(int(24 + 70 * lum))
-            p.setBrush(col)
-            p.drawPolygon(QPolygonF([QPointF(float(sx[j]), float(sy[j])) for j in faces[i]]))
+        if not self.lite:
+            tri = r1[faces]
+            nrm = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
+            nrm /= (np.linalg.norm(nrm, axis=1)[:, None] + 1e-9)
+            order = np.argsort(tri[:, :, 2].mean(axis=1)).tolist()
+            lums = np.abs(nrm @ light).tolist()
+            specs = (np.clip(nrm[:, 2], 0, 1) ** 6).tolist()
+            sxl, syl, fl = sx.tolist(), sy.tolist(), faces.tolist()
+            cm, ca = self._col("m"), self._col("a")
+            p.setPen(Qt.PenStyle.NoPen)
+            for i in order:
+                lum, spec = lums[i], specs[i]
+                col = mix(cm, ca, lum)
+                col.setAlpha(int(min(255, 26 + 75 * lum + 110 * spec)))
+                if spec > 0.2:
+                    col = mix(col, QColor(255, 255, 255, col.alpha()), spec * 0.55)
+                p.setBrush(col)
+                p.drawPolygon(QPolygonF([QPointF(sxl[j], syl[j]) for j in fl[i]]))
+            self._lines(p, sx, sy, z, edges, 5.5, 0.16, 0.3)
+            self._dots(p, sx, sy, z, 13.0, 0.18, 0.5)
         self._lines(p, sx, sy, z, edges, 1.5, 1.0, 0.3)
         self._dots(p, sx, sy, z, 6.0, 1.0, 0.5)
+        if self.lite:
+            return
         r2 = geo.rotate(v * 0.52 * s, -yaw * 1.7, -pitch * 0.8 + 0.4)
         sx2, sy2, z2, _ = geo.project(r2, cx, cy, R)
         self._lines(p, sx2, sy2, z2, edges, 1.1, 0.8, 0.9)
@@ -743,40 +965,71 @@ class Stage3D(_GLWidget):
             rr = geo.rotate(ring * 1.38, yaw * 0.6, pitch + 0.2)
             rx, ry, rz, _ = geo.project(rr, cx, cy, R)
             self._lines(p, rx, ry, rz, self._chain(len(ring)), 1.0, 0.45, 0.6)
+        self._sparks(p, cx, cy, R * 1.38, yaw)
 
     def _draw_globe(self, p, cx, cy, R, yaw, pitch, amp):
-        n = len(self._globe)
+        step = 2 if self.lite else 1
+        base = self._globe[::step]
+        ang = self._globe_ang[::step]
+        n = len(base)
         i = np.arange(n)
         jitter = 1.0 + amp * 0.18 * np.sin(i * 1.7 + self._t * 9)
-        pts = self._globe * jitter[:, None]
+        pts = base * jitter[:, None]
         r = geo.rotate(pts, yaw, pitch)
         sx, sy, z, f = geo.project(r, cx, cy, R)
-        self._dots(p, sx, sy, z, 3.4, 1.0, 0.25)
+        if not self.lite:
+            rim = QRadialGradient(cx, cy, R * 1.22)
+            m = self._col("m")
+            rim.setColorAt(0.78, QColor(m.red(), m.green(), m.blue(), 0))
+            rim.setColorAt(0.93, QColor(m.red(), m.green(), m.blue(), 70))
+            rim.setColorAt(1.0, QColor(m.red(), m.green(), m.blue(), 0))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QBrush(rim))
+            p.drawEllipse(QPointF(cx, cy), R * 1.22, R * 1.22)
+        sweep = (self._t * 1.1) % (2 * math.pi)
+        d = np.abs(((ang - sweep + math.pi) % (2 * math.pi)) - math.pi)
+        hot = d < 0.22
+        north = base[:, 1] > 0
+        cold = ~hot
+        self._dots(p, sx[cold & north], sy[cold & north], z[cold & north], 3.2, 1.0, 0.0)
+        self._dots(p, sx[cold & ~north], sy[cold & ~north], z[cold & ~north], 3.2, 1.0, 0.85)
+        if hot.any():
+            self._dots(p, sx[hot], sy[hot], z[hot], 6.4, 1.0, 1.0)
+        if self.lite:
+            return
         for k, ring in enumerate(self._rings):
             rr = geo.rotate(ring * 1.12, yaw * (1.2 + k * .4), pitch + k * 0.5)
             rx, ry, rz, _ = geo.project(rr, cx, cy, R)
             self._lines(p, rx, ry, rz, self._chain(len(ring)), 1.2, 0.8, 0.7 + k * 0.1)
-        lat = []
         for ly in (-0.5, 0.0, 0.5):
             c = geo.circle(70) * math.sqrt(1 - ly * ly)
             c[:, 1] = ly
-            lat.append(c)
-        for c in lat:
             rr = geo.rotate(c, yaw, pitch)
             rx, ry, rz, _ = geo.project(rr, cx, cy, R)
             self._lines(p, rx, ry, rz, self._chain(len(c)), 0.8, 0.35, 0.2)
+        self._sparks(p, cx, cy, R * 1.3, yaw, n=2)
 
     def _draw_knot(self, p, cx, cy, R, yaw, pitch, amp):
         n = len(self._knot)
-        for k, (sc, mc) in enumerate(((1.0, 0.0), (1.07, 0.5), (0.93, 1.0))):
+        strands = ((1.0, 0.0),) if self.lite else ((1.0, 0.0), (1.07, 0.5), (0.93, 1.0))
+        first = None
+        for k, (sc, mc) in enumerate(strands):
             pts = np.roll(self._knot, k * 17, axis=0) * sc * (1 + amp * 0.12)
             pts = pts * (1.0 + 0.04 * np.sin(np.arange(n) * 0.3 + self._t * 3 + k))[:, None]
             r = geo.rotate(pts, yaw, pitch, roll=self._t * 0.2)
             sx, sy, z, _ = geo.project(r, cx, cy, R * 1.25)
+            if k == 0:
+                first = (sx, sy, z)
+                if not self.lite:
+                    self._lines(p, sx, sy, z, self._chain(n), 7.0, 0.12, 0.0)
             self._lines(p, sx, sy, z, self._chain(n), 2.4 - k * 0.5, 1.0 - k * 0.2, mc)
-        r = geo.rotate(self._knot, yaw, pitch, roll=self._t * 0.2)
-        sx, sy, z, _ = geo.project(r, cx, cy, R * 1.25)
-        self._dots(p, sx[::9], sy[::9], z[::9], 5.0, 1.0, 0.8)
+        if first is None:
+            return
+        sx, sy, z = first
+        ids = [int(self._t * 70 + m * n / 5) % n for m in range(5)]
+        if not self.lite:
+            self._dots(p, sx[ids], sy[ids], z[ids], 14.0, 0.25, 0.8)
+        self._dots(p, sx[ids], sy[ids], z[ids], 6.0, 1.0, 0.9)
 
     def _draw_helix(self, p, cx, cy, R, yaw, pitch, amp):
         s1, s2 = self._helix
@@ -790,29 +1043,27 @@ class Stage3D(_GLWidget):
         sx = np.concatenate([ax, bx])
         sy = np.concatenate([ay, by])
         z = np.concatenate([az, bz])
-        self._lines(p, sx, sy, z, np.stack([rung, rung + n], 1), 1.2, 0.6, 0.5)
+        pulse = ((self._t * 0.5) % 2.0) - 1.0
+        hot = np.abs(s1[rung, 1] - pulse) < 0.14
+        rg = np.stack([rung, rung + n], 1)
+        self._lines(p, sx, sy, z, rg[~hot], 1.2, 0.55, 0.5)
+        if hot.any():
+            self._lines(p, sx, sy, z, rg[hot], 3.4, 1.0, 0.5)
         ch = self._chain(n, closed=False)
+        if not self.lite:
+            self._lines(p, ax, ay, az, ch, 7.0, 0.12, 0.0)
+            self._lines(p, bx, by, bz, ch, 7.0, 0.12, 1.0)
         self._lines(p, ax, ay, az, ch, 2.6, 1.0, 0.0)
         self._lines(p, bx, by, bz, ch, 2.6, 1.0, 1.0)
-        self._dots(p, sx[np.concatenate([rung, rung + n])], sy[np.concatenate([rung, rung + n])],
-                   z[np.concatenate([rung, rung + n])], 6.0, 1.0, 0.5)
+        both = np.concatenate([rung, rung + n])
+        self._dots(p, sx[both], sy[both], z[both], 6.0, 1.0, 0.5)
 
-    def paintEvent(self, _):
-        p = QPainter(self)
-        if not p.isActive():
-            return
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        try:
-            p.setRenderHint(QPainter.RenderHint.VerticalSubpixelPositioning)
-        except Exception:
-            pass
-        W, H = self.width(), self.height()
+    def _paint_scene(self, p, W, H):
         amp = self._amp
         band_h = H * 0.78
         cx = W / 2 + self._look[0] * W * 0.05
-        cy = band_h * 0.52 + self._look[1] * H * 0.04
-        R = min(W * 0.34, band_h * 0.40) * (1.0 + amp * 0.06)
+        cy = band_h * 0.50 + self._look[1] * H * 0.04
+        R = min(W * 0.30, band_h * 0.29) * (1.0 + amp * 0.06)
         main, acc = self._col("m"), self._col("a")
 
         g = QRadialGradient(cx, cy, R * 2.3)
@@ -834,7 +1085,7 @@ class Stage3D(_GLWidget):
         p.setBrush(QBrush(fg))
         p.drawEllipse(QPointF(cx, fy), R * 1.3, R * 1.3)
         p.restore()
-        for rt in self._ripples:
+        for rt in ([] if self.lite else self._ripples):
             age = (self._t - rt) / 2.2
             rr = R * (0.9 + age * 1.6)
             col = QColor(acc.red(), acc.green(), acc.blue(), int(90 * (1 - age)))
@@ -848,23 +1099,44 @@ class Stage3D(_GLWidget):
             p.restore()
 
         yaw, pitch = self._yaw + self._look[0] * 2.0, self._pitch + self._look[1]
-        if self.model == "face" and self._avatar is not None:
+        face_ok = self.model == "face" and self._avatar is not None
+        if face_ok:
             try:
                 r_head = min(min(W, H) * 0.355, band_h / (self._avatar.SPAN + 0.08))
                 head_cy = 12 + (band_h - 12 - self._avatar.SPAN * r_head) / 2.0 + r_head
+                hg = QRadialGradient(W / 2, head_cy, r_head * 1.7)
+                hg.setColorAt(0.45, QColor(main.red(), main.green(), main.blue(), 46))
+                hg.setColorAt(1.0, QColor(0, 0, 0, 0))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QBrush(hg))
+                p.drawEllipse(QPointF(W / 2, head_cy), r_head * 1.7, r_head * 1.7)
+                self._hud_rings(p, W / 2, head_cy, r_head * 1.12)
                 self._avatar.paint(p, W / 2, head_cy, r_head, main, acc, qcol(C.BG))
+                if not self.lite:
+                    p.save()
+                    clip = QPainterPath()
+                    clip.addEllipse(QPointF(W / 2, head_cy), r_head * 0.95, r_head)
+                    p.setClipPath(clip)
+                    yy = head_cy - r_head + ((self._t * 0.35) % 1.0) * 2 * r_head
+                    sg = QLinearGradient(0, yy - 16, 0, yy + 16)
+                    sg.setColorAt(0.0, QColor(main.red(), main.green(), main.blue(), 0))
+                    sg.setColorAt(0.5, QColor(main.red(), main.green(), main.blue(), 60))
+                    sg.setColorAt(1.0, QColor(main.red(), main.green(), main.blue(), 0))
+                    p.fillRect(QRectF(W / 2 - r_head, yy - 16, 2 * r_head, 32), QBrush(sg))
+                    p.restore()
             except Exception:
                 self.model = "crystal"
-        elif self.model == "globe":
-            self._draw_globe(p, cx, cy, R, yaw, pitch, amp)
-        elif self.model == "knot":
-            self._draw_knot(p, cx, cy, R, yaw, pitch, amp)
-        elif self.model == "helix":
-            self._draw_helix(p, cx, cy, R, yaw, pitch, amp)
-        else:
-            self._draw_crystal(p, cx, cy, R, yaw, pitch, amp)
-
-        if self.model != "face":
+                face_ok = False
+        if not face_ok:
+            self._hud_rings(p, cx, cy, R * 1.62)
+            if self.model == "globe":
+                self._draw_globe(p, cx, cy, R, yaw, pitch, amp)
+            elif self.model == "knot":
+                self._draw_knot(p, cx, cy, R, yaw, pitch, amp)
+            elif self.model == "helix":
+                self._draw_helix(p, cx, cy, R, yaw, pitch, amp)
+            else:
+                self._draw_crystal(p, cx, cy, R, yaw, pitch, amp)
             cr = R * (0.24 + amp * 0.18)
             cg = QRadialGradient(cx, cy, cr)
             cg.setColorAt(0, QColor(255, 255, 255, 230))
@@ -873,16 +1145,30 @@ class Stage3D(_GLWidget):
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QBrush(cg))
             p.drawEllipse(QPointF(cx, cy), cr, cr)
-
-        if self.particles:
-            ang = self._t * 0.6
-            for k, sc in enumerate((1.55, 1.85)):
-                pts = geo.rotate(self._halo * sc, ang * (1 if k == 0 else -0.7), 0.35 + k * 0.5)
-                hx, hy, hz, _ = geo.project(pts, cx, cy, R)
-                self._dots(p, hx, hy, hz, 2.6, 0.9, 0.7 + 0.3 * k)
+            if self.particles and not self.lite:
+                ang = self._t * 0.6
+                for k, sc in enumerate((1.55, 1.85)):
+                    pts = geo.rotate(self._halo * sc, ang * (1 if k == 0 else -0.7), 0.35 + k * 0.5)
+                    hx, hy, hz, _ = geo.project(pts, cx, cy, R)
+                    self._dots(p, hx, hy, hz, 2.6, 0.9, 0.7 + 0.3 * k)
 
         self._paint_status(p, W, H, band_h, amp)
+
+    def _render(self) -> None:
+        t0 = time.perf_counter()
+        p = QPainter(self)
+        if not p.isActive():
+            return
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        W, H = self.width(), self.height()
+        self._paint_bg(p, W, H)
+        self._paint_scene(p, W, H)
         p.end()
+        self._frame_done((time.perf_counter() - t0) * 1000.0)
+
+    def paintEvent(self, _):
+        if not self.external:
+            self._render()
 
     def _paint_status(self, p, W, H, band_h, amp):
         main, acc = self._col("m"), self._col("a")
@@ -890,8 +1176,6 @@ class Stage3D(_GLWidget):
             txt = "MUTED"
         elif self.speaking:
             txt = "SPEAKING"
-        elif self.state in ("THINKING", "PROCESSING"):
-            txt = self.state
         else:
             txt = self.state
         f = QFont("Segoe UI", 10, QFont.Weight.DemiBold)
@@ -900,7 +1184,7 @@ class Stage3D(_GLWidget):
         p.setPen(QPen(main))
         y = band_h + 4
         p.drawText(QRectF(0, y, W, 24), Qt.AlignmentFlag.AlignCenter, txt)
-        N, bw, gap = 28, 5.0, 4.0
+        N, bw, gap = (18 if self.lite else 28), 5.0, 4.0
         x0 = (W - N * (bw + gap)) / 2
         by = y + 30
         mid = (N - 1) / 2
@@ -913,10 +1197,20 @@ class Stage3D(_GLWidget):
                 idle = 4 + 2.5 * math.sin(self._t * 2.2 + i * 0.55)
                 h = idle + amp * 30 * env * (0.55 + 0.45 * math.sin(self._t * 9 + i * 0.8))
             h = max(3.0, min(34.0, h))
-            gr = QLinearGradient(0, by + 20 - h, 0, by + 20)
-            gr.setColorAt(0, mix(main, acc, i / N))
-            gr.setColorAt(1, QColor(main.red(), main.green(), main.blue(), 60))
-            p.setBrush(QBrush(gr))
+            key = (i, N, main.red() >> 2, main.green() >> 2, main.blue() >> 2,
+                   acc.red() >> 2, acc.green() >> 2, acc.blue() >> 2)
+            br = self._bar_cache.get(key)
+            if br is None:
+                if len(self._bar_cache) > 600:
+                    self._bar_cache.clear()
+                gr = QLinearGradient(0, 0, 0, 1)
+                gr.setCoordinateMode(QGradient.CoordinateMode.ObjectBoundingMode)
+                gr.setColorAt(0, mix(main, acc, i / N))
+                gr.setColorAt(1, QColor(main.red(), main.green(), main.blue(), 60))
+                br = QBrush(gr)
+                self._bar_cache[key] = br
+            p.setBrush(br)
             p.drawRoundedRect(QRectF(x0 + i * (bw + gap), by + 20 - h, bw, h), bw / 2, bw / 2)
+
 
 # by ASDcuber521

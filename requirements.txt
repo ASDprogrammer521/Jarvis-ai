@@ -47,4 +47,12 @@ PyPDF2                       # file_processor — PDF fallback reader
 python-docx                  # file_processor — .docx reading
 paho-mqtt                    # printer_control plugin — MQTT printers
 pynvml                       # system_monitor + the HUD's GPU meter (NVIDIA)
+
+mediapipe>=0.10
+pypdf>=4
+pdfplumber>=0.10
+pymupdf>=1.24
+pytesseract>=0.3
+docx2pdf; sys_platform == "win32"
+
 # by ASDcuber521

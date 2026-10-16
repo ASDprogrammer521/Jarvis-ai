@@ -18,6 +18,8 @@ hiddenimports = [
     'PyQt6.QtCore',
     'PyQt6.QtGui',
     'PyQt6.QtWidgets',
+    'PyQt6.QtOpenGL',
+    'PyQt6.QtOpenGLWidgets',
     'google.genai',
     'sounddevice',
     'numpy',
@@ -42,10 +44,25 @@ hiddenimports = [
     'websockets',
     'yaml',
     'cryptography',
+    'pptx',
+    'docx',
+    'openpyxl',
+    'pypdf',
+    'pdfplumber',
+    'fitz',
+    'pytesseract',
+    'mediapipe',
 ]
 
 for pkg in ('google.genai', 'uvicorn', 'fastapi', 'starlette'):
     try:
+        hiddenimports += collect_submodules(pkg)
+    except Exception:
+        pass
+
+for pkg in ('pptx', 'docx', 'openpyxl', 'pdfplumber', 'pypdf', 'mediapipe'):
+    try:
+        datas += collect_data_files(pkg)
         hiddenimports += collect_submodules(pkg)
     except Exception:
         pass

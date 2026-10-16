@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QSlider, QStackedWidget, QVBoxLayout, QWidget,
 )
 
-from ui_fx import GlassCard, GlowButton, Toggle, fade_in
+from ui_fx import GL_ENABLED, GlassCard, GlowButton, Toggle, fade_in
 from ui_theme import C, DEFAULT_ACCENT, read_cfg, rgba
 from ui_widgets import (
     HueSlider, IconButton, Segmented, divider, font, make_page, section_label, setting_row,
@@ -312,6 +312,20 @@ class SettingsPanel(GlassCard):
         hint = QLabel("Tip: drag the model to rotate it · double-click to switch")
         hint.setStyleSheet(f"color: {C.TEXT_DIM}; margin-top: 4px;")
         lay.addWidget(hint)
+        lay.addWidget(section_label("Performance"))
+        q = Segmented([("auto", "Auto"), ("high", "High quality"), ("lite", "Lightweight")],
+                      getattr(w.stage, "quality", "auto"))
+        q.changed.connect(w.set_quality)
+        lay.addWidget(setting_row("Rendering quality", "Auto drops detail when the PC is struggling", q))
+        hw = Toggle(bool(read_cfg().get("hw_accel", True)))
+        hw.toggled.connect(w.set_hw_accel)
+        state = "active" if GL_ENABLED else "off"
+        lay.addWidget(setting_row("GPU acceleration", f"Draws the 3D scene on the graphics card · now: {state} · restart to apply", hw))
+        lay.addWidget(divider())
+        sp = Toggle(bool(read_cfg().get("show_perf", False)))
+        sp.toggled.connect(w.set_perf)
+        lay.addWidget(setting_row("Show performance stats", "FPS and frame time under the command bar", sp))
+        lay.addWidget(divider())
         lay.addWidget(section_label("Effects"))
         for key, title, sub, cur in (
             ("aurora", "Aurora background", "Soft animated colour glow behind everything", w.backdrop.aurora),

@@ -38,6 +38,22 @@ Voice, vision, desktop control, holographic HUD, and phone companion — one sys
 `https://github.com/ASDprogrammer521/Jarvis-ai/releases/latest`
 
 > Windows may show SmartScreen (unsigned build) → **More info → Run anyway**.
+
+### Publish a new release (for maintainers)
+
+```bash
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+Or: **Actions → Build Windows EXE + Release → Run workflow** (optional tag input).
+
+Local build on Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1
+```
+
 ---
 
 ## 🚀 Getting Started (from source)
@@ -77,6 +93,38 @@ python main.py
 | 🔄 **Self-update** | Check GitHub for updates |
 | 🖥️ **Compact mode** | Floating always-on-top mic (F12) |
 | 💻 **Windows EXE** | Single-folder build via GitHub Releases — no Python install |
+| 🏋️ **Push-up counter** | Live webcam rep counting with form checks (depth, hips) and workout history |
+| 🍎 **Calorie & nutrition tracker** | Log meals by text or photo, daily budget and macros |
+| 📊 **Presentations (PPTX)** | Multi-slide decks with diagrams, styling and speaker notes |
+| 📝 **Word documents (DOCX)** | Create and edit formatted documents, tables and lists |
+| 📄 **PDF toolkit** | Merge, split, convert, extract text/tables, OCR scanned pages |
+| 📈 **Spreadsheets (XLSX)** | Formatted workbooks with live formulas, totals and charts |
+| 🎵 **Spotify controller** | Play, pause, skip, volume and search playlists or tracks |
+| ▶️ **YouTube** | Play videos, get info, summarize from the transcript |
+
+---
+
+## 🧰 Fitness, office & media tools
+
+Each tool is a drop-in file in `actions/` and is discovered automatically.
+
+| Tool | File | Try saying |
+| ---- | ---- | ---------- |
+| Push-up counter | `actions/pushup_counter.py` | "Count my push-ups, target 20" · "How many push-ups this week?" |
+| Calorie counter | `actions/calorie_counter.py` | "I had two eggs and toast" · "How many calories do I have left?" |
+| Presentation builder | `actions/ppt_template_workflow.py` | "Make a 10-slide presentation about solar energy" |
+| Word documents | `actions/docx_tools.py` | "Write a one-page cover letter as a Word document" |
+| PDF tools | `actions/pdf_tools.py` | "Merge these two PDFs" · "Read the text in this scanned PDF" |
+| Spreadsheets | `actions/office_builder.py`, `actions/office_generator.py` | "Create a monthly budget spreadsheet" |
+| Spotify | `actions/spotify_controller.py` | "Play my chill playlist" · "Volume down" · "Skip" |
+| YouTube | `actions/youtube_video.py` | "Summarize this YouTube video" |
+
+Setup notes:
+
+* **Push-up counter** needs `opencv-python` and `mediapipe`. On first use it downloads a small pose model (about 6 MB) to `config/models/`. Place the camera at your side so your whole body is visible.
+* **PDF OCR** needs the free [Tesseract](https://github.com/tesseract-ocr/tesseract) program installed. Converting Word/PowerPoint/Excel to PDF needs [LibreOffice](https://www.libreoffice.org) (or Microsoft Word with `docx2pdf` on Windows).
+* **Spotify** works out of the box with the desktop app (media keys, volume, search page). For one-step "play my chill playlist", add `spotify_client_id` and `spotify_client_secret` (free, from developer.spotify.com/dashboard) to `config/api_keys.json`, register `http://127.0.0.1:8888/callback` as the Redirect URI, then say "log in to Spotify" once.
+* Generated files are saved under `Documents/Jarvis/` (change with `"output_dir"` in `config/api_keys.json`). Workout and nutrition logs live in `memory/`.
 
 ---
 

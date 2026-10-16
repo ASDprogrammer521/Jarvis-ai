@@ -172,7 +172,7 @@ class StatePill(QWidget):
         self._t = 0.0
         self._tm = QTimer(self)
         self._tm.timeout.connect(self._tick)
-        self._tm.start(50)
+        self._tm.start(90)
         self.setMinimumWidth(150)
 
     def set(self, text: str, color: str):
@@ -182,7 +182,7 @@ class StatePill(QWidget):
 
     def _tick(self):
         if self.isVisible():
-            self._t += 0.05
+            self._t += 0.09
             self.update()
 
     def paintEvent(self, _):
@@ -219,7 +219,7 @@ class MetricTile(QWidget):
         self._text = "--"
         self._tm = QTimer(self)
         self._tm.timeout.connect(self._tick)
-        self._tm.start(33)
+        self._tm.start(60)
 
     def set_value(self, pct: float, text: str):
         self._pct = max(0.0, min(100.0, pct))
@@ -271,6 +271,16 @@ class ChatView(QScrollArea):
         self._count = 0
         self.verticalScrollBar().rangeChanged.connect(self._stick)
 
+    def _bw(self) -> int:
+        return max(240, int(self.viewport().width() * 0.88))
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        w = self._bw()
+        for lb in self._body.findChildren(QLabel):
+            if lb.property("bub"):
+                lb.setMaximumWidth(w)
+
     def _stick(self, _lo, hi):
         self.verticalScrollBar().setValue(hi)
 
@@ -294,7 +304,8 @@ class ChatView(QScrollArea):
         bub.setWordWrap(True)
         bub.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         bub.setFont(font(10))
-        bub.setMaximumWidth(290)
+        bub.setProperty("bub", True)
+        bub.setMaximumWidth(self._bw())
         if kind == "user":
             bub.setStyleSheet(
                 f"background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {rgba(C.PRI, .30)}, stop:1 {rgba(C.ACC, .30)});"

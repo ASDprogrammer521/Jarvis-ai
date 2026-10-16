@@ -11,15 +11,15 @@ import time
 import webbrowser
 from pathlib import Path
 
-from PyQt6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QRectF, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QFont, QImage, QPainter, QPen, QPixmap, QRadialGradient
+from PyQt6.QtCore import QCoreApplication, QEasingCurve, QPoint, QPropertyAnimation, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor, QFont, QImage, QPainter, QPen, QPixmap, QRadialGradient, QSurfaceFormat
 from PyQt6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
     QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
 
 import ui_theme
-from ui_fx import Backdrop, GlassCard, GlowButton, ModalLayer, Stage3D, fade_in, slide_to
+from ui_fx import GL_ENABLED, Backdrop, GlassCard, GlowButton, ModalLayer, Stage3D, fade_in, slide_to
 from ui_metrics import _metrics
 from ui_panels import APP_VERSION, ConfirmPanel, RemotePanel, SettingsPanel, SetupPanel
 from ui_theme import C, DEFAULT_ACCENT, apply_accent, build_qss, patch_cfg, qcol, read_cfg, rgba
@@ -110,7 +110,7 @@ class StageHost(QWidget):
             c.setGeometry(18, H - h - 10, W - 36, h)
         m = self.floats.get("media")
         if m is not None and m.isVisible():
-            m.setGeometry(W - 330, 12, 318, 250)
+            m.setGeometry(W - 400, 12, 388, 316)
         k = self.floats.get("clip")
         if k is not None and k.isVisible():
             k.setGeometry(int((W - min(W - 40, 620)) / 2), 12, min(W - 40, 620), 96)
@@ -128,6 +128,7 @@ class MainWindow(QMainWindow):
     _cam_stream_sig = pyqtSignal(bool)
     _cam_frame_sig = pyqtSignal(bytes)
     _phone_frame_sig = pyqtSignal(str)
+    _media_frame_sig = pyqtSignal(bytes, str)
     _confirm_sig = pyqtSignal(str, str)
     _confirm_hide_sig = pyqtSignal()
     _wake_dl_sig = pyqtSignal(bool, str)
@@ -175,6 +176,7 @@ class MainWindow(QMainWindow):
         self._confirm_panel = None
         self._settings_open = False
         self._chat_open = False
+        self._chat_wide = bool(cfg.get("chat_wide", False))
         self._last_clip = ""
 
         self.backdrop = Backdrop()
@@ -183,12 +185,15 @@ class MainWindow(QMainWindow):
         self.backdrop.stars = bool(cfg.get("fx_stars", True))
         self.backdrop.speed = float(cfg.get("fx_speed", 1.0))
         self.stage = Stage3D()
+        self.backdrop.stage = self.stage
         self.stage.particles = bool(cfg.get("fx_particles", True))
         self.stage.speed = float(cfg.get("fx_speed", 1.0))
         self.stage.set_model(str(cfg.get("stage_model") or "crystal"))
+        self.stage.quality = str(cfg.get("quality") or "auto")
         self._build()
         self.modal = ModalLayer(self.backdrop)
         self.modal.closed.connect(self._on_modal_closed)
+        self.modal.opened.connect(lambda: self._pause_scene(True))
 
         self._log_sig.connect(self._on_log)
         self._state_sig.connect(self._apply_state)
@@ -197,6 +202,7 @@ class MainWindow(QMainWindow):
         self._cam_stream_sig.connect(self._camera_toggle)
         self._cam_frame_sig.connect(self._camera_frame)
         self._phone_frame_sig.connect(self._phone_frame)
+        self._media_frame_sig.connect(self._on_media_frame)
         self._confirm_sig.connect(self._show_confirm)
         self._confirm_hide_sig.connect(self._hide_confirm)
         self._wake_dl_sig.connect(self._on_wake_dl)
@@ -217,6 +223,7 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         QTimer.singleShot(250, self._boot)
+        QTimer.singleShot(2500, self._check_gpu)
 
     def _boot(self):
         try:
@@ -326,6 +333,10 @@ class MainWindow(QMainWindow):
         dt.setFont(font(12, QFont.Weight.Bold))
         dh.addWidget(dt)
         dh.addStretch()
+        wide = IconButton("full", 30, True, "Wider chat", flat=True)
+        wide.setChecked(self._chat_wide)
+        wide.clicked.connect(lambda: self._set_chat_wide(wide.isChecked()))
+        dh.addWidget(wide)
         clr = IconButton("close", 30, tip="Clear", flat=True)
         dh.addWidget(clr)
         dl.addLayout(dh)
@@ -368,6 +379,11 @@ class MainWindow(QMainWindow):
         bl.addWidget(send)
         root.addWidget(bar)
 
+        self.perf = QLabel("")
+        self.perf.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.perf.setStyleSheet(f"color: {C.TEXT_DIM}; font-size: 10px;")
+        self.perf.setVisible(bool(read_cfg().get("show_perf", False)))
+        root.addWidget(self.perf)
         foot = QLabel("by ASDcuber521")
         foot.setAlignment(Qt.AlignmentFlag.AlignCenter)
         foot.setStyleSheet(f"color: {rgba(C.TEXT_DIM, .8)}; font-size: 10px; letter-spacing: 3px;")
@@ -483,7 +499,15 @@ class MainWindow(QMainWindow):
         self._clip.hide()
         self._send(fmt.format(t=self._last_clip[:800]))
 
+    def set_perf(self, on: bool):
+        self.perf.setVisible(on)
+        patch_cfg(show_perf=on)
+
     def _tick(self):
+        if self.perf.isVisible():
+            st = self.stage
+            mode = "GPU" if GL_ENABLED else "CPU"
+            self.perf.setText(f"{mode} · {st.fps:.0f} fps · {st._ms:.1f} ms · {'lite' if st.lite else 'full'}")
         self.clock.setText(time.strftime("%H:%M"))
         self.date.setText(time.strftime("%a %d %b %Y"))
         if self.metrics.isVisible():
@@ -517,11 +541,34 @@ class MainWindow(QMainWindow):
         a.setDuration(320)
         a.setEasingCurve(QEasingCurve.Type.OutCubic)
         a.setStartValue(self.drawer.maximumWidth())
-        a.setEndValue(500 if show else 0)
+        a.setEndValue(self._drawer_target() if show else 0)
         a.start()
         self._drawer_anim = a
         if show:
             self.drawer.setMinimumWidth(0)
+
+    def _drawer_target(self) -> int:
+        frac = 0.55 if self._chat_wide else 0.40
+        return int(max(440, min(self.width() * frac, 900 if self._chat_wide else 640)))
+
+    def _set_chat_wide(self, on: bool):
+        self._chat_wide = on
+        patch_cfg(chat_wide=on)
+        if self._chat_open:
+            self._toggle_chat(True)
+
+    def _check_gpu(self):
+        if GL_ENABLED and hasattr(self.backdrop, "isValid") and not self.backdrop.isValid():
+            patch_cfg(hw_accel=False)
+            self.write_log("SYS: GPU rendering is unavailable on this system — switched to software mode. Restart Jarvis.")
+
+    def set_quality(self, q: str):
+        self.stage.quality = q
+        patch_cfg(quality=q)
+
+    def set_hw_accel(self, on: bool):
+        patch_cfg(hw_accel=on)
+        self._toast("GPU acceleration " + ("on" if on else "off") + " — restart to apply")
 
     def _cycle_model(self):
         m = self.stage.cycle_model()
@@ -538,7 +585,16 @@ class MainWindow(QMainWindow):
     def close_modal(self):
         self.modal.dismiss()
 
+    def _pause_scene(self, on: bool):
+        self.backdrop.paused = on
+        self.stage.paused = on
+        if not on:
+            self.stage._tm.setInterval(24)
+        if not on:
+            self.backdrop._dirty = True
+
     def _on_modal_closed(self):
+        self._pause_scene(False)
         self._settings_open = False
         self._sync_nav()
 
@@ -567,9 +623,11 @@ class MainWindow(QMainWindow):
     def set_effect(self, key: str, on: bool):
         if key == "aurora":
             self.backdrop.aurora = on
+            self.backdrop._dirty = True
             patch_cfg(fx_aurora=on)
         elif key == "stars":
             self.backdrop.stars = on
+            self.backdrop._dirty = True
             patch_cfg(fx_stars=on)
         elif key == "particles":
             self.stage.particles = on
@@ -979,7 +1037,7 @@ class MainWindow(QMainWindow):
         img = QImage.fromData(data)
         if not img.isNull() and self._media.isVisible():
             self._media_lbl.setPixmap(QPixmap.fromImage(img).scaled(
-                290, 190, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+                362, 262, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
 
     def start_camera_stream(self):
         self._cam_stream_sig.emit(True)
@@ -1004,8 +1062,30 @@ class MainWindow(QMainWindow):
             self.host.layout_floats()
             fade_in(self._media, 260)
         self._media_lbl.setPixmap(QPixmap.fromImage(img).scaled(
-            290, 190, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            362, 262, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         self._media_timer.start(6000)
+
+    def show_media_frame(self, data: bytes, title: str = ""):
+        self._media_frame_sig.emit(bytes(data or b""), str(title or ""))
+
+    def _on_media_frame(self, data: bytes, title: str):
+        if not data:
+            if not self._cam_run:
+                self._media.hide()
+            return
+        if self._cam_run:
+            return
+        img = QImage.fromData(data)
+        if img.isNull():
+            return
+        if not self._media.isVisible() or self._media_title.text() != (title or "VIDEO"):
+            self._media_title.setText(title or "VIDEO")
+            self._media.show()
+            self.host.layout_floats()
+        self._media.raise_()
+        self._media_lbl.setPixmap(QPixmap.fromImage(img).scaled(
+            362, 262, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        self._media_timer.start(4000)
 
     def _close_media(self):
         if not self._cam_run:
@@ -1103,6 +1183,8 @@ class MainWindow(QMainWindow):
         super().resizeEvent(e)
         if hasattr(self, "modal"):
             self.modal.setGeometry(self.backdrop.rect())
+        if getattr(self, "_chat_open", False):
+            self.drawer.setMaximumWidth(self._drawer_target())
 
     def closeEvent(self, e):
         self._cam_run = False
@@ -1129,23 +1211,12 @@ class JarvisUI:
     }
 
     def __init__(self, face_path: str = ""):
-        # Hardware acceleration (GPU / OpenGL) before QApplication exists
-        try:
-            from PyQt6.QtCore import QCoreApplication
-            if QApplication.instance() is None:
-                QCoreApplication.setAttribute(
-                    Qt.ApplicationAttribute.AA_UseDesktopOpenGL, True
-                )
-                QCoreApplication.setAttribute(
-                    Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True
-                )
-        except Exception:
-            pass
-        try:
-            import os as _os
-            _os.environ.setdefault("QT_OPENGL", "desktop")
-        except Exception:
-            pass
+        if QApplication.instance() is None and GL_ENABLED:
+            QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+            try:
+                QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_UseDesktopOpenGL)
+            except Exception:
+                pass
         object.__setattr__(self, "_app", QApplication.instance() or QApplication(sys.argv))
         self._app.setApplicationName("Jarvis")
         self._app.setFont(font(10))
@@ -1210,6 +1281,9 @@ class JarvisUI:
 
     def show_phone_screen_frame(self, b64: str):
         self._win.show_phone_screen_frame(b64)
+
+    def show_media_frame(self, data: bytes, title: str = ""):
+        self._win.show_media_frame(data, title)
 
     def notify_phone_connected(self):
         self._win.notify_phone_connected()
