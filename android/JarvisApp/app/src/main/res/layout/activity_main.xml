@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#05070C"
+    android:padding="0dp">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="18dp"
+        android:background="#080D16">
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="J A R V I S"
+            android:textColor="#E8F4FF"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.2" />
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="● OFFLINE"
+            android:textColor="#FF4D6D"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:background="@drawable/bg_status_pill"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="6dp" />
+    </LinearLayout>
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:padding="14dp">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+            <LinearLayout
+                android:id="@+id/connectCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:padding="16dp">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="CONNECT TO PC"
+                    android:textColor="#6A8499"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.12" />
+                <EditText
+                    android:id="@+id/hostInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="12dp"
+                    android:hint="PC IP (e.g. 192.168.35.70)"
+                    android:inputType="text"
+                    android:paddingHorizontal="14dp"
+                    android:background="@drawable/bg_input"
+                    android:textColor="#FFFFFF"
+                    android:textColorHint="#6A8499"
+                    android:textSize="14sp"
+                    android:singleLine="true" />
+                <EditText
+                    android:id="@+id/keyInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="10dp"
+                    android:hint="Pairing key from Dashboard"
+                    android:inputType="textCapCharacters"
+                    android:paddingHorizontal="14dp"
+                    android:background="@drawable/bg_input"
+                    android:textColor="#FFFFFF"
+                    android:textColorHint="#6A8499"
+                    android:textSize="14sp"
+                    android:singleLine="true" />
+                <Button
+                    android:id="@+id/connectBtn"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="12dp"
+                    android:text="CONNECT"
+                    android:textColor="#FFFFFF"
+                    android:textStyle="bold"
+                    android:background="@drawable/bg_btn_primary"
+                    android:stateListAnimator="@null" />
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Same Wi‑Fi required. Get a fresh key from Jarvis → Remote Control."
+                    android:textColor="#6A8499"
+                    android:textSize="11sp" />
+                <Button
+                    android:id="@+id/adminBtn"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:layout_marginTop="8dp"
+                    android:text="Enable lock permission"
+                    android:textColor="#9AB4C8"
+                    android:textSize="12sp"
+                    android:background="@drawable/bg_btn_ghost"
+                    android:stateListAnimator="@null" />
+            </LinearLayout>
+            <HorizontalScrollView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:scrollbars="none">
+                <LinearLayout
+                    android:id="@+id/quickRow"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+                    <Button android:id="@+id/qYoutube" android:layout_width="wrap_content" android:layout_height="40dp" android:text="YouTube" android:textSize="11sp" android:textColor="#E8F4FF" android:background="@drawable/bg_btn_ghost" android:layout_marginEnd="8dp" android:stateListAnimator="@null"/>
+                    <Button android:id="@+id/qLock" android:layout_width="wrap_content" android:layout_height="40dp" android:text="Lock" android:textSize="11sp" android:textColor="#E8F4FF" android:background="@drawable/bg_btn_ghost" android:layout_marginEnd="8dp" android:stateListAnimator="@null"/>
+                    <Button android:id="@+id/qHome" android:layout_width="wrap_content" android:layout_height="40dp" android:text="Home" android:textSize="11sp" android:textColor="#E8F4FF" android:background="@drawable/bg_btn_ghost" android:layout_marginEnd="8dp" android:stateListAnimator="@null"/>
+                    <Button android:id="@+id/qNotif" android:layout_width="wrap_content" android:layout_height="40dp" android:text="Notifs" android:textSize="11sp" android:textColor="#E8F4FF" android:background="@drawable/bg_btn_ghost" android:layout_marginEnd="8dp" android:stateListAnimator="@null"/>
+                    <Button android:id="@+id/qLoc" android:layout_width="wrap_content" android:layout_height="40dp" android:text="Location" android:textSize="11sp" android:textColor="#E8F4FF" android:background="@drawable/bg_btn_ghost" android:layout_marginEnd="8dp" android:stateListAnimator="@null"/>
+                    <Button android:id="@+id/qCam" android:layout_width="wrap_content" android:layout_height="40dp" android:text="Camera" android:textSize="11sp" android:textColor="#E8F4FF" android:background="@drawable/bg_btn_ghost" android:layout_marginEnd="8dp" android:stateListAnimator="@null"/>
+                    <Button android:id="@+id/qMic" android:layout_width="wrap_content" android:layout_height="40dp" android:text="Voice" android:textSize="11sp" android:textColor="#E8F4FF" android:background="@drawable/bg_btn_ghost" android:layout_marginEnd="8dp" android:stateListAnimator="@null"/>
+                    <Button android:id="@+id/qPcLock" android:layout_width="wrap_content" android:layout_height="40dp" android:text="PC Lock" android:textSize="11sp" android:textColor="#E8F4FF" android:background="@drawable/bg_btn_ghost" android:layout_marginEnd="8dp" android:stateListAnimator="@null"/>
+                    <Button android:id="@+id/qPcOff" android:layout_width="wrap_content" android:layout_height="40dp" android:text="PC Off" android:textSize="11sp" android:textColor="#FF8A9A" android:background="@drawable/bg_btn_ghost" android:stateListAnimator="@null"/>
+                </LinearLayout>
+            </HorizontalScrollView>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:padding="16dp"
+                android:minHeight="220dp">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="LIVE LOG"
+                    android:textColor="#6A8499"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.12" />
+                <TextView
+                    android:id="@+id/logView"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:textColor="#9AB4C8"
+                    android:textSize="13sp"
+                    android:lineSpacingExtra="4dp"
+                    android:textIsSelectable="true" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="12dp"
+        android:background="#080D16">
+        <ImageButton
+            android:id="@+id/attachBtn"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:src="@android:drawable/ic_menu_add"
+            android:background="@drawable/bg_btn_ghost"
+            android:contentDescription="Attach file"
+            android:scaleType="centerInside"
+            android:padding="10dp" />
+        <EditText
+            android:id="@+id/chatInput"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:layout_marginHorizontal="8dp"
+            android:hint="Ask anything…"
+            android:inputType="textCapSentences|textMultiLine"
+            android:maxLines="3"
+            android:paddingHorizontal="16dp"
+            android:background="@drawable/bg_input"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#6A8499"
+            android:textSize="14sp" />
+        <ImageButton
+            android:id="@+id/sendBtn"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:src="@android:drawable/ic_menu_send"
+            android:background="@drawable/bg_btn_send"
+            android:contentDescription="Send"
+            android:scaleType="centerInside"
+            android:padding="12dp" />
+    </LinearLayout>
+</LinearLayout>
+<!-- by ASDcuber521 -->
