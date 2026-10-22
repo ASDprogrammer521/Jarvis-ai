@@ -1,54 +1,26 @@
-"""
-Check GitHub for Jarvis updates and optionally install them.
-"""
 from __future__ import annotations
 
-TOOL = {
-    "name": "self_update",
-    "description": (
-        "Check the GitHub repository for a newer Jarvis version and optionally "
-        "download and install the update. Use when the user asks to update Jarvis, "
-        "check for updates, or upgrade the app."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "action": {
-                "type": "string",
-                "description": "check | update | set_repo",
-                "enum": ["check", "update", "set_repo"],
-            },
-            "repo": {
-                "type": "string",
-                "description": "GitHub repo as owner/name (for set_repo), e.g. ASDcuber/Jarvis-ai",
-            },
-        },
-        "required": ["action"],
-    },
-}
 
-def run(action: str = "check", repo: str = "", **kwargs) -> str:
-    from core.updater import check_for_updates, apply_update, save_repo, get_repo, get_local_version
-
-    action = (action or "check").strip().lower()
+def self_update(parameters: dict, player=None, speak=None) -> str:
+    from core.updater import (apply_update, check_for_updates, get_local_version, get_repo, rollback_update, save_repo)
+    p = parameters or {}
+    action = str(p.get("action") or "check").strip().lower()
 
     if action == "set_repo":
-        if not repo or "/" not in repo:
-            return "Provide repo as owner/name, for example: ASDcuber/Jarvis-ai"
-        save_repo(repo)
-        return f"GitHub repo set to {get_repo()}. Say 'check for updates' next."
+        try:
+            save_repo(str(p.get("repo") or ""))
+        except ValueError:
+            return "Give the repository as owner/name, for example ASDprogrammer521/Jarvis-ai."
+        return f"Update source set to {get_repo()}. Say 'check for updates' next."
 
-    if action == "check":
+    if action in ("check", "status", "whats_new"):
         info = check_for_updates()
         if not info.get("ok"):
             return info.get("message") or "Update check failed."
-        extra = f" Repo: {info.get('repo')}."
         if info.get("update_available"):
-            return (
-                info["message"] + extra +
-                " Say 'update Jarvis' or 'install update' to download and apply."
-            )
-        return info["message"] + extra + f" Local version: {get_local_version()}."
+            notes = f" What's new: {info['notes'][:200]}" if info.get("notes") else ""
+            return f"{info['message']}.{notes} Say 'update Jarvis' to install it."
+        return f"{info['message']} Source: {info.get('repo')}."
 
     if action in ("update", "upgrade", "install"):
         info = check_for_updates()
@@ -56,9 +28,41 @@ def run(action: str = "check", repo: str = "", **kwargs) -> str:
             return info.get("message") or "Update check failed."
         if not info.get("update_available"):
             return info.get("message") or "Already up to date."
-        result = apply_update(info.get("zip_url"))
-        return result.get("message") or str(result)
+        res = apply_update(info.get("zip_url"))
+        if res.get("open_url"):
+            import webbrowser
+            webbrowser.open(res["open_url"])
+        return (res.get("message") or str(res)) + (" Say 'restart Jarvis' to finish." if res.get("ok") and not res.get("manual") else "")
 
-    return "Unknown action. Use check, update, or set_repo."
+    if action in ("rollback", "undo", "revert"):
+        return rollback_update().get("message", "Rollback failed.")
+
+    if action == "restart":
+        fn = getattr(player, "restart_app", None)
+        if fn is None:
+            return "I can't restart myself from here — please close and reopen Jarvis."
+        fn()
+        return "Restarting now, sir."
+
+    return "Unknown action. Available: check, update, rollback, restart, set_repo."
+
+
+TOOL = {
+    "name": "self_update",
+    "description": (
+        "Updates Jarvis itself from its GitHub repository: check whether a newer version exists and what is new, "
+        "download and install it (keeps your settings, memory and plugins), roll back to the previous version, or "
+        "restart Jarvis. Use when the user asks to update Jarvis, check for updates, undo an update or restart."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "check | update | rollback | restart | set_repo"},
+            "repo": {"type": "STRING", "description": "GitHub repo as owner/name (for set_repo)"},
+        },
+        "required": ["action"],
+    },
+    "handler": self_update,
+}
 
 # by ASDcuber521

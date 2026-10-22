@@ -239,11 +239,19 @@ def brightness_down():
         except Exception as e:
             print(f"[Settings] Brightness down failed on Windows: {e}")
 
+def _no_self_close(what: str):
+    from actions._common import jarvis_has_focus
+    if jarvis_has_focus():
+        raise RuntimeError(f"refused to {what}: the focused window is Jarvis itself. "
+                           "To close a named app (Discord, Chrome…) use the app_manager tool with action=close.")
+
 def close_app():
+    _no_self_close("close the app")
     if _OS == "Darwin": pyautogui.hotkey("command", "q")
     else:               pyautogui.hotkey("alt", "f4")
 
 def close_window():
+    _no_self_close("close the window")
     if _OS == "Darwin": pyautogui.hotkey("command", "w")
     else:               pyautogui.hotkey("ctrl", "w")
 
@@ -333,6 +341,7 @@ def refresh_page():
     else:               pyautogui.press("f5")
 
 def close_tab():
+    _no_self_close("close the tab")
     if _OS == "Darwin": pyautogui.hotkey("command", "w")
     else:               pyautogui.hotkey("ctrl", "w")
 
@@ -858,7 +867,7 @@ TOOL = {
                     "The exact action. Prefer this over `description` — pick one of: "
                     "volume_up | volume_down | volume_set | mute | "
                     "brightness_up | brightness_down | sleep_display | "
-                    "pause_video | close_app | close_window | full_screen | "
+                    "pause_video | close_app (focused window only — NOT for named apps, use app_manager) | close_window | full_screen | "
                     "minimize | maximize | snap_left | snap_right | "
                     "switch_window | show_desktop | task_manager | focus_search | "
                     "refresh_page | close_tab | new_tab | next_tab | prev_tab | "

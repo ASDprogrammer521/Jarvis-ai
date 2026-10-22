@@ -327,9 +327,9 @@ def save_plugin_enabled(plugin_name: str, enabled: bool) -> None:
     CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
 
 _DEFAULT_PROFILES = {
-    "home": {"hud": "sphere", "talk_mode": "push", "sys_monitor": True},
-    "work": {"hud": "core", "talk_mode": "open", "sys_monitor": True},
-    "game": {"hud": "armor", "talk_mode": "push", "sys_monitor": False},
+    "home": {"hud": "holo", "talk_mode": "push", "quality": "auto", "sys_monitor": True},
+    "work": {"hud": "crystal", "talk_mode": "open", "quality": "auto", "sys_monitor": True},
+    "game": {"hud": "globe", "talk_mode": "push", "quality": "lite", "sys_monitor": False},
 }
 
 def get_active_profile_name() -> str:
