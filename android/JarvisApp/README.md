@@ -38,7 +38,7 @@ By ASDcuber
 
 ## GitHub Actions (no Android Studio needed)
 
-1. Push this repo to GitHub (e.g. `ASDcuber/Jarvis-ai`)
+1. Push this repo to GitHub (e.g. `ASDprogrammer521/Jarvis-ai`)
 2. Open **Actions** tab → **Build Jarvis App APK**
 3. Wait for the green check
 4. Open the run → **Artifacts** → download **JarvisApp-debug**

@@ -265,8 +265,16 @@ class SettingsPanel(GlassCard):
         lay.addWidget(section_label("Profile"))
         from memory.config_manager import get_active_profile_name, set_active_profile
         seg = Segmented([("home", "🏠 Home"), ("work", "💼 Work"), ("game", "🎮 Game")], get_active_profile_name())
-        seg.changed.connect(lambda k: (set_active_profile(k), w.write_log(f"SYS: Profile → {k}")))
+        pl = QLabel(w.profile_summary(get_active_profile_name()))
+        pl.setWordWrap(True)
+        pl.setStyleSheet(f"color: {C.TEXT_DIM}; margin-top: 4px;")
+
+        def pick(k):
+            w.apply_profile(k)
+            pl.setText(w.profile_summary(k))
+        seg.changed.connect(pick)
         lay.addWidget(seg)
+        lay.addWidget(pl)
         lay.addWidget(section_label("Window"))
         row = QHBoxLayout()
         for text, fn, closes in (("Fullscreen  F11", w.toggle_fullscreen, True),
@@ -321,6 +329,10 @@ class SettingsPanel(GlassCard):
         hw.toggled.connect(w.set_hw_accel)
         state = "active" if GL_ENABLED else "off"
         lay.addWidget(setting_row("GPU acceleration", f"Draws the 3D scene on the graphics card · now: {state} · restart to apply", hw))
+        lay.addWidget(divider())
+        gh = Toggle(bool(read_cfg().get("gpu_holo", True)))
+        gh.toggled.connect(w.set_gpu_holo)
+        lay.addWidget(setting_row("GPU hologram renderer", "Draws the Holo model with shaders on the graphics card (very low CPU). Switches itself off if unsupported.", gh))
         lay.addWidget(divider())
         sp = Toggle(bool(read_cfg().get("show_perf", False)))
         sp.toggled.connect(w.set_perf)
@@ -460,6 +472,9 @@ class SettingsPanel(GlassCard):
         except Exception:
             ver = "—"
         lay.addWidget(setting_row("Version", f"Installed: {ver}", None))
+        au = Toggle(bool(read_cfg().get("auto_update_check", True)))
+        au.toggled.connect(lambda on: __import__("ui.theme", fromlist=["patch_cfg"]).patch_cfg(auto_update_check=on))
+        lay.addWidget(setting_row("Check for updates automatically", "Looks for a new version once every 12 hours", au))
         up = GlowButton("Check for updates", "primary")
         up.clicked.connect(w.check_updates)
         lay.addWidget(up, 0, Qt.AlignmentFlag.AlignLeft)

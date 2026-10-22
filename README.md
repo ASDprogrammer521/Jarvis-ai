@@ -144,10 +144,59 @@ Each tool is a drop-in file in `actions/` and is discovered automatically.
 
 Setup notes:
 
+* **Memory:** heavy tools (PowerPoint, Word, PDF, Excel, push-up counter) are loaded only when you ask for them. At startup only a tiny declaration file is read; the libraries (`python-pptx`, `python-docx`, `openpyxl`, `pypdf`, `mediapipe`, OpenCV) are imported on first use. To make your own action lazy, keep `TOOL` in a small file and import the heavy code inside the handler.
+* **GPU hologram:** with GPU acceleration on, the Holo model is drawn by a shader on the graphics card. If the shader cannot run, Jarvis checks itself and switches to the standard renderer automatically (Settings → Appearance → Performance).
+* **Profiles:** Settings → General → Profile (or "switch to work mode") changes the 3D model, push-to-talk / open mic and graphics quality: Home = Holo, Work = Crystal, Game = Globe + lightweight.
 * **Push-up counter** needs `opencv-python` and `mediapipe`. On first use it downloads a small pose model (about 6 MB) to `config/models/`. Place the camera at your side so your whole body is visible.
 * **PDF OCR** needs the free [Tesseract](https://github.com/tesseract-ocr/tesseract) program installed. Converting Word/PowerPoint/Excel to PDF needs [LibreOffice](https://www.libreoffice.org) (or Microsoft Word with `docx2pdf` on Windows).
 * **Spotify** works out of the box with the desktop app (media keys, volume, search page). For one-step "play my chill playlist", add `spotify_client_id` and `spotify_client_secret` (free, from developer.spotify.com/dashboard) to `config/api_keys.json`, register `http://127.0.0.1:8888/callback` as the Redirect URI, then say "log in to Spotify" once.
 * Generated files are saved under `Documents/Jarvis/` (change with `"output_dir"` in `config/api_keys.json`). Workout and nutrition logs live in `memory/`.
+
+---
+
+## 🛠️ System & everyday tools
+
+These run **only when you ask** and add almost nothing to startup memory.
+
+| Tool | File | Try saying |
+| ---- | ---- | ---------- |
+| Storage analyzer | `actions/storage_analyzer.py` | "What is taking the most space?" · "Find my biggest files" · "How much junk can I clean?" |
+| App manager | `actions/app_manager.py` | "Close Discord" · "Which apps use the most RAM?" · "What starts with my PC?" |
+| Network | `actions/network_tools.py` | "Am I online?" · "Test my internet speed" · "Ping google.com" |
+| Power | `actions/power_tools.py` | "Battery level?" · "Shut down in 30 minutes" · "Cancel the shutdown" |
+| File tools | `actions/file_tools.py` | "Find duplicate files" · "Organize my Downloads" (both undoable) |
+| Notes & tasks | `actions/notes_tasks.py` | "Add a task: call the bank" · "What do I have to do today?" · "Take a note…" |
+| Clipboard | `actions/clipboard_tools.py` | "What did I copy?" · "Copy this to the clipboard" |
+| Text assistant | `actions/text_assistant.py` | "Translate what I copied to English" · "Summarize this" · "Fix my grammar" |
+| Utilities | `actions/utility_tools.py` | "15% of 240" · "100 USD to UZS" · "Make a password" · "Time in Tokyo" · "QR code for this link" |
+| Focus timer | `actions/focus_timer.py` | "Start a 25 minute focus session" · "Pomodoro, 4 rounds" |
+
+Closing an app by name uses `app_manager` (graceful close first, then force for tray apps like Discord). The old Alt+F4 shortcut is refused when Jarvis itself is the focused window, so Jarvis can no longer close itself.
+
+---
+
+## ✨ More tools
+
+| Tool | File | Try saying |
+| ---- | ---- | ---------- |
+| Screen capture | `actions/screen_capture.py` | "Take a screenshot" · "Record my screen" · "Read the text on my screen" |
+| Habits | `actions/habit_tracker.py` | "I drank two glasses of water" · "How are my habits?" |
+| Finances | `actions/finance_tracker.py` | "I spent 50 on lunch" · "How much did I spend this month?" · "Export my finances to Excel" |
+| Flashcards | `actions/study_cards.py` | "Make flashcards about the solar system" · "Quiz me" |
+| Lookup | `actions/knowledge_lookup.py` | "Who was Amir Temur?" · "Define serendipity" |
+| Appearance | `actions/appearance_tools.py` | "Random wallpaper from my Pictures" · "Turn on dark mode" |
+| Profiles | `actions/profile_switch.py` | "Switch to work mode" (3D model, mic mode, graphics quality) |
+
+### 🔄 Updating Jarvis
+
+Updates come from **github.com/ASDprogrammer521/Jarvis-ai** (change it with *"set the update source to owner/name"*).
+Say *"check for updates"*, *"update Jarvis"*, *"undo the update"* or *"restart Jarvis"*, or use **Settings → About**.
+
+* Your `config/` (API keys), `memory/` data, plugins and all your JSON data are **never overwritten or deleted**.
+* Before replacing files a backup is made (last 3 kept) so the update can be rolled back.
+* Files removed upstream are cleaned up, new dependencies are installed automatically, and archives with unsafe paths are rejected.
+* The packaged Windows EXE can't patch itself, so it opens the release page instead.
+* Jarvis checks quietly every 12 hours (Settings → About can turn that off).
 
 ---
 

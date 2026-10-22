@@ -129,6 +129,10 @@ class MainWindow(QMainWindow):
     _wake_dl_sig = pyqtSignal(bool, str)
     _update_sig = pyqtSignal(object)
     _toast_sig = pyqtSignal(str)
+    _profile_sig = pyqtSignal(str)
+    _tasks_sig = pyqtSignal()
+    _update_done_sig = pyqtSignal(object)
+    _restart_sig = pyqtSignal()
 
     def __init__(self, face_path: str = ""):
         super().__init__()
@@ -185,6 +189,7 @@ class MainWindow(QMainWindow):
         self.stage.speed = float(cfg.get("fx_speed", 1.0))
         self.stage.set_model(str(cfg.get("stage_model") or "holo"))
         self.stage.show_status = False
+        self.stage.on_gpu_event = self._on_gpu_event
         self.stage.quality = str(cfg.get("quality") or "auto")
         self._build()
         self.modal = ModalLayer(self.backdrop)
@@ -204,6 +209,10 @@ class MainWindow(QMainWindow):
         self._wake_dl_sig.connect(self._on_wake_dl)
         self._update_sig.connect(self._on_update)
         self._toast_sig.connect(self._toast)
+        self._profile_sig.connect(self.apply_profile)
+        self._tasks_sig.connect(lambda: self.dash.tasks.reload())
+        self._update_done_sig.connect(self._on_update_done)
+        self._restart_sig.connect(self.restart_app)
 
         self._clock = QTimer(self)
         self._clock.timeout.connect(self._tick)
@@ -220,6 +229,7 @@ class MainWindow(QMainWindow):
             pass
         QTimer.singleShot(250, self._boot)
         QTimer.singleShot(2500, self._check_gpu)
+        QTimer.singleShot(9000, self._auto_update_check)
 
     def _boot(self):
         try:
@@ -619,6 +629,41 @@ class MainWindow(QMainWindow):
             patch_cfg(hw_accel=False)
             self.write_log("SYS: GPU rendering is unavailable on this system — switched to software mode. Restart Jarvis.")
 
+    def _on_gpu_event(self, why: str):
+        patch_cfg(gpu_holo=False)
+        self.write_log(f"SYS: GPU hologram renderer unavailable ({why}) — using the standard renderer.")
+
+    def set_gpu_holo(self, on: bool):
+        self.stage.gpu_enabled = bool(on and GL_ENABLED)
+        patch_cfg(gpu_holo=bool(on))
+        self._toast("GPU hologram renderer " + ("on" if on else "off"))
+
+    _HUD_MAP = {"sphere": "globe", "core": "crystal", "armor": "holo"}
+
+    def profile_summary(self, name: str) -> str:
+        from memory.config_manager import get_profile
+        pr = get_profile(name)
+        hud = self._HUD_MAP.get(str(pr.get("hud")), str(pr.get("hud")))
+        talk = "push-to-talk" if pr.get("talk_mode") == "push" else "open microphone"
+        return f"3D model: {hud.title()} · {talk} · graphics quality: {pr.get('quality', 'auto')}"
+
+    def apply_profile(self, name: str, announce: bool = True):
+        from memory.config_manager import get_profile, set_active_profile
+        name = str(name or "home").lower()
+        if name not in ("home", "work", "game"):
+            return
+        set_active_profile(name)
+        pr = get_profile(name)
+        hud = self._HUD_MAP.get(str(pr.get("hud") or "holo").lower(), str(pr.get("hud") or "holo").lower())
+        self.set_model(hud)
+        self.set_quality(str(pr.get("quality") or "auto"))
+        if pr.get("talk_mode") in ("push", "open"):
+            self.toggle_ptt(pr.get("talk_mode") == "push")
+        self.add_activity(f"Profile: {name.title()}")
+        self.write_log(f"SYS: Profile → {name.title()} ({self.profile_summary(name)})")
+        if announce:
+            self._toast(f"Profile: {name.title()}")
+
     def set_quality(self, q: str):
         self.stage.quality = q
         patch_cfg(quality=q)
@@ -877,10 +922,15 @@ class MainWindow(QMainWindow):
         if not info.get("update_available"):
             self._toast(f"You're up to date ({info.get('local_version', '')})")
             return
-        p = ConfirmPanel(f"Update to v{info.get('remote_version')}?",
-                         "Your config and memory are preserved. Restart after the update finishes.")
+        notes = (info.get("notes") or "").strip().replace("\n", " ")[:170]
+        if info.get("frozen"):
+            title, detail = f"Version {info.get('remote_version')} is available", "Open the download page to get the new installer."
+        else:
+            title = f"Update to v{info.get('remote_version')}?"
+            detail = (notes + " — " if notes else "") + "Your settings, memory and plugins are kept, and a backup lets you roll back."
+        p = ConfirmPanel(title, detail)
         p.answered.connect(lambda ok: self._do_update(ok))
-        self.modal.present(p, 460, 230, dismissable=False)
+        self.modal.present(p, 480, 250, dismissable=False)
 
     def _do_update(self, ok: bool):
         self.modal.dismiss()
@@ -891,10 +941,59 @@ class MainWindow(QMainWindow):
         def work():
             try:
                 from core.updater import apply_update
-                r = apply_update()
-                self._log_sig.emit(f"SYS: {r.get('message', 'Update finished — restart to apply.')}")
+                self._update_done_sig.emit(apply_update())
             except Exception as e:
-                self._log_sig.emit(f"ERR: update — {e}")
+                self._update_done_sig.emit({"ok": False, "message": str(e)})
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_update_done(self, r):
+        r = r if isinstance(r, dict) else {}
+        if r.get("open_url"):
+            webbrowser.open(r["open_url"])
+        self.write_log(f"{'SYS' if r.get('ok') else 'ERR'}: {r.get('message', 'Update finished.')}")
+        if r.get("ok") and not r.get("manual"):
+            QTimer.singleShot(400, self._ask_restart)
+
+    def _ask_restart(self):
+        if self.modal.is_open():
+            self.modal.dismiss()
+        p = ConfirmPanel("Update installed", "Restart Jarvis now to use the new version?")
+        p.answered.connect(self._restart_answer)
+        QTimer.singleShot(330, lambda: self.modal.present(p, 460, 220, dismissable=False))
+
+    def _restart_answer(self, ok: bool):
+        self.modal.dismiss()
+        if ok:
+            QTimer.singleShot(350, self.restart_app)
+
+    def restart_app(self):
+        cmd = self._launch_cmd()
+        try:
+            if _OS == "Windows":
+                subprocess.Popen(["cmd", "/c", "timeout /t 2 /nobreak >nul & start \"\" " + subprocess.list2cmdline(cmd)],
+                                 cwd=str(BASE_DIR), **_WIN_HIDE)
+            else:
+                subprocess.Popen(["sh", "-c", 'sleep 2; exec "$@"', "sh", *cmd], cwd=str(BASE_DIR), start_new_session=True)
+        except Exception as e:
+            self.write_log(f"ERR: restart — {e}")
+            return
+        QApplication.quit()
+
+    def _auto_update_check(self):
+        cfg = read_cfg()
+        if not cfg.get("auto_update_check", True) or time.time() - float(cfg.get("last_update_check", 0) or 0) < 12 * 3600:
+            return
+
+        def work():
+            try:
+                from core.updater import check_for_updates
+                info = check_for_updates()
+                patch_cfg(last_update_check=time.time())
+                if info.get("ok") and info.get("update_available"):
+                    self._toast_sig.emit(f"⬆ Update {info.get('remote_version')} is available — Settings → About")
+                    self._log_sig.emit(f"SYS: {info.get('message')}. Open Settings → About to install it.")
+            except Exception:
+                pass
         threading.Thread(target=work, daemon=True).start()
 
     def open_store(self):
@@ -1349,5 +1448,14 @@ class JarvisUI:
 
     def prompt_reconfig(self):
         self._win.prompt_reconfig()
+
+    def apply_profile(self, name: str):
+        self._win._profile_sig.emit(str(name))
+
+    def refresh_tasks(self):
+        self._win._tasks_sig.emit()
+
+    def restart_app(self):
+        self._win._restart_sig.emit()
 
 # by ASDcuber521

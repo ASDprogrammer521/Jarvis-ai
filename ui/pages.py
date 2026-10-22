@@ -392,6 +392,10 @@ class TasksCard(GlassCard):
     def focus_input(self):
         self.edit.setFocus()
 
+    def reload(self):
+        self.tasks = list(read_cfg().get("tasks") or [])
+        self._render()
+
     def _save(self):
         patch_cfg(tasks=self.tasks)
 

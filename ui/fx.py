@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 )
 
 import ui.geo as geo
+from ui import glholo
 from ui import models as objmodels
 from ui.theme import C, qcol, read_cfg
 
@@ -233,6 +234,7 @@ class Backdrop(_BackdropBase):
         st = self.stage
         if st is not None and st.external and st.isVisible():
             tl = st.mapTo(self, QPoint(0, 0))
+            st._origin = (tl.x(), tl.y())
             p.save()
             p.translate(tl.x(), tl.y())
             p.setClipRect(QRectF(0, 0, st.width(), st.height()))
@@ -634,6 +636,14 @@ class Stage3D(QWidget):
         self._cm = np.array(QColor(C.PRI).getRgb()[:3], dtype=np.float64)
         self._ca = np.array(QColor(C.ACC).getRgb()[:3], dtype=np.float64)
         self._last_xyz = None
+        self.gpu_enabled = bool(GL_ENABLED and read_cfg().get("gpu_holo", True))
+        self.on_gpu_event = None
+        self._glh = None
+        self._gpu_cache: dict = {}
+        self._origin = (0, 0)
+        self._geom = (0.0, 0.0, 1.0)
+        self._gl_frames = 0
+        self._gl_checked = False
         self._halo = geo.circle(46, .35, .0)
         self._ticks = np.linspace(0, 2 * math.pi, 72, endpoint=False)
         self._tm = QTimer(self)
@@ -801,6 +811,11 @@ class Stage3D(QWidget):
             want = 200
         if self._tm.interval() != want:
             self._tm.setInterval(want)
+        if self._glh is not None and self._glh.used and not self._gl_checked:
+            self._gl_frames += 1
+            if self._gl_frames >= 60:
+                self._gl_checked = True
+                QTimer.singleShot(60, self._gl_selfcheck)
         if self._alive():
             self._request_paint()
 
@@ -1051,10 +1066,72 @@ class Stage3D(QWidget):
             p.setBrush(col)
             p.drawPolygon(QPolygonF([QPointF(sxl[j], syl[j]) for j in fl[i]]))
 
+    def _gpu_ok(self, m) -> bool:
+        v = self._gpu_cache.get(m.name)
+        if v is None:
+            v = glholo.supports(m)
+            self._gpu_cache[m.name] = v
+        return v
+
+    def _gpu_off(self, why: str) -> None:
+        self.gpu_enabled = False
+        print(f"[GPU holo] disabled: {why}")
+        if self.on_gpu_event:
+            try:
+                self.on_gpu_event(why)
+            except Exception:
+                pass
+
+    def _gpu_draw(self, p, m, cx, cy, R, yaw, pitch, amp) -> bool:
+        host = self._backdrop()
+        if host is None:
+            return False
+        if self._glh is None:
+            self._glh = glholo.GlHolo()
+            if not self._glh.init():
+                self._gpu_off("shader setup failed: " + self._glh.err)
+                return False
+        clip = (self._origin[0], self._origin[1], self.width(), self.height())
+        cm = (float(self._cm[0]), float(self._cm[1]), float(self._cm[2]))
+        ca = (float(self._ca[0]), float(self._ca[1]), float(self._ca[2]))
+        ok = self._glh.draw(p, host, m, self._origin, cx, cy, R, yaw, pitch, amp, self._t, cm, ca, self.lite, clip)
+        if not ok:
+            self._gpu_off("draw failed: " + self._glh.err)
+        return ok
+
+    def _gl_selfcheck(self) -> None:
+        host = self._backdrop()
+        if host is None or not self.gpu_enabled:
+            return
+        try:
+            img = host.grabFramebuffer()
+            dpr = float(img.devicePixelRatio() or 1.0)
+            ox, oy = self._origin
+            cx, cy, R = self._geom
+            gold = 0
+            x0, x1 = int(ox * dpr), int((ox + self.width()) * dpr)
+            y0, y1 = int(oy * dpr), int((oy + self.height()) * dpr)
+            rmin2 = (0.45 * R * dpr) ** 2
+            mx, my = (ox + cx) * dpr, (oy + cy) * dpr
+            for y in range(max(0, y0), min(img.height(), y1), 4):
+                for x in range(max(0, x0), min(img.width(), x1), 4):
+                    if (x - mx) ** 2 + (y - my) ** 2 < rmin2:
+                        continue
+                    c = img.pixelColor(x, y)
+                    if c.red() > 140 and c.red() > c.blue() * 1.6:
+                        gold += 1
+            if gold < 120:
+                self._gpu_off(f"nothing was drawn on screen ({gold} lit samples)")
+        except Exception as e:
+            print(f"[GPU holo] self-check skipped: {e}")
+
     def _draw_model(self, p, name, cx, cy, R, yaw, pitch, amp):
         m = self._models.get(name)
         if m is None:
             return
+        if self.external and self.gpu_enabled and self._gpu_ok(m):
+            if self._gpu_draw(p, m, cx, cy, R, yaw, pitch, amp):
+                return
         self._last_xyz = None
         for L in m.layers:
             self._draw_layer(p, L, cx, cy, R, yaw, pitch, amp)
@@ -1065,6 +1142,7 @@ class Stage3D(QWidget):
         cx = W / 2 + self._look[0] * W * 0.05
         cy = band_h * 0.50 + self._look[1] * H * 0.04
         R = min(W * 0.30, band_h * 0.29) * (1.0 + amp * 0.06)
+        self._geom = (cx, cy, R)
         main, acc = self._col("m"), self._col("a")
 
         g = QRadialGradient(cx, cy, R * 2.3)
