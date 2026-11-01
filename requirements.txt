@@ -1,59 +1,59 @@
+# Jarvis AI — the only requirements file.  Install with:  python setup.py   (or: pip install -r requirements.txt)
+# OS-specific packages carry `sys_platform` markers, so they are skipped on other systems.
 
-
+# ── Core ─────────────────────────────────────────────
 PyQt6>=6.6,<7
 sounddevice>=0.4,<1
 numpy>=1.24,<3
 google-genai>=2.8.0,<3
-
 requests>=2.31,<3
 beautifulsoup4>=4.12,<5
-playwright>=1.40,<2
+psutil>=5.9,<8
+tzdata
 
+# ── Desktop control ──────────────────────────────────
 pyautogui
 pyperclip
 pygetwindow
-
 pillow>=10,<13
-opencv-python>=4.8,<5
 mss>=9,<11
-
-psutil>=5.9,<8
 send2trash
-youtube-transcript-api
-python-pptx
-openpyxl
+playwright>=1.40,<2                  # browser automation (setup.py also fetches the browsers)
 
+# ── Phone link + web dashboard ───────────────────────
 fastapi>=0.110,<1
 uvicorn[standard]>=0.27,<1
 cryptography>=42,<50
 python-multipart>=0.0.9,<1
 qrcode[pil]>=7,<9
 
-google-api-python-client
+# ── Tools ────────────────────────────────────────────
+ddgs>=9,<10                          # web_search
+youtube-transcript-api
+yt-dlp>=2024.1                       # play_hud_video for YouTube URLs
+opencv-python>=4.8,<5                # camera, push-up counter, HUD video
+mediapipe>=0.10                      # push-up counter pose detection
+python-pptx                          # presentations
+openpyxl                             # spreadsheets
+python-docx                          # Word documents
+pypdf>=4                             # PDF toolkit
+pdfplumber>=0.10                     # PDF text and tables
+PyPDF2                               # PDF fallback reader
+pymupdf>=1.24                        # PDF rendering / OCR
+pytesseract>=0.3                     # PDF OCR (needs the Tesseract program)
+paho-mqtt                            # printer_control plugin (MQTT)
+tinytuya                             # smart-home devices
+google-api-python-client             # Google services
 google-auth-oauthlib
+pynvml                               # system_monitor + HUD GPU meter (NVIDIA)
 
-tinytuya
-
+# ── Windows only ─────────────────────────────────────
 comtypes;   sys_platform == "win32"
 pycaw;      sys_platform == "win32"
 win10toast; sys_platform == "win32"
 pywinauto;  sys_platform == "win32"
 pywin32;    sys_platform == "win32"
 wmi;        sys_platform == "win32"
-
-ddgs>=9,<10                  # web_search — the maintained successor to
-pdfplumber                   # file_processor — PDF text and tables
-PyPDF2                       # file_processor — PDF fallback reader
-python-docx                  # file_processor — .docx reading
-paho-mqtt                    # printer_control plugin — MQTT printers
-pynvml                       # system_monitor + the HUD's GPU meter (NVIDIA)
-
-mediapipe>=0.10
-pypdf>=4
-pdfplumber>=0.10
-pymupdf>=1.24
-pytesseract>=0.3
-docx2pdf; sys_platform == "win32"
-tzdata
+docx2pdf;   sys_platform == "win32"
 
 # by ASDcuber521

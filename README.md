@@ -1,3 +1,7 @@
+<p align="center">
+<img src="assets/banner.png" alt="JARVIS — Your personal AI assistant for PC &amp; phone" width="100%">
+</p>
+
 # Jarvis-ai
 
 <p align="center">
@@ -14,7 +18,7 @@
 
 **Jarvis AI** is an advanced intelligent assistant built to automate workflows and simplify everyday computer tasks. It combines a clean modern interface with powerful tools: voice control, screen awareness, desktop automation, a holographic HUD, profiles, plugins, and a full phone companion — all in one system.
 
-Voice, vision, desktop control, holographic HUD, and phone companion — one system.
+Voice, vision, desktop control, holographic HUD, and phone companion — one system. Version **5.x**.
 
 ---
 
@@ -60,7 +64,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1
 
 Follow these steps if you prefer Python source:
 
-* 📦 **Step 1:** Install dependencies with **`setup.py`**:
+* 📦 **Step 1:** Install dependencies with **`setup.py`** (it reads the single `requirements.txt`, skips packages for other operating systems and fetches the Playwright browsers):
 
 ```bash
 python setup.py
@@ -81,6 +85,37 @@ python main.py
 
 | Feature | Description |
 | ------- | ----------- |
+| 💎 **Modern & Clean UI** | Dashboard · Chat · Settings tabs with a cinematic HUD |
+| 🧑‍🚀 **HUD modes & 3D models** | Holo · Crystal · Globe · Knot · Helix · Face — or drop in your own `.obj` |
+| 🎙️ **Voice + Wake word** | Push-to-talk, open mic, mute, optional local "Hey Jarvis" wake word |
+| 📱 **Jarvis App (phone)** | Native Android app + browser companion — **make and answer calls**, SMS, lock, locate, flashlight, no ADB |
+| 🪟 **Window control by name** | "Minimize Discord", "maximize Chrome", "bring Spotify forward" act on *that* app's window |
+| ⚡ **Fast Automation** | Apps, files, browser, system controls, clipboard, screenshots, messaging |
+| 🛡️ **Safe by design** | Shutdown / restart / messages need an on-screen confirm · `undo` reverses volume, brightness, files and more |
+| 📊 **Admin Dashboard** | Remote control from a browser or the phone via pairing key |
+| 🧠 **Memory** | Long-term facts you can view and delete |
+| 🔌 **Plugins + store** | Drop-in tools in `plugins/`; list / enable / disable / install from URL |
+| 👤 **Profiles** | `home` · `work` · `game` presets |
+| 🔄 **Self-update** | Checks GitHub for updates and applies them |
+| 🖥️ **Compact mode** | Floating always-on-top mic (F12) |
+| 💻 **Windows EXE** | Single-folder build via GitHub Releases — no Python install |
+
+### Built-in tools
+
+| Area | Tools — try saying |
+| ---- | ------------------ |
+| **Computer** | `computer_settings` volume, brightness, snapping, dark mode, Wi-Fi · `app_manager` close / **minimize / maximize / restore / focus** a named app, top RAM/CPU apps, startup list · `power_tools` battery, uptime, lock, sleep · `network_tools` IP, Wi-Fi, speed · `storage_analyzer` biggest folders and file types · `file_tools` duplicates and cleanup · `clipboard_tools` · `screen_capture` screenshots and recordings · `appearance_tools` wallpaper |
+| **Phone** | `phone_control` — "call +998 90 123 45 67" · "answer the call" · "hang up" · "text 901234567: I'm late" · "lock my phone" · "where is my phone?" |
+| **Productivity** | `notes_tasks` to-do list and notes · `reminder` · `focus_timer` Pomodoro · `habit_tracker` streaks · `finance_tracker` expenses and income · `study_cards` spaced-repetition flashcards · `text_assistant` translate, summarize, rewrite, fix grammar |
+| **Office** | PowerPoint decks · Word documents · Excel workbooks with formulas and charts · PDF merge / split / convert / OCR |
+| **Fitness & health** | `pushup_counter` webcam rep counting with form checks · `calorie_counter` meals by text or photo |
+| **Media & games** | `spotify_controller` · `youtube_video` summaries · `play_hud_video` muted video in the HUD · `game_updater` Steam / Epic installs and updates |
+| **Info** | `web_search` · `knowledge_lookup` · `weather_report` · `flight_finder` · `utility_tools` calculator, units, live currency |
+| **Developer** | `code_helper` write / edit / run code · `dev_agent` multi-file projects |
+
+Each tool is a drop-in file in `actions/`, discovered automatically.
+
+------- | ----------- |
 | 💎 **Modern & Clean UI** | Dashboard · Chat · Settings tabs with a cinematic HUD |
 | 🧑‍🚀 **HUD modes** | Animated face · Reactor core · Holo sphere · Iron Man armor |
 | 📊 **Admin Dashboard** | Remote control via pairing key / browser |
@@ -127,20 +162,7 @@ File-level options use `#@hud 1`, `#@glow 1`, `#@rim 1`, `#@palette gold`. The b
 
 ---
 
-## 🧰 Fitness, office & media tools
-
-Each tool is a drop-in file in `actions/` and is discovered automatically.
-
-| Tool | File | Try saying |
-| ---- | ---- | ---------- |
-| Push-up counter | `actions/pushup_counter.py` | "Count my push-ups, target 20" · "How many push-ups this week?" |
-| Calorie counter | `actions/calorie_counter.py` | "I had two eggs and toast" · "How many calories do I have left?" |
-| Presentation builder | `actions/ppt_template_workflow.py` | "Make a 10-slide presentation about solar energy" |
-| Word documents | `actions/docx_tools.py` | "Write a one-page cover letter as a Word document" |
-| PDF tools | `actions/pdf_tools.py` | "Merge these two PDFs" · "Read the text in this scanned PDF" |
-| Spreadsheets | `actions/office_builder.py`, `actions/office_generator.py` | "Create a monthly budget spreadsheet" |
-| Spotify | `actions/spotify_controller.py` | "Play my chill playlist" · "Volume down" · "Skip" |
-| YouTube | `actions/youtube_video.py` | "Summarize this YouTube video" |
+## 🧰 Tool setup notes
 
 Setup notes:
 
@@ -156,6 +178,8 @@ Setup notes:
 
 ## 📱 Phone connection
 
+Jarvis connects **out** from the phone to your PC (reverse WebSocket), so there is nothing to forward and no ADB.
+
 ### Option A — Android APK (recommended)
 
 <p align="center">
@@ -165,12 +189,33 @@ Setup notes:
 </p>
 
 1. Install the APK on your phone (allow install from unknown sources if needed).
-2. On first open, allow **notifications**, **files**, **location**, **mic**, **camera** as prompted.
+2. On first open, allow **notifications**, **phone / calls**, **SMS**, **location**, **mic** and **camera** as prompted.
 3. Start Jarvis on the PC and get a **fresh pairing key** (Remote Control / Dashboard).
 4. In the app: enter **PC IP** + **key** → **Connect**.
-5. Status should show **● ONLINE** and a persistent **Jarvis Connected** notification.
+5. The pill in the corner turns **● ONLINE** and a persistent **Jarvis Connected** notification appears.
+6. Optional: **Enable lock permission** so Jarvis can lock the screen.
 
-**Build APK yourself (GitHub Actions):** push the repo → **Actions** → **Build Jarvis App APK** → download artifact `JarvisApp-debug`.
+**Build the APK yourself:** open `android/JarvisApp` in Android Studio, or push to GitHub → **Actions** → **Build Jarvis App APK** → download the `JarvisApp-debug` artifact.
+
+### The app
+
+* **Header** — live status pill (online / connecting / offline).
+* **Phone card** — current call state, a big **Make a call** button, and **Answer / Reject / Hang up**.
+* **Dialer** — bottom sheet with a full keypad, long-press `0` for `+`, **Paste**, backspace (long-press clears) and redial of the last number.
+* **Quick actions** — YouTube, Lock, Home, Notifications, Location, Camera, Voice, Torch, Screenshot.
+* **Control the PC** — lock or shut down the PC (shutdown asks for confirmation).
+* **Activity log** and a chat bar with file attach.
+
+### Phone calls
+
+| From | How |
+| ---- | --- |
+| **The phone** | Tap **Make a call**, type or paste a number, press the green button. |
+| **Your voice, on the PC** | "Call +998 90 123 45 67" → the PC tells the phone to dial. Jarvis needs a **number**; it will ask if you only give a name. |
+| **Incoming calls** | "Answer the call", "reject it", "hang up", "is anyone calling?" |
+| **SMS** | "Text 901234567: I'll be there in ten minutes" |
+
+Calls need the **Phone** permission. Without it Jarvis opens the dialer with the number filled in instead of dialling. Answer / reject / hang up need **Answer phone calls** (Android 8+); on some phones the system dialer may still refuse to be controlled.
 
 ### Option B — Browser companion
 
@@ -178,31 +223,31 @@ Setup notes:
 http://<PC-IP>:8000/jarvis-app
 ```
 
-Example: `http://192.168.35.70:8000/jarvis-app`
-
-Same Wi‑Fi required. Use **http** (not https) unless you configured certificates.
+Same Wi‑Fi required. Use **http** (not https) unless you configured certificates. The page has a phone-style keypad: **Call** hands the number to the phone's own dialer (`tel:`), and it chats with Jarvis and receives messages and links. Answering and hanging up need the APK.
 
 ### Phone capabilities
 
 | Capability | Notes |
 | ---------- | ----- |
+| Calls and SMS | Dial, answer, reject, hang up, call state, send SMS |
 | Chat with Jarvis | Type in the bottom bar and send |
 | Attach files | **+** button — text files inline; small binaries as base64 |
-| Quick actions | YouTube, Lock, Home, Notifs, Location, Camera, Voice |
-| Read notifications | Enable **Notification access** for Jarvis App |
-| Location | Grant location permission |
+| Quick actions | YouTube, Lock, Home, Notifs, Location, Camera, Voice, Torch, Screenshot |
+| Message previews | Enable **Notification access**; SMS, WhatsApp and Telegram previews show in the Phone section on the PC (read-only — no replies, SMS storage is never read) |
+| Phone status | Name, battery and charging state reported every five minutes |
 | Voice to PC | **Voice** uses on-device speech recognition |
-| PC Lock / Shutdown | Quick buttons send secure control commands to the PC |
-| Auto-reconnect | Service retries the link if the socket drops |
-| Background link | Foreground notification keeps the connection alive |
+| PC Lock / Shutdown | Secure control commands to the PC |
+| Auto-reconnect | The service retries the link if the socket drops |
+| Background link | A foreground notification keeps the connection alive |
 
 ### Troubleshooting
 
 - Test on the PC: `http://127.0.0.1:8000/jarvis-app`
-- Allow port **8000** in Windows Firewall  
-- Same Wi‑Fi (not guest isolation)  
-- **ADB is optional** — main path is Jarvis App reverse WebSocket  
-- Phone battery: set Jarvis App to **Unrestricted** so background link stays alive  
+- Allow port **8000** in Windows Firewall
+- Same Wi‑Fi (not guest isolation)
+- **ADB is optional** — the main path is the Jarvis App reverse WebSocket
+- Set Jarvis App to **Unrestricted** battery so the background link stays alive
+- A call only opens the dialer? Grant **Phone** permission in Android → Apps → Jarvis App → Permissions
 
 ---
 
@@ -217,6 +262,8 @@ Same Wi‑Fi required. Use **http** (not https) unless you configured certificat
 The **Ask anything** command bar stays visible at the bottom.
 
 **Shortcuts:** `F4` mute · `F11` fullscreen · `F12` compact mode  
+
+**Window commands:** say the app's name — "minimize Discord", "maximize Chrome", "restore Spotify", "bring Steam to the front". Jarvis finds that app's own window; it never minimizes itself by mistake. Without a name, minimize / maximize act on the focused window — which is Jarvis while you talk to it — so it refuses and asks which app you mean.
 
 Top-left shows the live clock and date.
 
@@ -240,12 +287,12 @@ Jarvis-ai/
 ├── tools/make_models.py    # regenerates the built-in .obj models
 ├── setup.py                # dependency installer
 ├── Jarvis.spec             # PyInstaller (Windows EXE)
-├── requirements.txt
+├── requirements.txt        # the only requirements file
 ├── actions/                # built-in tools
 ├── plugins/                # drop-in plugins
 ├── core/                   # avatar, audio, LLM, updater…
 ├── dashboard/              # remote server + web companion
-├── android/JarvisApp/      # native Android companion source
+├── android/JarvisApp/      # native Android companion (Kotlin) — dialer, calls, quick actions
 ├── scripts/build_exe.ps1   # local Windows packaging
 ├── memory/                 # config + long-term memory
 ├── config/                 # API keys, certificates

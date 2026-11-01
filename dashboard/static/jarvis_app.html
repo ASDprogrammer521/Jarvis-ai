@@ -127,6 +127,36 @@
   .ask button:active { transform: scale(0.94); }
 
   .hint { font-size: 11px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
+
+  
+  .dialer-num {
+    font-size: 26px; text-align: center; letter-spacing: 2px; margin-bottom: 4px;
+    min-height: 40px; display: flex; align-items: center; justify-content: center;
+    color: var(--text); word-break: break-all;
+  }
+  .dialer-num.empty { color: var(--muted); font-size: 15px; letter-spacing: 0; }
+  .keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
+  .key {
+    height: 54px; border-radius: 16px; font-size: 22px; font-weight: 500; cursor: pointer;
+    background: rgba(255,255,255,0.05); color: var(--text); border: 1px solid var(--border);
+    transition: transform .12s, background .2s; -webkit-tap-highlight-color: transparent;
+  }
+  .key:active { transform: scale(0.93); background: rgba(99,102,241,0.2); }
+  .key small { display:block; font-size: 8px; letter-spacing: 2px; color: var(--muted); margin-top: -2px; }
+  .dial-actions { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 8px; margin-top: 10px; align-items: center; }
+  .callbtn {
+    height: 56px; border-radius: 28px; background: #15a86f; color: #fff; font-size: 14px; font-weight: 700;
+    letter-spacing: 1px; cursor: pointer; box-shadow: 0 0 18px rgba(34,197,94,0.35);
+  }
+  .callbtn:active { transform: scale(0.96); }
+  .linkbtn { background: none; color: var(--muted); font-size: 13px; height: 44px; cursor: pointer; }
+  .linkbtn:hover { color: var(--accent); }
+  .call-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+  .call-row .btn { padding: 11px 6px; letter-spacing: 1px; }
+  .btn-ok { background: rgba(34,197,94,0.12); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+  .callstate { font-size: 12px; color: var(--muted); text-align: center; margin-top: 8px; min-height: 16px; }
+  .top { padding-top: max(16px, env(safe-area-inset-top)); }
+  .ask { padding-bottom: max(20px, env(safe-area-inset-bottom)); }
 </style>
 </head>
 <body>
@@ -144,6 +174,22 @@
         Use <b>http</b> (not https). Same Wi‑Fi required.<br/>
         Get a <b>fresh</b> key from Jarvis → Remote Control each time.
       </p>
+    </div>
+    <div class="card" id="dialCard" style="display:none">
+      <h3>PHONE</h3>
+      <div class="dialer-num empty" id="dialNum">Enter a number</div>
+      <div class="keys" id="keys"></div>
+      <div class="dial-actions">
+        <button class="linkbtn" onclick="pasteNum()">Paste</button>
+        <button class="callbtn" onclick="placeCall()">📞 CALL</button>
+        <button class="linkbtn" onclick="backNum()" ondblclick="clearNum()" aria-label="Delete">⌫</button>
+      </div>
+      <div class="call-row">
+        <button class="btn btn-ok" onclick="callAction('answer')">ANSWER</button>
+        <button class="btn btn-danger" onclick="callAction('reject')">REJECT</button>
+        <button class="btn btn-danger" onclick="callAction('hangup')">HANG UP</button>
+      </div>
+      <div class="callstate" id="callState"></div>
     </div>
     <div class="card" id="ctrlCard" style="display:none">
       <h3>QUICK ACTIONS</h3>
@@ -183,6 +229,52 @@ function setOnline(on) {
   $('st').className = 'status ' + (on ? 'on' : 'off');
   $('connectCard').style.display = on ? 'none' : 'block';
   $('ctrlCard').style.display = on ? 'block' : 'none';
+  $('dialCard').style.display = on ? 'block' : 'none';
+}
+
+/* ───────── dialer ───────── */
+let num = '';
+const KEYS = [['1',''],['2','ABC'],['3','DEF'],['4','GHI'],['5','JKL'],['6','MNO'],
+              ['7','PQRS'],['8','TUV'],['9','WXYZ'],['*',''],['0','+'],['#','']];
+(function buildKeys() {
+  const box = $('keys');
+  KEYS.forEach(([k, sub]) => {
+    const b = document.createElement('button');
+    b.className = 'key';
+    b.innerHTML = k + (sub ? '<small>' + sub + '</small>' : '');
+    b.onclick = () => { if (num.length < 20) { num += k; renderNum(); } };
+    if (k === '0') {
+      let t; b.onpointerdown = () => { t = setTimeout(() => { num += '+'; renderNum(); t = 0; }, 450); };
+      b.onpointerup = b.onpointerleave = () => clearTimeout(t);
+    }
+    box.appendChild(b);
+  });
+})();
+function renderNum() {
+  const el = $('dialNum');
+  el.textContent = num || 'Enter a number';
+  el.className = 'dialer-num' + (num ? '' : ' empty');
+}
+function backNum() { num = num.slice(0, -1); renderNum(); }
+function clearNum() { num = ''; renderNum(); }
+async function pasteNum() {
+  try {
+    const t = await navigator.clipboard.readText();
+    num = (t || '').replace(/[^0-9+*#]/g, '').slice(0, 20); renderNum();
+  } catch (e) { log('Clipboard is blocked by the browser.'); }
+}
+function placeCall() {
+  const n = num || localStorage.getItem('jarvis_last_num') || '';
+  if (n.replace(/\D/g, '').length < 3) { $('callState').textContent = 'Enter a valid phone number'; return; }
+  localStorage.setItem('jarvis_last_num', n);
+  $('callState').textContent = 'Calling ' + n + '…';
+  log('Calling ' + n);
+  location.href = 'tel:' + n;              // hands the call to the phone's own dialer
+}
+function callAction(a) {
+  const label = { answer: 'Answer', reject: 'Reject', hangup: 'Hang up' }[a];
+  sendCmd('phone ' + a);
+  $('callState').textContent = label + ' requested — needs the Jarvis App for this';
 }
 
 function resolveOrigin(hostVal) {
@@ -287,6 +379,18 @@ function handlePhoneCmd(m) {
     log('Jarvis → ' + t);
     try { if (navigator.vibrate) navigator.vibrate(80); } catch (e) {}
     alert(t);
+    return;
+  }
+  if ((act === 'call' || act === 'dial') && (m.value || m.number)) {
+    const n = String(m.value || m.number).replace(/[^0-9+*#]/g, '');
+    log('Jarvis asks to call ' + n);
+    try { location.href = 'tel:' + n; } catch (e) {}
+    return;
+  }
+  if (act === 'sms' && m.value) {
+    const [n, ...rest] = String(m.value).split('|');
+    log('Jarvis drafted an SMS to ' + n);
+    try { location.href = 'sms:' + n.replace(/[^0-9+]/g, '') + '?body=' + encodeURIComponent(rest.join('|')); } catch (e) {}
     return;
   }
   if (act === 'open_url' && m.url) {
