@@ -260,19 +260,24 @@ Same Wi‑Fi required. Enter the pairing key (or scan the QR code from Remote Co
 
 ## 🖥️ UI navigation
 
-| Tab | What it does |
-| --- | ------------ |
-| **Dashboard** | Main holographic HUD |
-| **Chat** | Conversation history (toggle open/close) |
-| **Settings** | Full-screen options |
+There is no top bar — the whole window is the page. Navigation lives in a slim **side rail** on the left:
 
-The **Ask anything** command bar stays visible at the bottom.
+* At rest it shows **icons only** (plus a status dot, the time and the fullscreen / compact-mode controls).
+* **Move the mouse onto it** and it slides open with the labels, the date and the version; move away and it folds back.
+* The microphone state (**Live / Muted / Listening / Speaking …**) is the dot at the bottom of the rail; it shows its name when the rail is open.
+
+| Item | What it does |
+| --- | --- |
+| **Home** | Main holographic HUD with the **Ask anything** command bar |
+| **Chat** | Conversation history |
+| **Dashboard** | System stats, tasks, activity and music |
+| **Phone** | Paired phone, calls, files and quick actions |
+| **Voice & AI** / **Settings** | Full-screen options |
 
 **Shortcuts:** `F4` mute · `F11` fullscreen · `F12` compact mode  
 
 **Window commands:** say the app's name — "minimize Discord", "maximize Chrome", "restore Spotify", "bring Steam to the front". Jarvis finds that app's own window; it never minimizes itself by mistake. Without a name, minimize / maximize act on the focused window — which is Jarvis while you talk to it — so it refuses and asks which app you mean.
 
-Top-left shows the live clock and date.
 
 ---
 

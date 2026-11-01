@@ -7,7 +7,7 @@ import time
 import uuid
 from collections import deque
 
-from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, QVariantAnimation, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QEvent, QPointF, QRectF, Qt, QTimer, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
 from PyQt6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QTextEdit, QVBoxLayout, QWidget,
@@ -67,10 +67,11 @@ class NavItem(HoverAnimationMixin, QPushButton):
         self._an = QVariantAnimation(self)
         self._an.setDuration(150)
         self._an.valueChanged.connect(self._set_h)
+        self._k = 0.0                      # 0 = side bar collapsed (icon only), 1 = expanded
 
-
-
-
+    def set_k(self, k: float):
+        self._k = float(k)
+        self.update()
 
     def paintEvent(self, _):
         p = QPainter(self)
@@ -93,10 +94,108 @@ class NavItem(HoverAnimationMixin, QPushButton):
             p.drawRoundedRect(r, 14, 14)
         col = qcol(C.PRI) if on else mix(qcol(C.TEXT_MED), qcol(C.TEXT), self._h)
         draw_icon(p, self.icon_kind, QRectF(r.left() + 14, r.center().y() - 11, 22, 22), col, 1.8)
-        p.setPen(qcol(C.TEXT) if on else col)
-        p.setFont(font(12, QFont.Weight.DemiBold if on else QFont.Weight.Medium))
-        p.drawText(QRectF(r.left() + 50, r.top(), r.width() - 56, r.height()),
-                   Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.label)
+        alpha = max(0.0, min(1.0, (self._k - 0.35) / 0.55))
+        if alpha > 0.01:
+            tc = QColor(qcol(C.TEXT) if on else col)
+            tc.setAlphaF(alpha)
+            p.setPen(tc)
+            p.setFont(font(12, QFont.Weight.DemiBold if on else QFont.Weight.Medium))
+            p.setClipRect(r)
+            p.drawText(QRectF(r.left() + 50, r.top(), max(0.0, r.width() - 56), r.height()),
+                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.label)
+
+
+class Sidebar(GlassCard):
+    """Left navigation. Rests as a slim icon rail and slides open over the content while the mouse is on it.
+
+    It floats above the page area (the window reserves the slim width), so opening it never
+    re-lays-out the pages or the 3D stage.
+    """
+    progress = pyqtSignal(float)           # 0.0 collapsed → 1.0 expanded
+    COLLAPSED = 76
+    EXPANDED = 248
+    MARGIN = 14
+
+    def __init__(self, parent):
+        super().__init__(parent, radius=26, tint=150)
+        self._k = 0.0
+        self.setFixedWidth(self.COLLAPSED)
+        self._an = QVariantAnimation(self)
+        self._an.setDuration(220)
+        self._an.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._an.valueChanged.connect(self._set_k)
+        self._hold = QTimer(self)
+        self._hold.setSingleShot(True)
+        self._hold.setInterval(260)          # small grace period so it doesn't flicker shut
+        self._hold.timeout.connect(self._maybe_collapse)
+        parent.installEventFilter(self)
+
+    @property
+    def k(self) -> float:
+        return self._k
+
+    def reposition(self):
+        p = self.parentWidget()
+        if p is not None:
+            self.setGeometry(self.MARGIN, self.MARGIN, self.width(), max(200, p.height() - 2 * self.MARGIN))
+
+    def eventFilter(self, obj, ev):
+        if obj is self.parentWidget() and ev.type() == QEvent.Type.Resize:
+            self.reposition()
+        return False
+
+    def _go(self, target: float):
+        self._an.stop()
+        self._an.setStartValue(self._k)
+        self._an.setEndValue(float(target))
+        self._an.start()
+
+    def _set_k(self, v):
+        self._k = float(v)
+        self.tint = int(150 + 90 * self._k)   # more opaque while it covers the page
+        self.setFixedWidth(int(round(self.COLLAPSED + (self.EXPANDED - self.COLLAPSED) * self._k)))
+        self.reposition()
+        self.progress.emit(self._k)
+        self.update()
+
+    def expand(self):
+        self._hold.stop()
+        if self._k < 1.0 and not (self._an.state() == QVariantAnimation.State.Running and self._an.endValue() == 1.0):
+            self._go(1.0)
+
+    def collapse(self):
+        self._hold.stop()
+        self._go(0.0)
+
+    def _maybe_collapse(self):
+        if self.underMouse():
+            return
+        self.collapse()
+
+    def enterEvent(self, e):
+        self.expand()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._hold.start()
+        super().leaveEvent(e)
+
+
+class PageHeader(QWidget):
+    """Small title for a page — the window no longer has a top bar."""
+
+    def __init__(self, title: str, subtitle: str = "", parent=None):
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(6, 2, 0, 4)
+        lay.setSpacing(0)
+        t = QLabel(title)
+        t.setFont(font(20, QFont.Weight.Bold))
+        lay.addWidget(t)
+        if subtitle:
+            sub = QLabel(subtitle)
+            sub.setStyleSheet(f"color: {C.TEXT_DIM}; font-size: 11px;")
+            lay.addWidget(sub)
 
 
 class InputBar(GlassCard):
@@ -565,6 +664,8 @@ class DashboardPage(QWidget):
         super().__init__(parent)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(8)
+        outer.addWidget(PageHeader("Dashboard", "System, tasks, activity and music at a glance"))
         sc = QScrollArea()
         sc.setWidgetResizable(True)
         sc.setFrameShape(QFrame.Shape.NoFrame)
@@ -626,6 +727,8 @@ class PhonePage(QWidget):
 
         page_l = QVBoxLayout(self)
         page_l.setContentsMargins(0, 0, 0, 0)
+        page_l.setSpacing(8)
+        page_l.addWidget(PageHeader("Phone", "Calls, files and quick actions for your paired Android phone"))
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)

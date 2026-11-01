@@ -23,7 +23,7 @@ from ui.fx import GL_ENABLED, Backdrop, GlassCard, GlowButton, ModalLayer, Stage
 from ui.metrics import _metrics
 from ui.panels import APP_VERSION, ConfirmPanel, RemotePanel, SettingsPanel, SetupPanel
 from ui.theme import C, DEFAULT_ACCENT, apply_accent, build_qss, patch_cfg, qcol, read_cfg, rgba
-from ui.pages import DashboardPage, InputBar, LogoMark, NavItem, PhonePage
+from ui.pages import DashboardPage, InputBar, LogoMark, NavItem, PhonePage, Sidebar
 from ui.widgets import ChatView, IconButton, StatePill, font
 
 _OS = platform.system()
@@ -253,15 +253,23 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(14)
 
-        side = GlassCard(radius=26, tint=140)
-        side.setFixedWidth(236)
+        # Left rail: icons only at rest, slides open (with labels) while the mouse is over it.
+        # It floats over the page area; this spacer keeps the pages clear of the slim rail.
+        self.side = side = Sidebar(self.backdrop)
+        reserve = QWidget()
+        reserve.setFixedWidth(Sidebar.COLLAPSED)
+        root.addWidget(reserve)
+
         sl = QVBoxLayout(side)
-        sl.setContentsMargins(16, 18, 16, 14)
-        sl.setSpacing(6)
+        sl.setContentsMargins(12, 16, 12, 12)
+        sl.setSpacing(4)
         brand = QHBoxLayout()
+        brand.setContentsMargins(3, 0, 0, 0)
         brand.setSpacing(10)
         brand.addWidget(LogoMark())
-        bcol = QVBoxLayout()
+        self.brand_txt = QWidget()
+        bcol = QVBoxLayout(self.brand_txt)
+        bcol.setContentsMargins(0, 0, 0, 0)
         bcol.setSpacing(0)
         self.title = QLabel(self.assistant_name.upper())
         tf = font(15, QFont.Weight.Bold)
@@ -271,66 +279,62 @@ class MainWindow(QMainWindow):
         sub_l = QLabel("Your AI Assistant")
         sub_l.setStyleSheet(f"color: {C.TEXT_DIM}; font-size: 10px;")
         bcol.addWidget(sub_l)
-        brand.addLayout(bcol, 1)
+        brand.addWidget(self.brand_txt, 1)
         sl.addLayout(brand)
-        sl.addSpacing(16)
+        sl.addSpacing(14)
         self.nav: dict = {}
         for key, icon, label in (("home", "home", "Home"), ("chat", "chat", "Chat"), ("dashboard", "dashboard", "Dashboard"),
                                  ("phone", "phone", "Phone"), ("voice", "mic", "Voice & AI"), ("settings", "gear", "Settings")):
             b = NavItem(icon, label)
+            b.setFixedHeight(46)
             b.clicked.connect(lambda _=False, k=key: self._nav(k))
+            side.progress.connect(b.set_k)
             self.nav[key] = b
             sl.addWidget(b)
         sl.addStretch()
         self.perf = QLabel("")
         self.perf.setStyleSheet(f"color: {C.TEXT_DIM}; font-size: 10px;")
-        self.perf.setVisible(bool(read_cfg().get("show_perf", False)))
+        self.perf.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._perf_pref = bool(read_cfg().get("show_perf", False))
         sl.addWidget(self.perf)
+
+        # status block: mic state · clock · date · fullscreen
+        self.pill = StatePill()
+        sl.addWidget(self.pill, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.clock = QLabel("--:--")
+        self.clock.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.date = QLabel("")
+        self.date.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.date.setStyleSheet(f"color: {C.TEXT_DIM}; font-size: 10px;")
+        sl.addWidget(self.clock)
+        sl.addWidget(self.date)
+        fs = IconButton("full", 34, tip=f"Fullscreen  {__import__('ui.theme', fromlist=['hotkeys']).hotkeys()['fullscreen']}")
+        fs.clicked.connect(self.toggle_fullscreen)
+        sl.addWidget(fs, 0, Qt.AlignmentFlag.AlignHCenter)
+        sl.addSpacing(4)
+
         crow = QHBoxLayout()
-        cl = QLabel("Compact Mode")
-        cl.setStyleSheet(f"color: {C.TEXT_MED};")
-        crow.addWidget(cl)
+        self.compact_lbl = QLabel("Compact Mode")
+        self.compact_lbl.setStyleSheet(f"color: {C.TEXT_MED};")
+        crow.addWidget(self.compact_lbl)
         crow.addStretch()
         self.compact_toggle = Toggle(False)
         self.compact_toggle.toggled.connect(self._compact_toggled)
         crow.addWidget(self.compact_toggle)
         sl.addLayout(crow)
-        sl.addSpacing(8)
-        ver = QLabel(f"v{APP_VERSION}")
-        ver.setStyleSheet(f"color: {C.TEXT_MED}; font-size: 10px;")
-        by = QLabel("by ASDcuber521")
-        by.setStyleSheet(f"color: {C.TEXT_DIM}; font-size: 10px; letter-spacing: 1px;")
-        sl.addWidget(ver)
-        sl.addWidget(by)
-        root.addWidget(side)
+        sl.addSpacing(4)
+        self.ver_lbl = QLabel(f"v{APP_VERSION}")
+        self.ver_lbl.setStyleSheet(f"color: {C.TEXT_MED}; font-size: 10px;")
+        self.by_lbl = QLabel("by ASDcuber521")
+        self.by_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; font-size: 10px; letter-spacing: 1px;")
+        sl.addWidget(self.ver_lbl)
+        sl.addWidget(self.by_lbl)
+        self._side_txt = None
+        side.progress.connect(self._side_progress)
+        self._side_progress(0.0)
 
         col = QVBoxLayout()
         col.setSpacing(12)
-        head = GlassCard(radius=24, tint=130)
-        head.setFixedHeight(68)
-        hl = QHBoxLayout(head)
-        hl.setContentsMargins(20, 0, 14, 0)
-        hl.setSpacing(14)
-        self.pill = StatePill()
-        hl.addWidget(self.pill)
-        self.sub = QLabel("")
-        self.sub.setStyleSheet(f"color: {C.TEXT_MED}; font-size: 12px;")
-        hl.addWidget(self.sub)
-        hl.addStretch()
-        self.clock = QLabel("--:--")
-        self.clock.setFont(font(15, QFont.Weight.Bold))
-        self.date = QLabel("")
-        self.date.setStyleSheet(f"color: {C.TEXT_DIM}; font-size: 10px;")
-        cb = QVBoxLayout()
-        cb.setSpacing(0)
-        cb.addWidget(self.clock, 0, Qt.AlignmentFlag.AlignRight)
-        cb.addWidget(self.date, 0, Qt.AlignmentFlag.AlignRight)
-        hl.addLayout(cb)
-        fs = IconButton("full", 40, tip=f"Fullscreen  {__import__('ui.theme', fromlist=['hotkeys']).hotkeys()['fullscreen']}")
-        fs.clicked.connect(self.toggle_fullscreen)
-        hl.addWidget(fs)
-        col.addWidget(head)
-        self._refresh_sub()
 
         self.pages = QStackedWidget()
         home = QWidget()
@@ -403,6 +407,8 @@ class MainWindow(QMainWindow):
             bar.attach_clicked.connect(self._browse)
             bar.detach_clicked.connect(self.clear_file)
         self._sync_nav()
+        side.reposition()
+        side.raise_()
 
         self._content = self._make_content()
         self._media = self._make_media()
@@ -514,15 +520,26 @@ class MainWindow(QMainWindow):
         self._send(fmt.format(t=self._last_clip[:800]))
 
     def set_perf(self, on: bool):
-        self.perf.setVisible(on)
+        self._perf_pref = bool(on)
+        self.perf.setVisible(bool(on) and bool(self._side_txt))
         patch_cfg(show_perf=on)
 
-    def _refresh_sub(self):
-        who = f", {self.user_name}" if self.user_name else ""
-        self.sub.setText(f"Ready to assist you{who}.")
+    def _side_progress(self, k: float):
+        """Show or hide the side bar's text as it opens and closes (icons are always visible)."""
+        wide = k > 0.72
+        if wide == self._side_txt:
+            return
+        self._side_txt = wide
+        self.brand_txt.setVisible(wide)
+        self.date.setVisible(wide)
+        self.compact_lbl.setVisible(wide)
+        self.ver_lbl.setVisible(wide)
+        self.by_lbl.setVisible(wide)
+        self.perf.setVisible(wide and self._perf_pref)
+        self.clock.setFont(font(15 if wide else 11, QFont.Weight.Bold))
 
     def _tick(self):
-        if self.perf.isVisible():
+        if self._perf_pref:
             st = self.stage
             mode = "GPU" if GL_ENABLED else "CPU"
             self.perf.setText(f"{mode} · {st.fps:.0f} fps · {st._ms:.1f} ms")
@@ -754,7 +771,6 @@ class MainWindow(QMainWindow):
         self.user_name = (user or "").strip()
         self.title.setText(name.upper())
         self.hero_title.setText(name.upper())
-        self._refresh_sub()
         self.setWindowTitle(name.upper())
         try:
             from memory.config_manager import save_assistant_config

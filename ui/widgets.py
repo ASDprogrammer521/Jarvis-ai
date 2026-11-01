@@ -8,7 +8,7 @@ from PyQt6.QtGui import (
     QBrush, QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QConicalGradient,
 )
 from PyQt6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from ui.fx import GlassCard, Toggle, fade_in, mix
@@ -236,11 +236,19 @@ class StatePill(QWidget):
         self._tm = QTimer(self)
         self._tm.timeout.connect(self._tick)
         self._tm.start(90)
-        self.setMinimumWidth(150)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def sizeHint(self):
+        return QSize(150, 32)
+
+    def minimumSizeHint(self):
+        return QSize(0, 32)
 
     def set(self, text: str, color: str):
         self._text = text
         self._color = QColor(color)
+        self.setToolTip(text.title())
         self.update()
 
     def _tick(self):
@@ -256,12 +264,15 @@ class StatePill(QWidget):
         p.setPen(QPen(QColor(self._color.red(), self._color.green(), self._color.blue(), 110), 1))
         p.drawRoundedRect(r, r.height() / 2, r.height() / 2)
         pulse = 0.5 + 0.5 * math.sin(self._t * 4)
-        c = QPointF(r.left() + 16, r.center().y())
+        icon_only = r.width() < 110          # narrow (collapsed side bar): just the status dot
+        c = QPointF(r.center().x() if icon_only else r.left() + 16, r.center().y())
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(self._color.red(), self._color.green(), self._color.blue(), int(50 + 60 * pulse)))
         p.drawEllipse(c, 5 + 3 * pulse, 5 + 3 * pulse)
         p.setBrush(self._color)
         p.drawEllipse(c, 3.6, 3.6)
+        if icon_only:
+            return
         f = font(9, QFont.Weight.DemiBold)
         f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.6)
         p.setFont(f)
