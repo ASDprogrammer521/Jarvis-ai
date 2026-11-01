@@ -771,7 +771,7 @@ class DashboardServer:
         @app.post("/login")
         async def login(req: Request):
             body    = await req.json()
-            entered = str(body.get("pin", "")).strip().upper()
+            entered = str(body.get("pin") or body.get("key") or "").strip().upper()
             now     = time.time()
             if entered in self._pending_keys and self._pending_keys[entered] > now:
                 del self._pending_keys[entered]
