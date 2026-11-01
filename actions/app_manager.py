@@ -101,6 +101,152 @@ def close_app(name: str, force, player=None) -> str:
     return f"Closed {shown}, sir — freed about {human_size(mem)}."
 
 
+# ───────────────────────── window control by app name ─────────────────────────
+# "minimize Discord" must act on Discord's own window, never on whatever window
+# has focus (that is Jarvis itself while the user is talking to it).
+
+_SW = {"minimize": 6, "maximize": 3, "restore": 9, "focus": 9}
+WINDOW_ACTIONS = tuple(_SW)
+
+
+def _win_handles(pids: set, title_hint: str) -> list:
+    """Visible top-level Windows windows owned by `pids` or whose title contains the hint."""
+    import ctypes
+    from ctypes import wintypes
+    u = ctypes.WinDLL("user32", use_last_error=True)
+    u.GetWindow.restype = wintypes.HWND            # 64-bit handles must not be truncated
+    u.GetWindow.argtypes = (wintypes.HWND, wintypes.UINT)
+    mine = own_pids()
+    found: list = []
+    hint = (title_hint or "").lower().strip()
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def cb(hwnd, _lp):
+        try:
+            if not u.IsWindowVisible(hwnd) and not u.IsIconic(hwnd):
+                return True
+            if u.GetWindow(hwnd, 4):  # GW_OWNER -> owned dialogs / tool windows
+                return True
+            ex = u.GetWindowLongW(hwnd, -20)
+            if ex & 0x80:  # WS_EX_TOOLWINDOW
+                return True
+            n = u.GetWindowTextLengthW(hwnd)
+            if n <= 0:
+                return True
+            buf = ctypes.create_unicode_buffer(n + 1)
+            u.GetWindowTextW(hwnd, buf, n + 1)
+            pid = wintypes.DWORD()
+            u.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if pid.value in mine:
+                return True
+            if pid.value in pids or (hint and len(hint) >= 3 and hint in buf.value.lower()):
+                found.append((hwnd, buf.value))
+        except Exception:
+            pass
+        return True
+
+    u.EnumWindows(cb, 0)
+    return found
+
+
+def _windows_window_op(action: str, pids: set, name: str) -> list:
+    import ctypes
+    u = ctypes.WinDLL("user32", use_last_error=True)
+    wins = _win_handles(pids, name)
+    for hwnd, _title in wins:
+        u.ShowWindow(hwnd, _SW[action])
+        if action in ("restore", "focus", "maximize"):
+            try:
+                u.keybd_event(0x12, 0, 0, 0)          # Alt tap lets SetForegroundWindow succeed
+                u.SetForegroundWindow(hwnd)
+                u.keybd_event(0x12, 0, 2, 0)
+            except Exception:
+                pass
+    return [t for _, t in wins]
+
+
+def _linux_window_op(action: str, pids: set, name: str) -> list:
+    import shutil
+    if not shutil.which("wmctrl"):
+        raise RuntimeError("wmctrl is not installed (sudo apt install wmctrl)")
+    out = subprocess.run(["wmctrl", "-lp"], capture_output=True, text=True, timeout=4).stdout
+    hint = (name or "").lower()
+    done = []
+    for line in out.splitlines():
+        parts = line.split(None, 4)
+        if len(parts) < 5:
+            continue
+        wid, _desk, pid, _host, title = parts
+        if int(pid) in own_pids() or not (int(pid) in pids or (len(hint) >= 3 and hint in title.lower())):
+            continue
+        if action == "minimize":
+            if shutil.which("xdotool"):
+                subprocess.run(["xdotool", "windowminimize", wid], capture_output=True, timeout=4)
+            else:
+                subprocess.run(["wmctrl", "-i", "-r", wid, "-b", "add,hidden"], capture_output=True, timeout=4)
+        elif action == "maximize":
+            subprocess.run(["wmctrl", "-i", "-r", wid, "-b", "remove,hidden"], capture_output=True, timeout=4)
+            subprocess.run(["wmctrl", "-i", "-r", wid, "-b", "add,maximized_vert,maximized_horz"], capture_output=True, timeout=4)
+            subprocess.run(["wmctrl", "-i", "-a", wid], capture_output=True, timeout=4)
+        else:
+            subprocess.run(["wmctrl", "-i", "-r", wid, "-b", "remove,hidden,maximized_vert,maximized_horz"] if action == "restore"
+                           else ["wmctrl", "-i", "-r", wid, "-b", "remove,hidden"], capture_output=True, timeout=4)
+            subprocess.run(["wmctrl", "-i", "-a", wid], capture_output=True, timeout=4)
+        done.append(title)
+    return done
+
+
+def _mac_window_op(action: str, procs: list, name: str) -> list:
+    names = sorted({(p.info["name"] or "").rsplit(".", 1)[0] for p in procs} or {name})
+    done = []
+    for proc_name in names:
+        if action == "minimize":
+            body = 'set value of attribute "AXMinimized" of every window to true'
+        elif action == "maximize":
+            body = ('set value of attribute "AXMinimized" of every window to false\n'
+                    'set frontmost to true\n'
+                    'try\nclick (first button of window 1 whose subrole is "AXZoomButton")\nend try')
+        else:
+            body = ('set value of attribute "AXMinimized" of every window to false\n'
+                    'set frontmost to true')
+        script = f'tell application "System Events" to tell process "{proc_name}"\n{body}\nend tell'
+        r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=6)
+        if r.returncode == 0:
+            done.append(proc_name)
+    return done
+
+
+def window_op(action: str, name: str, player=None) -> str:
+    """minimize / maximize / restore / focus the window of a NAMED app."""
+    action = {"unminimize": "restore", "show": "restore", "open": "focus", "bring": "focus"}.get(action, action)
+    if action not in _SW:
+        return f"Unknown window action: {action}"
+    target = _target(name)
+    if not target:
+        return "Sir, tell me which app's window you mean."
+    if target in ("jarvis", "main", "python", "pythonw"):
+        return "That is my own window — use the minimize button on my window, sir."
+    procs = _matches(target)
+    pids = {p.pid for p in procs}
+    try:
+        if _OS == "Windows":
+            titles = _windows_window_op(action, pids, name)
+        elif _OS == "Darwin":
+            titles = _mac_window_op(action, procs, name)
+        else:
+            titles = _linux_window_op(action, pids, name)
+    except Exception as e:
+        return f"I couldn't {action} {name}: {e}"
+    if not titles:
+        if not procs:
+            return f"I don't see {name} running, sir."
+        return (f"{name} is running but has no window I can control "
+                f"(it may be hidden in the tray). Try 'open {name}' first.")
+    verb = {"minimize": "Minimized", "maximize": "Maximized", "restore": "Restored", "focus": "Brought forward"}[action]
+    log(f"[Apps] {verb} {name} ({len(titles)} window)", player)
+    return f"{verb} {name}, sir."
+
+
 def top_apps(sort: str, n: int) -> str:
     import psutil
     groups: dict = {}
@@ -184,6 +330,8 @@ def app_manager(parameters: dict, player=None, speak=None) -> str:
             if action == "kill":
                 force = True
             return close_app(str(p.get("name") or ""), force if force is not None else None, player)
+        if action in ("minimize", "maximize", "restore", "focus", "unminimize", "show", "bring", "open"):
+            return window_op(action, str(p.get("name") or p.get("app") or ""), player)
         if action in ("top", "list", "usage", "ram", "cpu"):
             sort = "cpu" if action == "cpu" or str(p.get("sort") or "").lower() == "cpu" else "memory"
             text = top_apps(sort, int(p.get("count") or 8))
@@ -201,22 +349,24 @@ def app_manager(parameters: dict, player=None, speak=None) -> str:
         return "Sir, I need the 'psutil' package: pip install psutil"
     except Exception as e:
         return f"App manager failed: {e}"
-    return "Unknown action. Available: close, top, find, startup."
+    return "Unknown action. Available: close, minimize, maximize, restore, focus, top, find, startup."
 
 
 TOOL = {
     "name": "app_manager",
     "description": (
-        "Closes or quits a NAMED application (Discord, Chrome, Spotify, Steam, any program), shows which apps use the "
-        "most RAM or CPU, checks whether an app is running, and lists programs that start with the computer. "
-        "ALWAYS use this when the user says close, quit, exit, kill or shut down an app by name — never use "
-        "hotkeys like Alt+F4 for that, they would close the wrong window."
+        "Controls a NAMED application (Discord, Chrome, Spotify, Steam, any program): close/quit it, MINIMIZE, "
+        "MAXIMIZE, RESTORE or bring its window to the FRONT; also shows which apps use the most RAM or CPU, checks "
+        "whether an app is running, and lists programs that start with the computer. "
+        "ALWAYS use this when the user names an app with close, quit, exit, kill, minimize, maximize, restore or "
+        "'bring up' — never use computer_settings minimize/maximize or Alt+F4 for a named app: those act on the "
+        "focused window, which is Jarvis itself, and would hit the wrong window."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "close | top | find | startup"},
-            "name": {"type": "STRING", "description": "App name for close/find, e.g. 'Discord', 'Chrome'"},
+            "action": {"type": "STRING", "description": "close | minimize | maximize | restore | focus | top | find | startup"},
+            "name": {"type": "STRING", "description": "App name for close/minimize/maximize/restore/focus/find, e.g. 'Discord', 'Chrome'"},
             "force": {"type": "BOOLEAN", "description": "End the app even if it asks to save (for 'force close')"},
             "sort": {"type": "STRING", "description": "memory | cpu (for top)"},
             "count": {"type": "INTEGER", "description": "How many apps to list (default 8)"},

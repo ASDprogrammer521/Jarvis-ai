@@ -37,6 +37,27 @@ def run(action=None, value="", **kwargs):
         "type_text": "notify",
         "url": "open_url",
         "open_link": "open_url",
+        "phone": "call",
+        "dial": "call",
+        "ring": "call",
+        "call_status": "call_state",
+        "answer_call": "answer",
+        "pick_up": "answer",
+        "reject_call": "reject",
+        "decline": "reject",
+        "hang_up": "hangup",
+        "end_call": "hangup",
+        "end": "hangup",
+        "sms": "sms",
+        "torch": "flashlight",
+        "flashlight_on": "flashlight",
+        "torch_on": "flashlight",
+        "torch_off": "flashlight_off",
+        "where": "location",
+        "app": "open_app",
+        "launch": "open_app",
+        "lock_phone": "lock",
+        "wake": "unlock",
     }
     action = aliases.get(action, action)
     dashboard = _get_dashboard()
@@ -78,16 +99,74 @@ def run(action=None, value="", **kwargs):
             return "The URL format is invalid."
         sent = _push_phone(dashboard, {"type": "phone_cmd", "action": "open_url", "url": url})
         return f"URL sent to the phone 🌐 ({sent} client(s)): {url}" if sent else "The URL was not sent because the Jarvis App is disconnected."
-    return "The Jarvis App currently supports only status, notify, and open_url."
+    if action == "call":
+        number = _clean_number(value)
+        if not number:
+            return "Give me a phone number to call (digits, optionally starting with +)."
+        sent = _push_phone(dashboard, {"type": "phone_cmd", "action": "call", "value": number})
+        return (f"Calling {number} on the phone 📞 — the phone may ask for Phone permission the first time."
+                if sent else "The call was not placed because the Jarvis App is disconnected.")
+    if action == "sms":
+        number, _, body = value.partition("|")
+        number = _clean_number(number)
+        body = body.strip()
+        if not number or not body:
+            return "For an SMS give: value = '<number>|<message text>'."
+        sent = _push_phone(dashboard, {"type": "phone_cmd", "action": "sms", "value": f"{number}|{body[:500]}"})
+        return f"SMS to {number} handed to the phone 💬." if sent else "The SMS was not sent because the Jarvis App is disconnected."
+    if action in _SIMPLE:
+        label, wire = _SIMPLE[action]
+        msg = {"type": "phone_cmd", "action": wire}
+        if action == "open_app":
+            if not value:
+                return "Tell me which app to open on the phone."
+            msg["value"] = value[:80]
+        sent = _push_phone(dashboard, msg)
+        return f"{label} 📱" if sent else "The command was not sent because the Jarvis App is disconnected."
+    return ("The Jarvis App supports: status, notify, open_url, open_app, call, answer, reject, hangup, "
+            "call_state, sms, lock, unlock, home, flashlight, flashlight_off, location, battery, "
+            "notifications, screenshot, volume_up, volume_down.")
+
+
+_SIMPLE = {
+    "answer": ("Answer requested", "answer"),
+    "reject": ("Reject requested", "reject"),
+    "hangup": ("Hang-up requested", "hangup"),
+    "call_state": ("Asked the phone for its call state — the reply shows in the log", "call_status"),
+    "lock": ("Lock requested", "lock"),
+    "unlock": ("Wake / unlock requested (a PIN or fingerprint is still needed)", "unlock"),
+    "home": ("Phone sent to the home screen", "home"),
+    "flashlight": ("Flashlight on", "flashlight"),
+    "flashlight_off": ("Flashlight off", "flashlight_off"),
+    "location": ("Asked the phone for its location", "location"),
+    "battery": ("Asked the phone for its battery level", "battery"),
+    "notifications": ("Asked the phone for its notifications", "notifications"),
+    "screenshot": ("Screenshot requested — allow it on the phone", "screenshot"),
+    "volume_up": ("Phone volume up", "volume_up"),
+    "volume_down": ("Phone volume down", "volume_down"),
+    "open_app": ("App launch requested", "open_app"),
+}
+
+
+def _clean_number(raw) -> str:
+    """Keep digits and one leading '+'; reject anything that is not a plausible phone number."""
+    raw = str(raw or "").strip()
+    number = ("+" if raw.startswith("+") else "") + re.sub(r"\D", "", raw)
+    return number if 3 <= len(re.sub(r"\D", "", number)) <= 15 else ""
 
 TOOL = {
     "name": "phone_control",
-    "description": "Check the paired Jarvis App connection, show a message on the phone, or open a safe HTTP(S) URL.",
+    "description": (
+        "Controls the user's paired Android phone through the Jarvis App: MAKE A PHONE CALL (action=call, value=number), "
+        "answer / reject / hang up a call, check call state, send an SMS (value='number|text'), show a message, "
+        "open a link or an app, lock / wake the phone, flashlight, location, battery, notifications, screenshot, volume. "
+        "A call needs a phone NUMBER — if the user gives only a name, ask for the number; never invent one."
+    ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "status | notify | open_url"},
-            "value": {"type": "STRING", "description": "Message text or HTTP(S) URL"},
+            "action": {"type": "STRING", "description": "status | call | answer | reject | hangup | call_state | sms | notify | open_url | open_app | lock | unlock | home | flashlight | flashlight_off | location | battery | notifications | screenshot | volume_up | volume_down"},
+            "value": {"type": "STRING", "description": "Phone number (call), 'number|text' (sms), message text (notify), HTTP(S) URL (open_url) or app name (open_app)"},
         },
         "required": ["action"],
     },

@@ -15,7 +15,7 @@ import android.os.Looper
 import android.provider.OpenableColumns
 import android.provider.Settings
 import android.speech.RecognizerIntent
-import android.widget.Button
+import android.view.View
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.TextView
@@ -40,6 +40,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var logView: TextView
     private lateinit var chatInput: EditText
+    private lateinit var callStateLabel: TextView
+    private var torchOn = false
     private var lastSeenLog: String = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,20 +53,19 @@ class MainActivity : AppCompatActivity() {
         chatInput = findViewById(R.id.chatInput)
         val hostInput = findViewById<EditText>(R.id.hostInput)
         val keyInput = findViewById<EditText>(R.id.keyInput)
-        val connectBtn = findViewById<Button>(R.id.connectBtn)
-        val adminBtn = findViewById<Button>(R.id.adminBtn)
-        val sendBtn = findViewById<ImageButton>(R.id.sendBtn)
-        val attachBtn = findViewById<ImageButton>(R.id.attachBtn)
+        val connectCard = findViewById<View>(R.id.connectCard)
+        val connectedBar = findViewById<View>(R.id.connectedBar)
+        val linkedHost = findViewById<TextView>(R.id.linkedHost)
+        callStateLabel = findViewById(R.id.callState)
 
         val prefs = getSharedPreferences("jarvis", Context.MODE_PRIVATE)
         hostInput.setText(prefs.getString("host", ""))
         keyInput.setText(prefs.getString("key", ""))
 
         requestStartupPermissions()
-
         handleJarvisAction(intent)
 
-        connectBtn.setOnClickListener {
+        findViewById<View>(R.id.connectBtn).setOnClickListener {
             val host = hostInput.text.toString().trim()
             val key = keyInput.text.toString().trim()
             if (host.isEmpty() || key.isEmpty()) {
@@ -77,8 +78,12 @@ class MainActivity : AppCompatActivity() {
             startForegroundService(i)
             appendLog("Starting link…")
         }
+        findViewById<View>(R.id.disconnectBtn).setOnClickListener {
+            stopService(Intent(this, JarvisLinkService::class.java))
+            appendLog("Disconnected")
+        }
 
-        adminBtn.setOnClickListener {
+        findViewById<View>(R.id.adminBtn).setOnClickListener {
             val dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
             val admin = ComponentName(this, JarvisDeviceAdmin::class.java)
             if (dpm.isAdminActive(admin)) appendLog("Lock permission already enabled")
@@ -90,8 +95,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        sendBtn.setOnClickListener { sendChat() }
-        attachBtn.setOnClickListener {
+        findViewById<View>(R.id.clearLog).setOnClickListener { logView.text = "" }
+        findViewById<ImageButton>(R.id.sendBtn).setOnClickListener { sendChat() }
+        findViewById<ImageButton>(R.id.attachBtn).setOnClickListener {
             startActivityForResult(
                 Intent.createChooser(
                     Intent(Intent.ACTION_GET_CONTENT).apply {
@@ -103,17 +109,16 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        findViewById<Button>(R.id.qYoutube).setOnClickListener {
-            localOrSend("open youtube") { CommandExecutor.handle(this, org.json.JSONObject(mapOf("action" to "open_app", "value" to "youtube"))) }
+        fun exec(action: String, value: String? = null): String {
+            val o = org.json.JSONObject().put("action", action)
+            if (value != null) o.put("value", value)
+            return CommandExecutor.handle(this, o)
         }
-        findViewById<Button>(R.id.qLock).setOnClickListener {
-            appendLog(CommandExecutor.handle(this, org.json.JSONObject(mapOf("action" to "lock"))))
-        }
-        findViewById<Button>(R.id.qHome).setOnClickListener {
-            appendLog(CommandExecutor.handle(this, org.json.JSONObject(mapOf("action" to "home"))))
-        }
-        findViewById<Button>(R.id.qNotif).setOnClickListener {
 
+        findViewById<View>(R.id.qYoutube).setOnClickListener { appendLog(exec("open_app", "youtube")) }
+        findViewById<View>(R.id.qLock).setOnClickListener { appendLog(exec("lock")) }
+        findViewById<View>(R.id.qHome).setOnClickListener { appendLog(exec("home")) }
+        findViewById<View>(R.id.qNotif).setOnClickListener {
             try {
                 startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             } catch (_: Exception) {}
@@ -121,21 +126,20 @@ class MainActivity : AppCompatActivity() {
             appendLog(snap)
             if (JarvisLinkService.connected) JarvisLinkService.sendCommand("[PHONE_NOTIFICATIONS]\n$snap")
         }
-        findViewById<Button>(R.id.qLoc).setOnClickListener {
+        findViewById<View>(R.id.qLoc).setOnClickListener {
             ensureLocationPerm()
-            val loc = CommandExecutor.handle(this, org.json.JSONObject(mapOf("action" to "location")))
+            val loc = exec("location")
             appendLog(loc)
             if (JarvisLinkService.connected) JarvisLinkService.sendCommand("[PHONE_LOCATION] $loc")
         }
-        findViewById<Button>(R.id.qCam).setOnClickListener {
-            val i = Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE)
+        findViewById<View>(R.id.qCam).setOnClickListener {
             try {
-                startActivityForResult(i, REQ_CAMERA)
+                startActivityForResult(Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE), REQ_CAMERA)
             } catch (e: Exception) {
                 appendLog("Camera: ${e.message}")
             }
         }
-        findViewById<Button>(R.id.qMic).setOnClickListener {
+        findViewById<View>(R.id.qMic).setOnClickListener {
             val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
@@ -147,84 +151,183 @@ class MainActivity : AppCompatActivity() {
                 appendLog("Voice not available: ${e.message}")
             }
         }
-        val callStateLabel = findViewById<android.widget.TextView>(R.id.callState)
-        fun runCallAction(action: String) {
-            val permission = when (action) {
-                "call_status" -> android.Manifest.permission.READ_PHONE_STATE
-                "answer", "reject", "hangup" -> android.Manifest.permission.ANSWER_PHONE_CALLS
-                else -> null
-            }
-            if (permission != null && androidx.core.content.ContextCompat.checkSelfPermission(
-                    this@MainActivity, permission
-                ) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                androidx.core.app.ActivityCompat.requestPermissions(this@MainActivity, arrayOf(permission), REQ_PERMS)
-                val note = "Phone permission requested; grant it, then tap this control again."
-                callStateLabel.text = note
-                appendLog(note)
-                return
-            }
-            val result = CommandExecutor.handle(this@MainActivity, org.json.JSONObject(mapOf("action" to action)))
-            callStateLabel.text = result
-            appendLog(result)
+        findViewById<View>(R.id.qTorch).setOnClickListener {
+            torchOn = !torchOn
+            appendLog(exec(if (torchOn) "flashlight" else "flashlight_off"))
         }
-        findViewById<Button>(R.id.qDial).setOnClickListener {
-            val numberInput = android.widget.EditText(this@MainActivity).apply {
-                inputType = android.text.InputType.TYPE_CLASS_PHONE
-                hint = "Phone number"
-            }
-            android.app.AlertDialog.Builder(this@MainActivity)
-                .setTitle("Make a call")
-                .setMessage("Confirm the number before placing the call.")
-                .setView(numberInput)
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Call") { _, _ ->
-                    val number = numberInput.text?.toString()?.trim().orEmpty()
-                    if (number.length < 3) appendLog("Enter a valid phone number.")
-                    else {
-                        val result = CommandExecutor.handle(this@MainActivity, org.json.JSONObject(mapOf("action" to "call", "value" to number)))
-                        callStateLabel.text = result
-                        appendLog(result)
-                    }
-                }
-                .show()
-        }
-        findViewById<Button>(R.id.qAnswer).setOnClickListener { runCallAction("answer") }
-        findViewById<Button>(R.id.qReject).setOnClickListener { runCallAction("reject") }
-        findViewById<Button>(R.id.qHangup).setOnClickListener { runCallAction("hangup") }
-        findViewById<Button>(R.id.qCallState).setOnClickListener { runCallAction("call_status") }
+        findViewById<View>(R.id.qShot).setOnClickListener { appendLog(exec("screenshot")) }
 
-        findViewById<Button>(R.id.qPcLock).setOnClickListener {
+        // ── Calls ────────────────────────────────────────────────────────────
+        findViewById<View>(R.id.qDial).setOnClickListener { showDialer() }
+        findViewById<View>(R.id.qAnswer).setOnClickListener { runCallAction("answer") }
+        findViewById<View>(R.id.qReject).setOnClickListener { runCallAction("reject") }
+        findViewById<View>(R.id.qHangup).setOnClickListener { runCallAction("hangup") }
+        findViewById<View>(R.id.qCallState).setOnClickListener { runCallAction("call_status") }
+
+        findViewById<View>(R.id.qPcLock).setOnClickListener {
             if (JarvisLinkService.sendCommand("[PC_CONTROL] lock")) appendLog("Sent: lock PC")
             else appendLog("Not connected")
         }
-        findViewById<Button>(R.id.qPcOff).setOnClickListener {
-            if (JarvisLinkService.sendCommand("[PC_CONTROL] shutdown")) appendLog("Sent: shutdown PC")
-            else appendLog("Not connected")
+        findViewById<View>(R.id.qPcOff).setOnClickListener {
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Shut down the PC?")
+                .setMessage("Jarvis will ask the PC to shut down.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Shut down") { _, _ ->
+                    if (JarvisLinkService.sendCommand("[PC_CONTROL] shutdown")) appendLog("Sent: shutdown PC")
+                    else appendLog("Not connected")
+                }
+                .show()
         }
 
+        var tick = 0
         handler.post(object : Runnable {
             override fun run() {
                 val online = JarvisLinkService.connected
+                val connecting = !online && (
+                    JarvisLinkService.statusLine.contains("Connect", true) ||
+                        JarvisLinkService.statusLine.contains("Login", true))
                 statusText.text = when {
                     online -> "● ONLINE"
-                    JarvisLinkService.statusLine.contains("Connect", true) ||
-                        JarvisLinkService.statusLine.contains("Login", true) -> "● CONNECTING"
+                    connecting -> "● CONNECTING"
                     else -> "● OFFLINE"
                 }
                 statusText.setTextColor(
+                    ContextCompat.getColor(
+                        this@MainActivity,
+                        when {
+                            online -> R.color.green
+                            connecting -> R.color.amber
+                            else -> R.color.red
+                        }
+                    )
+                )
+                statusText.setBackgroundResource(
                     when {
-                        online -> 0xFF37FF8B.toInt()
-                        statusText.text.contains("CONNECT") -> 0xFFFFB428.toInt()
-                        else -> 0xFFFF4D6D.toInt()
+                        online -> R.drawable.bg_status_online
+                        connecting -> R.drawable.bg_status_connecting
+                        else -> R.drawable.bg_status_pill
                     }
                 )
+                connectCard.visibility = if (online) View.GONE else View.VISIBLE
+                connectedBar.visibility = if (online) View.VISIBLE else View.GONE
+                if (online) linkedHost.text = prefs.getString("host", "") ?: ""
+
                 val lg = JarvisLinkService.lastLog
                 if (lg.isNotBlank() && lg != lastSeenLog) {
                     lastSeenLog = lg; appendLog(lg)
                 }
+                // Refresh the call banner every ~2 s while we are allowed to read it.
+                if (tick++ % 4 == 0 && ContextCompat.checkSelfPermission(
+                        this@MainActivity, Manifest.permission.READ_PHONE_STATE
+                    ) == PackageManager.PERMISSION_GRANTED
+                ) {
+                    callStateLabel.text = CommandExecutor.handle(
+                        this@MainActivity, org.json.JSONObject().put("action", "call_status")
+                    )
+                }
                 handler.postDelayed(this, 500)
             }
         })
+    }
+
+    // ── Dialer bottom sheet ──────────────────────────────────────────────────
+    private fun showDialer() {
+        val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+        val v = layoutInflater.inflate(R.layout.dialog_dialer, null)
+        sheet.setContentView(v)
+        (v.parent as? View)?.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+
+        val display = v.findViewById<TextView>(R.id.dialNumber)
+        val hint = v.findViewById<TextView>(R.id.dialHint)
+        val prefs = getSharedPreferences("jarvis", Context.MODE_PRIVATE)
+        val last = prefs.getString("last_number", "") ?: ""
+        val number = StringBuilder()
+
+        fun refresh() {
+            display.text = number.toString()
+            hint.text = when {
+                number.isEmpty() && last.isNotEmpty() -> "Tap Call to redial $last"
+                number.isEmpty() -> "Enter a number"
+                else -> " "
+            }
+        }
+
+        val keypad = v.findViewById<android.widget.GridLayout>(R.id.keypad)
+        for (k in "123456789*0#") {
+            val key = TextView(this)
+            key.text = k.toString()
+            key.gravity = android.view.Gravity.CENTER
+            key.setTextColor(ContextCompat.getColor(this, R.color.text))
+            key.textSize = 26f
+            key.setBackgroundResource(R.drawable.bg_key)
+            key.isClickable = true
+            key.isFocusable = true
+            val lp = android.widget.GridLayout.LayoutParams(
+                android.widget.GridLayout.spec(android.widget.GridLayout.UNDEFINED, 1f),
+                android.widget.GridLayout.spec(android.widget.GridLayout.UNDEFINED, 1f)
+            )
+            lp.width = 0
+            lp.height = (64 * resources.displayMetrics.density).toInt()
+            val m = (5 * resources.displayMetrics.density).toInt()
+            lp.setMargins(m, m, m, m)
+            key.layoutParams = lp
+            key.setOnClickListener {
+                if (number.length < 20) number.append(k)
+                refresh()
+            }
+            if (k == '0') key.setOnLongClickListener { number.append('+'); refresh(); true }
+            keypad.addView(key)
+        }
+
+        v.findViewById<View>(R.id.dialBack).apply {
+            setOnClickListener { if (number.isNotEmpty()) number.deleteCharAt(number.length - 1); refresh() }
+            setOnLongClickListener { number.clear(); refresh(); true }
+        }
+        v.findViewById<View>(R.id.dialPaste).setOnClickListener {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            val text = cm.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
+            val cleaned = text.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }.take(20)
+            if (cleaned.isNotEmpty()) { number.clear(); number.append(cleaned); refresh() }
+        }
+        v.findViewById<View>(R.id.dialCall).setOnClickListener {
+            val n = if (number.isEmpty()) last else number.toString()
+            if (n.filter { it.isDigit() }.length < 3) {
+                hint.text = "Enter a valid phone number"; return@setOnClickListener
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) !=
+                PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CALL_PHONE), REQ_PERMS)
+            }
+            prefs.edit().putString("last_number", n).apply()
+            val result = CommandExecutor.handle(
+                this, org.json.JSONObject().put("action", "call").put("value", n)
+            )
+            callStateLabel.text = result
+            appendLog(result)
+            sheet.dismiss()
+        }
+        refresh()
+        sheet.show()
+    }
+
+    private fun runCallAction(action: String) {
+        val permission = when (action) {
+            "call_status" -> Manifest.permission.READ_PHONE_STATE
+            "answer", "reject", "hangup" -> Manifest.permission.ANSWER_PHONE_CALLS
+            else -> null
+        }
+        if (permission != null && ContextCompat.checkSelfPermission(this, permission) !=
+            PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(permission), REQ_PERMS)
+            val note = "Phone permission requested; allow it, then tap again."
+            callStateLabel.text = note
+            appendLog(note)
+            return
+        }
+        val result = CommandExecutor.handle(this, org.json.JSONObject().put("action", action))
+        callStateLabel.text = result
+        appendLog(result)
     }
 
     private fun localOrSend(label: String, local: () -> String) {
@@ -411,6 +514,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun appendLog(line: String) {
         logView.append(line + "\n")
+        // keep the log light: drop the oldest lines past 200
+        val lines = logView.text.lines()
+        if (lines.size > 200) logView.text = lines.takeLast(200).joinToString("\n")
     }
 }
 

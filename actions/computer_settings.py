@@ -1116,6 +1116,20 @@ def computer_settings(
         except Exception as e:
             return f"Could not {action.replace('_', ' ')}: {e}"
 
+    if action in ("minimize", "maximize", "restore_window", "restore"):
+        # The focused window is Jarvis while the user talks to it, so "minimize Discord"
+        # must go to the named app's window instead of the foreground one.
+        app_name = str(params.get("app") or params.get("name") or params.get("target") or "").strip()
+        if not app_name and isinstance(value, str) and value.strip() and not value.strip().isdigit():
+            app_name = value.strip()
+        if app_name:
+            from actions.app_manager import window_op
+            return window_op("restore" if action.startswith("restore") else action, app_name, player)
+        from actions._common import jarvis_has_focus
+        if jarvis_has_focus():
+            return (f"Refused: the focused window is Jarvis itself. Say which app to {action} "
+                    f"(for example 'minimize Discord') — pass its name in `app`.")
+
     func = ACTION_MAP.get(action)
     if not func:
         return _suggest(raw_action or description)
@@ -1160,7 +1174,7 @@ TOOL = {
                     "volume_up | volume_down | volume_set | mute | "
                     "brightness_up | brightness_down | sleep_display | "
                     "pause_video | close_app (focused window only — NOT for named apps, use app_manager) | close_window | full_screen | "
-                    "minimize | maximize | snap_left | snap_right | "
+                    "minimize | maximize (pass `app` to target a named app) | restore_window | snap_left | snap_right | "
                     "switch_window | show_desktop | task_manager | focus_search | "
                     "refresh_page | close_tab | new_tab | next_tab | prev_tab | "
                     "go_back | go_forward | zoom_in | zoom_out | zoom_reset | "
@@ -1177,6 +1191,14 @@ TOOL = {
                 "description": (
                     "Fallback only, when no action name above fits. "
                     "Resolved locally — no extra model call."
+                )
+            },
+            "app": {
+                "type": "STRING",
+                "description": (
+                    "App whose window to minimize / maximize / restore, e.g. 'Discord', 'Chrome'. "
+                    "REQUIRED whenever the user names an app — without it the action hits the focused "
+                    "window, which is Jarvis itself."
                 )
             },
             "value": {
