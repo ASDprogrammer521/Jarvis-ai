@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <meta name="theme-color" content="#05070b"/>
 <title>Jarvis App</title>
 <style>
@@ -129,32 +129,6 @@
   .hint { font-size: 11px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
 
   
-  .dialer-num {
-    font-size: 26px; text-align: center; letter-spacing: 2px; margin-bottom: 4px;
-    min-height: 40px; display: flex; align-items: center; justify-content: center;
-    color: var(--text); word-break: break-all;
-  }
-  .dialer-num.empty { color: var(--muted); font-size: 15px; letter-spacing: 0; }
-  .keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
-  .key {
-    height: 54px; border-radius: 16px; font-size: 22px; font-weight: 500; cursor: pointer;
-    background: rgba(255,255,255,0.05); color: var(--text); border: 1px solid var(--border);
-    transition: transform .12s, background .2s; -webkit-tap-highlight-color: transparent;
-  }
-  .key:active { transform: scale(0.93); background: rgba(99,102,241,0.2); }
-  .key small { display:block; font-size: 8px; letter-spacing: 2px; color: var(--muted); margin-top: -2px; }
-  .dial-actions { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 8px; margin-top: 10px; align-items: center; }
-  .callbtn {
-    height: 56px; border-radius: 28px; background: #15a86f; color: #fff; font-size: 14px; font-weight: 700;
-    letter-spacing: 1px; cursor: pointer; box-shadow: 0 0 18px rgba(34,197,94,0.35);
-  }
-  .callbtn:active { transform: scale(0.96); }
-  .linkbtn { background: none; color: var(--muted); font-size: 13px; height: 44px; cursor: pointer; }
-  .linkbtn:hover { color: var(--accent); }
-  .call-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
-  .call-row .btn { padding: 11px 6px; letter-spacing: 1px; }
-  .btn-ok { background: rgba(34,197,94,0.12); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
-  .callstate { font-size: 12px; color: var(--muted); text-align: center; margin-top: 8px; min-height: 16px; }
   .top { padding-top: max(16px, env(safe-area-inset-top)); }
   .ask { padding-bottom: max(20px, env(safe-area-inset-bottom)); }
 </style>
@@ -171,26 +145,9 @@
       <input id="key" placeholder="Pairing key from Dashboard" autocomplete="off"/>
       <button class="btn btn-primary" id="connectBtn" onclick="connect()">CONNECT</button>
       <p class="hint">
-        Open this page from the address Jarvis shows (<b>https://…:8000</b>). The first time, the browser warns about the
-        certificate because Jarvis signs it itself: compare the <b>SHA-256</b> fingerprint with the one in Jarvis → Phone, then continue.<br/>
-        Get a <b>fresh</b> key from Jarvis → Remote Control each time.
+        Open this page from the address Jarvis shows (<b>https://…:8000</b>). The first time the browser shows a certificate warning, because Jarvis signs its own certificate: compare the <b>SHA-256</b> fingerprint with the one in Jarvis → Phone, then continue.<br/>
+        Get a <b>fresh</b> key from Jarvis → Remote Control each time. Calls and SMS are only available in the Android app.
       </p>
-    </div>
-    <div class="card" id="dialCard" style="display:none">
-      <h3>PHONE</h3>
-      <div class="dialer-num empty" id="dialNum">Enter a number</div>
-      <div class="keys" id="keys"></div>
-      <div class="dial-actions">
-        <button class="linkbtn" onclick="pasteNum()">Paste</button>
-        <button class="callbtn" onclick="placeCall()">📞 CALL</button>
-        <button class="linkbtn" onclick="backNum()" ondblclick="clearNum()" aria-label="Delete">⌫</button>
-      </div>
-      <div class="call-row">
-        <button class="btn btn-ok" onclick="callAction('answer')">ANSWER</button>
-        <button class="btn btn-danger" onclick="callAction('reject')">REJECT</button>
-        <button class="btn btn-danger" onclick="callAction('hangup')">HANG UP</button>
-      </div>
-      <div class="callstate" id="callState"></div>
     </div>
     <div class="card" id="ctrlCard" style="display:none">
       <h3>QUICK ACTIONS</h3>
@@ -214,7 +171,8 @@
 <script>
 let ws = null;
 const $ = (id) => document.getElementById(id);
-const saved = localStorage.getItem('jarvis_host') || '';
+let saved = '';
+try { saved = localStorage.getItem('jarvis_host') || ''; } catch (e) {}
 if (saved) $('host').value = saved;
 if (!$('host').value && location.hostname && location.hostname !== '127.0.0.1') {
   $('host').value = location.hostname;
@@ -230,52 +188,6 @@ function setOnline(on) {
   $('st').className = 'status ' + (on ? 'on' : 'off');
   $('connectCard').style.display = on ? 'none' : 'block';
   $('ctrlCard').style.display = on ? 'block' : 'none';
-  $('dialCard').style.display = on ? 'block' : 'none';
-}
-
-/* ───────── dialer ───────── */
-let num = '';
-const KEYS = [['1',''],['2','ABC'],['3','DEF'],['4','GHI'],['5','JKL'],['6','MNO'],
-              ['7','PQRS'],['8','TUV'],['9','WXYZ'],['*',''],['0','+'],['#','']];
-(function buildKeys() {
-  const box = $('keys');
-  KEYS.forEach(([k, sub]) => {
-    const b = document.createElement('button');
-    b.className = 'key';
-    b.innerHTML = k + (sub ? '<small>' + sub + '</small>' : '');
-    b.onclick = () => { if (num.length < 20) { num += k; renderNum(); } };
-    if (k === '0') {
-      let t; b.onpointerdown = () => { t = setTimeout(() => { num += '+'; renderNum(); t = 0; }, 450); };
-      b.onpointerup = b.onpointerleave = () => clearTimeout(t);
-    }
-    box.appendChild(b);
-  });
-})();
-function renderNum() {
-  const el = $('dialNum');
-  el.textContent = num || 'Enter a number';
-  el.className = 'dialer-num' + (num ? '' : ' empty');
-}
-function backNum() { num = num.slice(0, -1); renderNum(); }
-function clearNum() { num = ''; renderNum(); }
-async function pasteNum() {
-  try {
-    const t = await navigator.clipboard.readText();
-    num = (t || '').replace(/[^0-9+*#]/g, '').slice(0, 20); renderNum();
-  } catch (e) { log('Clipboard is blocked by the browser.'); }
-}
-function placeCall() {
-  const n = num || localStorage.getItem('jarvis_last_num') || '';
-  if (n.replace(/\D/g, '').length < 3) { $('callState').textContent = 'Enter a valid phone number'; return; }
-  localStorage.setItem('jarvis_last_num', n);
-  $('callState').textContent = 'Calling ' + n + '…';
-  log('Calling ' + n);
-  location.href = 'tel:' + n;              // hands the call to the phone's own dialer
-}
-function callAction(a) {
-  const label = { answer: 'Answer', reject: 'Reject', hangup: 'Hang up' }[a];
-  sendCmd('phone ' + a);
-  $('callState').textContent = label + ' requested — needs the Jarvis App for this';
 }
 
 function resolveOrigin(hostVal) {
@@ -318,7 +230,7 @@ async function connect() {
   $('connectBtn').disabled = true;
   $('connectBtn').textContent = 'CONNECTING…';
   const origin = resolveOrigin(hostVal);
-  localStorage.setItem('jarvis_host', hostVal);
+  try { localStorage.setItem('jarvis_host', hostVal); } catch (e) {}
   log('Target: ' + origin);
 
   try {
@@ -384,10 +296,8 @@ function handlePhoneCmd(m) {
     alert(t);
     return;
   }
-  if ((act === 'call' || act === 'dial') && (m.value || m.number)) {
-    const n = String(m.value || m.number).replace(/[^0-9+*#]/g, '');
-    log('Jarvis asks to call ' + n);
-    try { location.href = 'tel:' + n; } catch (e) {}
+  if (act === 'call' || act === 'dial' || act === 'answer' || act === 'reject' || act === 'hangup') {
+    log('Calls need the Jarvis Android app — the browser page cannot place or control calls.');
     return;
   }
   if (act === 'sms' && m.value) {
@@ -404,7 +314,43 @@ function handlePhoneCmd(m) {
   log('Phone cmd: ' + JSON.stringify(m));
 }
 
-function disconnect() { if (ws) ws.close(); setOnline(false); }
+function disconnect() {
+  try { sessionStorage.removeItem('jarvis_token'); sessionStorage.removeItem('jarvis_key'); } catch (e) {}
+  if (ws) ws.close();
+  setOnline(false);
+}
+
+/* QR / auto-login: /auto-login stores a session token (and a device token) before redirecting here. */
+async function autoConnect() {
+  if (ws && ws.readyState === 1) return;
+  const origin = location.origin;
+  let tok = '';
+  try { tok = sessionStorage.getItem('jarvis_token') || ''; } catch (e) {}
+  if (tok) {
+    try {
+      ws = await openWs(origin, tok);
+      wireWs(ws); setOnline(true); log('Connected (QR session).');
+      return;
+    } catch (e) { log('QR session expired: ' + e.message); }
+  }
+  let dev = '';
+  try { dev = localStorage.getItem('jarvis_device_token') || ''; } catch (e) {}
+  if (dev) {
+    try {
+      const res = await fetch(origin + '/api/device-login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_token: dev }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok && data.token) {
+        try { sessionStorage.setItem('jarvis_token', data.token); } catch (e) {}
+        ws = await openWs(origin, data.token);
+        wireWs(ws); setOnline(true); log('Reconnected (known device).');
+      }
+    } catch (e) { log('Auto-reconnect failed: ' + e.message); }
+  }
+}
+if (location.protocol === 'https:' || location.protocol === 'http:') autoConnect();
 function sendCmd(text) {
   if (!ws || ws.readyState !== 1) { log('Not connected'); return; }
   ws.send(JSON.stringify({ type: 'command', text }));
