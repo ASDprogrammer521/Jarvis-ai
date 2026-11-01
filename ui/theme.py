@@ -80,13 +80,15 @@ def build_qss() -> str:
         border-radius: 8px; padding: 5px 9px; }}
     QLabel {{ background: transparent; color: {C.TEXT}; }}
     QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; border: none; }}
-    QScrollBar:vertical {{ background: transparent; width: 9px; margin: 2px; }}
-    QScrollBar::handle:vertical {{ background: {rgba(C.TEXT_MED, .25)}; border-radius: 3px; min-height: 36px; }}
-    QScrollBar::handle:vertical:hover {{ background: {rgba(C.PRI, .6)}; }}
+    QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
+    QScrollBar::handle:vertical {{ background: {rgba(C.TEXT_MED, .25)}; border-radius: 4px; min-height: 40px; }}
+    QScrollBar::handle:vertical:hover {{ background: {rgba(C.PRI, .65)}; }}
+    QTextEdit, QPlainTextEdit {{ selection-background-color: {C.PRI_DIM}; }}
+    QPushButton:focus {{ outline: none; }}
     QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page {{ background: none; height: 0; }}
     QLineEdit {{ background: {rgba('#ffffff', .05)}; color: {C.TEXT}; border: 1px solid {rgba('#ffffff', .10)};
-        border-radius: 12px; padding: 8px 12px; selection-background-color: {C.PRI_DIM}; }}
-    QLineEdit:focus {{ border: 1px solid {C.PRI}; background: {rgba('#ffffff', .08)}; }}
+        border-radius: 12px; padding: 9px 14px; selection-background-color: {C.PRI_DIM}; }}
+    QLineEdit:focus {{ border: 1px solid {C.PRI}; background: {rgba('#ffffff', .09)}; }}
     QComboBox {{ background: {rgba('#ffffff', .06)}; color: {C.TEXT}; border: 1px solid {rgba('#ffffff', .10)};
         border-radius: 10px; padding: 6px 12px; }}
     QComboBox:hover {{ border-color: {C.PRI}; }}
@@ -116,6 +118,22 @@ def read_cfg() -> dict:
         return json.loads(config_path().read_text(encoding="utf-8"))
     except Exception:
         return {}
+
+
+HOTKEY_DEFAULTS = {"mute": "F4", "fullscreen": "F11", "compact": "F12"}
+HOTKEY_LABELS = {"mute": "Mute / unmute", "fullscreen": "Fullscreen", "compact": "Compact mode"}
+
+
+def hotkeys() -> dict:
+    """Window shortcuts: the defaults plus whatever the user changed in Settings."""
+    saved = read_cfg().get("hotkeys")
+    out = dict(HOTKEY_DEFAULTS)
+    if isinstance(saved, dict):
+        for k in HOTKEY_DEFAULTS:
+            v = saved.get(k)
+            if isinstance(v, str) and v.strip():
+                out[k] = v.strip()
+    return out
 
 
 def patch_cfg(**fields) -> None:

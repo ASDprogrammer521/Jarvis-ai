@@ -1,5 +1,6 @@
 from __future__ import annotations
 import re
+from pathlib import Path
 from urllib.parse import urlsplit
 
 def _get_dashboard():
@@ -58,6 +59,18 @@ def run(action=None, value="", **kwargs):
         "launch": "open_app",
         "lock_phone": "lock",
         "wake": "unlock",
+        "find_phone": "ring",
+        "find": "ring",
+        "locate": "ring",
+        "stop_ring": "ring_stop",
+        "stop_find": "ring_stop",
+        "search_contacts": "contacts",
+        "find_contact": "contacts",
+        "call_name": "call",
+        "send": "send_file",
+        "transfer": "send_file",
+        "last_call": "call_info",
+        "who_called": "call_info",
     }
     action = aliases.get(action, action)
     dashboard = _get_dashboard()
@@ -99,10 +112,30 @@ def run(action=None, value="", **kwargs):
             return "The URL format is invalid."
         sent = _push_phone(dashboard, {"type": "phone_cmd", "action": "open_url", "url": url})
         return f"URL sent to the phone 🌐 ({sent} client(s)): {url}" if sent else "The URL was not sent because the Jarvis App is disconnected."
+    if action == "call" and _looks_like_name(value):
+        sent = _push_phone(dashboard, {"type": "phone_cmd", "action": "call_contact", "value": value[:60]})
+        return (f"Looking up \"{value}\" in the phone's contacts 📇 — the result comes back in a moment. "
+                "If several people match, ask the user which one."
+                if sent else "The call was not placed because the Jarvis App is disconnected.")
+    if action == "contacts":
+        if not value:
+            return "Tell me which contact to look for."
+        sent = _push_phone(dashboard, {"type": "phone_cmd", "action": "contacts", "value": value[:60]})
+        return f"Searching contacts for \"{value}\" 📇" if sent else "The Jarvis App is disconnected."
+    if action == "call_info":
+        last = getattr(dashboard, "last_call", None) or {}
+        if not last:
+            return "No call events from the phone yet (the app needs the Phone and Call log permissions)."
+        who = last.get("name") or last.get("number") or "an unknown number"
+        label = {"incoming_call": "is ringing", "call_active": "is in progress", "call_ended": "just ended",
+                 "missed_call": "was missed"}.get(last.get("event"), last.get("event", ""))
+        return f"The last call with {who} {label}."
+    if action == "send_file":
+        return _send_file(dashboard, value)
     if action == "call":
         number = _clean_number(value)
         if not number:
-            return "Give me a phone number to call (digits, optionally starting with +)."
+            return "Give me a phone number or a contact name to call."
         sent = _push_phone(dashboard, {"type": "phone_cmd", "action": "call", "value": number})
         return (f"Calling {number} on the phone 📞 — the phone may ask for Phone permission the first time."
                 if sent else "The call was not placed because the Jarvis App is disconnected.")
@@ -123,12 +156,15 @@ def run(action=None, value="", **kwargs):
             msg["value"] = value[:80]
         sent = _push_phone(dashboard, msg)
         return f"{label} 📱" if sent else "The command was not sent because the Jarvis App is disconnected."
-    return ("The Jarvis App supports: status, notify, open_url, open_app, call, answer, reject, hangup, "
-            "call_state, sms, lock, unlock, home, flashlight, flashlight_off, location, battery, "
-            "notifications, screenshot, volume_up, volume_down.")
+    return ("The Jarvis App supports: status, call (number or contact name), contacts, answer, reject, hangup, "
+            "call_state, call_info, sms, ring (find phone), ring_stop, send_file, notify, open_url, open_app, "
+            "lock, unlock, home, flashlight, flashlight_off, location, battery, notifications, screenshot, "
+            "volume_up, volume_down.")
 
 
 _SIMPLE = {
+    "ring": ("Phone is ringing loudly — say 'stop ringing' when you find it", "ring"),
+    "ring_stop": ("Stopped the phone ringing", "ring_stop"),
     "answer": ("Answer requested", "answer"),
     "reject": ("Reject requested", "reject"),
     "hangup": ("Hang-up requested", "hangup"),
@@ -148,6 +184,36 @@ _SIMPLE = {
 }
 
 
+_BLOCKED_PARTS = {".ssh", ".gnupg", "certs"}
+_BLOCKED_NAMES = {"api_keys.json", "jarvis.key", "id_rsa", "id_ed25519", ".env"}
+
+
+def _looks_like_name(value: str) -> bool:
+    """A contact name has letters; a phone number does not."""
+    return len(re.findall(r"[^\W\d_]", str(value or ""), flags=re.UNICODE)) >= 2
+
+
+def _send_file(dashboard, value: str) -> str:
+    """PC → phone: hand out a one-file, 15-minute link and tell the phone to fetch it."""
+    if not value:
+        return "Give me the path of the file to send to the phone."
+    path = Path(value.strip().strip('"')).expanduser()
+    if not path.is_file():
+        return f"I can't find the file {path}."
+    parts = {p.lower() for p in path.resolve().parts}
+    if path.name.lower() in _BLOCKED_NAMES or parts & _BLOCKED_PARTS:
+        return "I won't send keys, certificates or credential files to the phone."
+    if not hasattr(dashboard, "share_file"):
+        return "File sharing needs the updated Jarvis dashboard."
+    try:
+        url_path, name = dashboard.share_file(path)
+    except Exception as exc:
+        return f"Could not prepare the file: {exc}"
+    sent = _push_phone(dashboard, {"type": "phone_cmd", "action": "fetch_file", "url": url_path, "name": name})
+    return (f"Sending {name} to the phone 📁 — it lands in Downloads/Jarvis."
+            if sent else "The file was not sent because the Jarvis App is disconnected.")
+
+
 def _clean_number(raw) -> str:
     """Keep digits and one leading '+'; reject anything that is not a plausible phone number."""
     raw = str(raw or "").strip()
@@ -157,16 +223,18 @@ def _clean_number(raw) -> str:
 TOOL = {
     "name": "phone_control",
     "description": (
-        "Controls the user's paired Android phone through the Jarvis App: MAKE A PHONE CALL (action=call, value=number), "
-        "answer / reject / hang up a call, check call state, send an SMS (value='number|text'), show a message, "
-        "open a link or an app, lock / wake the phone, flashlight, location, battery, notifications, screenshot, volume. "
-        "A call needs a phone NUMBER — if the user gives only a name, ask for the number; never invent one."
+        "Controls the user's paired Android phone through the Jarvis App: MAKE A PHONE CALL (action=call, value=a number OR a contact name like 'Akam' — "
+        "the phone looks the name up in its address book), answer / reject / hang up a call, say who is calling "
+        "(call_info), FIND THE PHONE (ring loudly, even if silent), send a file from this PC to the phone "
+        "(send_file, value=path), send an SMS (value='number|text'), show a message, open a link or an app, lock / wake "
+        "the phone, flashlight, location, battery, notifications, screenshot, volume. "
+        "Incoming calls are announced automatically; when the user says answer / reject, call this tool."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "status | call | answer | reject | hangup | call_state | sms | notify | open_url | open_app | lock | unlock | home | flashlight | flashlight_off | location | battery | notifications | screenshot | volume_up | volume_down"},
-            "value": {"type": "STRING", "description": "Phone number (call), 'number|text' (sms), message text (notify), HTTP(S) URL (open_url) or app name (open_app)"},
+            "action": {"type": "STRING", "description": "status | call | contacts | call_info | send_file | ring | ring_stop | answer | reject | hangup | call_state | sms | notify | open_url | open_app | lock | unlock | home | flashlight | flashlight_off | location | battery | notifications | screenshot | volume_up | volume_down"},
+            "value": {"type": "STRING", "description": "Phone number OR contact name (call), name (contacts), file path on this PC (send_file), 'number|text' (sms), message text (notify), HTTP(S) URL (open_url) or app name (open_app)"},
         },
         "required": ["action"],
     },

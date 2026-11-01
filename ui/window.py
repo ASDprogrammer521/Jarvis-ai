@@ -12,7 +12,7 @@ import webbrowser
 from pathlib import Path
 
 from PyQt6.QtCore import QCoreApplication, QEasingCurve, QPoint, QPropertyAnimation, QRectF, Qt, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QFont, QImage, QPainter, QPen, QPixmap, QRadialGradient, QSurfaceFormat
+from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QFont, QImage, QKeySequence, QPainter, QPen, QPixmap, QRadialGradient, QSurfaceFormat
 from PyQt6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
     QPushButton, QStackedWidget, QTextEdit, QVBoxLayout, QWidget,
@@ -254,10 +254,10 @@ class MainWindow(QMainWindow):
         root.setSpacing(14)
 
         side = GlassCard(radius=26, tint=140)
-        side.setFixedWidth(228)
+        side.setFixedWidth(236)
         sl = QVBoxLayout(side)
         sl.setContentsMargins(16, 18, 16, 14)
-        sl.setSpacing(4)
+        sl.setSpacing(6)
         brand = QHBoxLayout()
         brand.setSpacing(10)
         brand.addWidget(LogoMark())
@@ -314,7 +314,7 @@ class MainWindow(QMainWindow):
         self.pill = StatePill()
         hl.addWidget(self.pill)
         self.sub = QLabel("")
-        self.sub.setStyleSheet(f"color: {C.TEXT_MED};")
+        self.sub.setStyleSheet(f"color: {C.TEXT_MED}; font-size: 12px;")
         hl.addWidget(self.sub)
         hl.addStretch()
         self.clock = QLabel("--:--")
@@ -326,7 +326,7 @@ class MainWindow(QMainWindow):
         cb.addWidget(self.clock, 0, Qt.AlignmentFlag.AlignRight)
         cb.addWidget(self.date, 0, Qt.AlignmentFlag.AlignRight)
         hl.addLayout(cb)
-        fs = IconButton("full", 40, tip="Fullscreen  F11")
+        fs = IconButton("full", 40, tip=f"Fullscreen  {__import__('ui.theme', fromlist=['hotkeys']).hotkeys()['fullscreen']}")
         fs.clicked.connect(self.toggle_fullscreen)
         hl.addWidget(fs)
         col.addWidget(head)
@@ -347,7 +347,7 @@ class MainWindow(QMainWindow):
         hv.addWidget(self.hero_title)
         tag = QLabel("Always here. Always listening.")
         tag.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        tag.setStyleSheet(f"color: {C.PRI}; font-size: 13px;")
+        tag.setStyleSheet(f"color: {C.PRI}; font-size: 14px; letter-spacing: 1px;")
         hv.addWidget(tag)
         hv.addSpacing(6)
         self.home_bar = InputBar(attach=False)
@@ -358,7 +358,7 @@ class MainWindow(QMainWindow):
         chips.addStretch()
         for label, kind in (("Open apps", "apps"), ("Search web", "web"), ("System info", "sys"), ("Create task", "task")):
             c = GlowButton(label, "ghost", pill=True)
-            c.setMinimumHeight(34)
+            c.setMinimumHeight(38)
             c.clicked.connect(lambda _=False, k=kind: self._chip(k))
             chips.addWidget(c)
         chips.addStretch()
@@ -372,7 +372,7 @@ class MainWindow(QMainWindow):
         cv.setSpacing(10)
         ch = QHBoxLayout()
         ct = QLabel("Conversation")
-        ct.setFont(font(13, QFont.Weight.Bold))
+        ct.setFont(font(14, QFont.Weight.Bold))
         ch.addWidget(ct)
         ch.addStretch()
         clr = IconButton("close", 32, tip="Clear conversation", flat=True)
@@ -390,6 +390,8 @@ class MainWindow(QMainWindow):
         self.dash.toast.connect(self._toast)
         self.pages.addWidget(self.dash)
         self.phone_page = PhonePage()
+        self.phone_page.command.connect(self._phone_command)
+        self.phone_page.toast.connect(self._toast)
         self.pages.addWidget(self.phone_page)
         col.addWidget(self.pages, 1)
         root.addLayout(col, 1)
@@ -1027,7 +1029,7 @@ class MainWindow(QMainWindow):
         if not info:
             self.write_log("SYS: Remote dashboard unavailable.")
             return
-        self.modal.present(RemotePanel(info, self._remote_info), 440, 560)
+        self.modal.present(RemotePanel(info, self._remote_info), 440, 610)
 
     def toggle_fullscreen(self):
         self.showNormal() if self.isFullScreen() else self.showFullScreen()
@@ -1178,6 +1180,21 @@ class MainWindow(QMainWindow):
             self.phone_page.set_devices(event.get("devices") or [])
         elif event.get("type") == "phone_notification":
             self.phone_page.add_message(event)
+        elif event.get("type") == "phone_call":
+            self.phone_page.on_call(event)
+            who = event.get("name") or event.get("number") or "unknown number"
+            if event.get("event") == "incoming_call":
+                self._toast_sig.emit(f"📞 Incoming call — {who}")
+            elif event.get("event") == "missed_call":
+                self._toast_sig.emit(f"❌ Missed call — {who}")
+
+    on_phone_command = None          # set by main: fn(action, value)
+
+    def _phone_command(self, action, value):
+        if self.on_phone_command:
+            self.on_phone_command(str(action), str(value))
+        else:
+            self._toast_sig.emit("Phone control is not ready yet")
 
     def notify_phone_connected(self):
         self._toast_sig.emit("📱 Phone connected")
@@ -1336,13 +1353,27 @@ class MainWindow(QMainWindow):
         self._ready = True
         self.write_log("SYS: API key saved.")
 
+    def reload_hotkeys(self):
+        """Re-read the shortcuts after Settings changed them."""
+        from ui.theme import hotkeys
+        self._hk_map = {seq: act for act, seq in hotkeys().items()}
+
+    def _hotkey_action(self, e):
+        if not hasattr(self, "_hk_map"):
+            self.reload_hotkeys()
+        try:
+            return self._hk_map.get(QKeySequence(e.keyCombination()).toString())
+        except Exception:
+            return None
+
     def keyPressEvent(self, e):
         k = e.key()
-        if k == Qt.Key.Key_F4:
+        hk = self._hotkey_action(e)
+        if hk == "mute":
             self.toggle_mute()
-        elif k == Qt.Key.Key_F11:
+        elif hk == "fullscreen":
             self.toggle_fullscreen()
-        elif k == Qt.Key.Key_F12:
+        elif hk == "compact":
             self.enter_compact()
         elif k == Qt.Key.Key_Escape and self.isFullScreen() and not self.modal.is_open():
             self.showNormal()
@@ -1387,7 +1418,7 @@ class JarvisUI:
     _FORWARD = {
         "on_text_command", "on_remote_clicked", "on_interrupt", "on_voice_change", "on_audio_device_change",
         "get_plugins", "get_plugin_settings", "on_wake_toggle", "on_wake_manual", "on_wake_install",
-        "on_push_to_talk", "ptt_hold", "wake_get_state",
+        "on_push_to_talk", "ptt_hold", "wake_get_state", "on_phone_command",
     }
 
     def __init__(self):
@@ -1431,6 +1462,9 @@ class JarvisUI:
     @property
     def current_file(self):
         return self._win.current_file
+
+    def set_phone_link_provider(self, fn):
+        self._win.phone_page.set_link_provider(fn)
 
     def wait_for_api_key(self):
         while not self._win._ready:

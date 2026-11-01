@@ -4,14 +4,14 @@ import threading
 import time
 
 from PyQt6.QtCore import QRectF, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont, QPixmap
+from PyQt6.QtGui import QFont, QKeySequence, QPixmap
 from PyQt6.QtWidgets import (
-    QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QApplication, QComboBox, QFrame, QHBoxLayout, QKeySequenceEdit, QLabel, QLineEdit, QPushButton,
     QSlider, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from ui.fx import GL_ENABLED, GlassCard, GlowButton, Toggle, fade_in
-from ui.theme import C, DEFAULT_ACCENT, read_cfg, rgba
+from ui.theme import C, DEFAULT_ACCENT, HOTKEY_DEFAULTS, HOTKEY_LABELS, hotkeys, patch_cfg, read_cfg, rgba
 from ui.widgets import (
     HueSlider, IconButton, Segmented, divider, font, make_page, section_label, setting_row,
 )
@@ -277,8 +277,8 @@ class SettingsPanel(GlassCard):
         lay.addWidget(pl)
         lay.addWidget(section_label("Window"))
         row = QHBoxLayout()
-        for text, fn, closes in (("Fullscreen  F11", w.toggle_fullscreen, True),
-                                 ("Compact mode  F12", w.enter_compact, True),
+        for text, fn, closes in (("Fullscreen", w.toggle_fullscreen, True),
+                                 ("Compact mode", w.enter_compact, True),
                                  ("Desktop shortcut", w.create_shortcut, False)):
             b = GlowButton(text)
             b.clicked.connect(lambda _=False, f=fn, c=closes: (w.close_modal() if c else None, f()))
@@ -483,8 +483,46 @@ class SettingsPanel(GlassCard):
         rc.clicked.connect(lambda: (w.close_modal(), QTimer.singleShot(330, w.open_remote)))
         lay.addWidget(rc, 0, Qt.AlignmentFlag.AlignLeft)
         lay.addWidget(section_label("Shortcuts"))
-        for k, d in (("F4", "Mute / unmute"), ("F11", "Fullscreen"), ("F12", "Compact mode"),
-                     ("Ctrl+Space", "Push-to-talk (hold)"), ("Esc", "Close panel / exit fullscreen")):
+        note = QLabel("Click a box and press the keys you want. Works while the Jarvis window has focus.")
+        note.setWordWrap(True)
+        note.setStyleSheet(f"color: {C.TEXT_DIM};")
+        lay.addWidget(note)
+        editors: dict = {}
+
+        def save_hotkey(action: str):
+            ed = editors[action]
+            seq = ed.keySequence().toString()
+            current = hotkeys()
+            if not seq:
+                seq = HOTKEY_DEFAULTS[action]
+            clash = [HOTKEY_LABELS[a] for a, v in current.items() if a != action and v == seq]
+            if clash:
+                w.write_log(f"SYS: {seq} is already used for {clash[0]}.")
+                ed.setKeySequence(QKeySequence(current[action]))
+                return
+            current[action] = seq
+            patch_cfg(hotkeys=current)
+            ed.setKeySequence(QKeySequence(seq))
+            ed.clearFocus()
+            w.reload_hotkeys()
+
+        for action, label in HOTKEY_LABELS.items():
+            ed = QKeySequenceEdit(QKeySequence(hotkeys()[action]))
+            ed.setMaximumSequenceLength(1)
+            ed.setFixedWidth(150)
+            ed.editingFinished.connect(lambda a=action: save_hotkey(a))
+            editors[action] = ed
+            lay.addWidget(setting_row(label, "", ed))
+        rs = GlowButton("Reset shortcuts", "ghost")
+
+        def reset_hotkeys():
+            patch_cfg(hotkeys=dict(HOTKEY_DEFAULTS))
+            for a, ed in editors.items():
+                ed.setKeySequence(QKeySequence(HOTKEY_DEFAULTS[a]))
+            w.reload_hotkeys()
+        rs.clicked.connect(reset_hotkeys)
+        lay.addWidget(rs, 0, Qt.AlignmentFlag.AlignLeft)
+        for k, d in (("Ctrl+Space", "Push-to-talk (hold)"), ("Esc", "Close panel / exit fullscreen")):
             lay.addWidget(setting_row(k, d, None))
 
 
@@ -593,6 +631,12 @@ class RemotePanel(GlassCard):
         self.url.setStyleSheet(f"color: {C.PRI};")
         self.url.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         lay.addWidget(self.url)
+        self.secure = QLabel()
+        self.secure.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.secure.setWordWrap(True)
+        self.secure.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.secure.setStyleSheet(f"color: {C.TEXT_DIM}; font-size: 9px;")
+        lay.addWidget(self.secure)
         self.key = QLabel()
         self.key.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.key.setFont(font(20, QFont.Weight.Bold))
@@ -617,8 +661,13 @@ class RemotePanel(GlassCard):
         self._tm.start(1000)
 
     def _apply(self, info):
-        url, key, auto, manual = (list(info) + ["", "", "", ""])[:4]
+        url, key, auto, manual, fingerprint = (list(info) + ["", "", "", "", ""])[:5]
         self.url.setText(manual or url)
+        if str(manual or url).startswith("https://"):
+            self.secure.setText("🔒 Encrypted (HTTPS). Your phone will pin this certificate on first pairing."
+                                + (f"\nSHA-256  {fingerprint}" if fingerprint else ""))
+        else:
+            self.secure.setText("⚠ Plain HTTP — set JARVIS_TLS=1 for an encrypted link.")
         self.key.setText(str(key))
         self._expiry = time.time() + 600
         self._qr(auto or url)

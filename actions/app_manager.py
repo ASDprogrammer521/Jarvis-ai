@@ -247,6 +247,218 @@ def window_op(action: str, name: str, player=None) -> str:
     return f"{verb} {name}, sir."
 
 
+# ───────────────────────── window layout: snap · tile · other monitor ─────────────────────────
+SIDES = ("left", "right", "top", "bottom", "center", "full", "topleft", "topright", "bottomleft", "bottomright")
+_SIDE_WORDS = {"l": "left", "r": "right", "up": "top", "upper": "top", "down": "bottom", "lower": "bottom",
+               "middle": "center", "centre": "center", "max": "full", "maximize": "full", "fullscreen": "full",
+               "top left": "topleft", "top right": "topright", "bottom left": "bottomleft", "bottom right": "bottomright"}
+
+
+def _side(raw: str) -> str:
+    raw = (raw or "").lower().strip().replace("-", " ").replace("_", " ")
+    raw = _SIDE_WORDS.get(raw, raw.replace(" ", ""))
+    return raw if raw in SIDES else ""
+
+
+def _rect_for(side: str, area: tuple) -> tuple:
+    """area = (x, y, w, h) → the window rectangle for that side."""
+    x, y, w, h = area
+    hw, hh = w // 2, h // 2
+    return {
+        "left": (x, y, hw, h), "right": (x + hw, y, w - hw, h),
+        "top": (x, y, w, hh), "bottom": (x, y + hh, w, h - hh),
+        "topleft": (x, y, hw, hh), "topright": (x + hw, y, w - hw, hh),
+        "bottomleft": (x, y + hh, hw, h - hh), "bottomright": (x + hw, y + hh, w - hw, h - hh),
+        "center": (x + w // 6, y + h // 8, w * 2 // 3, h * 3 // 4),
+        "full": (x, y, w, h),
+    }[side]
+
+
+def _win_monitors() -> list:
+    """Work areas (x, y, w, h) of every monitor, left-to-right."""
+    import ctypes
+    from ctypes import wintypes
+    u = ctypes.WinDLL("user32", use_last_error=True)
+
+    class RECT(ctypes.Structure):
+        _fields_ = [("l", wintypes.LONG), ("t", wintypes.LONG), ("r", wintypes.LONG), ("b", wintypes.LONG)]
+
+    class MI(ctypes.Structure):
+        _fields_ = [("cb", wintypes.DWORD), ("mon", RECT), ("work", RECT), ("flags", wintypes.DWORD)]
+
+    out: list = []
+    PROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HANDLE, wintypes.HDC, ctypes.POINTER(RECT), wintypes.LPARAM)
+
+    def cb(hmon, _hdc, _rc, _lp):
+        mi = MI()
+        mi.cb = ctypes.sizeof(MI)
+        if u.GetMonitorInfoW(hmon, ctypes.byref(mi)):
+            w = mi.work
+            out.append((w.l, w.t, w.r - w.l, w.b - w.t))
+        return True
+
+    u.EnumDisplayMonitors(None, None, PROC(cb), 0)
+    return sorted(out) or [(0, 0, u.GetSystemMetrics(0), u.GetSystemMetrics(1))]
+
+
+def _win_area_of(hwnd, monitors: list) -> tuple:
+    import ctypes
+    from ctypes import wintypes
+
+    class RECT(ctypes.Structure):
+        _fields_ = [("l", wintypes.LONG), ("t", wintypes.LONG), ("r", wintypes.LONG), ("b", wintypes.LONG)]
+
+    u = ctypes.WinDLL("user32", use_last_error=True)
+    r = RECT()
+    u.GetWindowRect(hwnd, ctypes.byref(r))
+    cx, cy = (r.l + r.r) // 2, (r.t + r.b) // 2
+    for m in monitors:
+        if m[0] <= cx < m[0] + m[2] and m[1] <= cy < m[1] + m[3]:
+            return m
+    return monitors[0]
+
+
+def _win_place(hwnd, rect: tuple) -> None:
+    import ctypes
+    u = ctypes.WinDLL("user32", use_last_error=True)
+    u.ShowWindow(hwnd, 9)                     # restore first: a maximized window ignores SetWindowPos
+    x, y, w, h = rect
+    u.SetWindowPos(hwnd, None, int(x), int(y), int(w), int(h), 0x0004 | 0x0010)   # no z-order change, no activate
+    u.SetForegroundWindow(hwnd)
+
+
+def _first_window(name: str):
+    """(procs, handle-or-id) of the named app's main window on this OS, or (procs, None)."""
+    target = _target(name)
+    procs = _matches(target) if target else []
+    pids = {p.pid for p in procs}
+    if _OS == "Windows":
+        wins = _win_handles(pids, name)
+        return procs, (wins[0][0] if wins else None)
+    if _OS == "Linux":
+        import shutil
+        if not shutil.which("wmctrl"):
+            raise RuntimeError("wmctrl is not installed (sudo apt install wmctrl)")
+        out = subprocess.run(["wmctrl", "-lp"], capture_output=True, text=True, timeout=4).stdout
+        hint = (name or "").lower()
+        for line in out.splitlines():
+            parts = line.split(None, 4)
+            if len(parts) == 5 and int(parts[2]) not in own_pids() and (
+                    int(parts[2]) in pids or (len(hint) >= 3 and hint in parts[4].lower())):
+                return procs, parts[0]
+        return procs, None
+    return procs, (procs[0].info["name"].rsplit(".", 1)[0] if procs else None)
+
+
+def _screen_area() -> tuple:
+    import pyautogui
+    s = pyautogui.size()
+    return (0, 0, int(s.width), int(s.height) - (25 if _OS == "Darwin" else 0))
+
+
+def _place_generic(handle, rect: tuple) -> None:
+    x, y, w, h = [int(v) for v in rect]
+    if _OS == "Linux":
+        subprocess.run(["wmctrl", "-i", "-r", handle, "-b", "remove,maximized_vert,maximized_horz,hidden"],
+                       capture_output=True, timeout=4)
+        subprocess.run(["wmctrl", "-i", "-r", handle, "-e", f"0,{x},{y},{w},{h}"], capture_output=True, timeout=4)
+        subprocess.run(["wmctrl", "-i", "-a", handle], capture_output=True, timeout=4)
+    else:   # macOS: System Events, process name
+        script = (f'tell application "System Events" to tell process "{handle}"\n'
+                  f'set frontmost to true\nset position of window 1 to {{{x}, {y}}}\n'
+                  f'set size of window 1 to {{{w}, {h}}}\nend tell')
+        subprocess.run(["osascript", "-e", script], capture_output=True, timeout=6)
+
+
+def snap_window(name: str, side: str, player=None) -> str:
+    """Put a named app's window on one half / quarter / the centre of its monitor."""
+    side = _side(side)
+    if not side:
+        return f"Say where: {', '.join(SIDES)}."
+    if _target(name) in ("jarvis", "main", "python", "pythonw", ""):
+        return "Tell me which app's window to move, sir."
+    try:
+        procs, handle = _first_window(name)
+        if handle is None:
+            return f"I don't see {name} running, sir." if not procs else f"{name} has no window I can move."
+        if _OS == "Windows":
+            mons = _win_monitors()
+            _win_place(handle, _rect_for(side, _win_area_of(handle, mons)))
+        else:
+            _place_generic(handle, _rect_for(side, _screen_area()))
+    except Exception as e:
+        return f"I couldn't move {name}: {e}"
+    log(f"[Apps] {name} → {side}", player)
+    return f"{name} is on the {side}, sir."
+
+
+def tile_windows(left: str, right: str, player=None) -> str:
+    """Two apps side by side — the first on the left, the second on the right."""
+    if not left or not right:
+        return "Tell me two apps to put side by side, sir."
+    a = snap_window(left, "left", player)
+    b = snap_window(right, "right", player)
+    if "on the left" in a and "on the right" in b:
+        return f"{left} on the left and {right} on the right, sir."
+    return " ".join(m for m in (a, b) if "on the" not in m) or f"{a} {b}"
+
+
+def move_to_monitor(name: str, which: str = "next", player=None) -> str:
+    """Send a named app's window to the next monitor (or monitor number N)."""
+    if _OS != "Windows":
+        return "Moving windows between monitors is supported on Windows only."
+    try:
+        import ctypes
+        procs, hwnd = _first_window(name)
+        if hwnd is None:
+            return f"I don't see {name} running, sir." if not procs else f"{name} has no window I can move."
+        mons = _win_monitors()
+        if len(mons) < 2:
+            return "There is only one monitor connected, sir."
+        here = _win_area_of(hwnd, mons)
+        idx = mons.index(here)
+        w = str(which or "next").lower().strip()
+        if w.isdigit():
+            nxt = max(1, min(len(mons), int(w))) - 1
+        elif w in ("previous", "prev", "left"):
+            nxt = (idx - 1) % len(mons)
+        else:
+            nxt = (idx + 1) % len(mons)
+        dst = mons[nxt]
+        u = ctypes.WinDLL("user32", use_last_error=True)
+        zoomed = bool(u.IsZoomed(hwnd))
+        u.ShowWindow(hwnd, 9)
+        # keep the window's size and its relative position on the monitor
+        import ctypes.wintypes as wt
+
+        class RECT(ctypes.Structure):
+            _fields_ = [("l", wt.LONG), ("t", wt.LONG), ("r", wt.LONG), ("b", wt.LONG)]
+
+        r = RECT()
+        u.GetWindowRect(hwnd, ctypes.byref(r))
+        ww, wh = min(r.r - r.l, dst[2]), min(r.b - r.t, dst[3])
+        rx, ry = (r.l - here[0]) / max(here[2], 1), (r.t - here[1]) / max(here[3], 1)
+        nx = dst[0] + int(max(0, min(rx, 1 - ww / dst[2])) * dst[2])
+        ny = dst[1] + int(max(0, min(ry, 1 - wh / dst[3])) * dst[3])
+        u.SetWindowPos(hwnd, None, nx, ny, ww, wh, 0x0004 | 0x0010)
+        if zoomed:
+            u.ShowWindow(hwnd, 3)
+    except Exception as e:
+        return f"I couldn't move {name}: {e}"
+    log(f"[Apps] {name} → monitor {nxt + 1}", player)
+    return f"Moved {name} to monitor {nxt + 1}, sir."
+
+
+def minimize_all(player=None) -> str:
+    """Show the desktop (hide every window)."""
+    try:
+        from actions.computer_settings import ACTION_MAP
+        ACTION_MAP["show_desktop"]()
+        return "All windows minimized, sir."
+    except Exception as e:
+        return f"I couldn't minimize everything: {e}"
+
+
 def top_apps(sort: str, n: int) -> str:
     import psutil
     groups: dict = {}
@@ -332,6 +544,14 @@ def app_manager(parameters: dict, player=None, speak=None) -> str:
             return close_app(str(p.get("name") or ""), force if force is not None else None, player)
         if action in ("minimize", "maximize", "restore", "focus", "unminimize", "show", "bring", "open"):
             return window_op(action, str(p.get("name") or p.get("app") or ""), player)
+        if action in ("snap", "dock", "move", "place"):
+            return snap_window(str(p.get("name") or ""), str(p.get("side") or p.get("position") or ""), player)
+        if action in ("tile", "split", "side_by_side", "arrange"):
+            return tile_windows(str(p.get("name") or ""), str(p.get("name2") or p.get("other") or ""), player)
+        if action in ("next_monitor", "monitor", "move_monitor", "other_monitor"):
+            return move_to_monitor(str(p.get("name") or ""), str(p.get("monitor") or "next"), player)
+        if action in ("minimize_all", "show_desktop", "hide_all", "clear_desktop"):
+            return minimize_all(player)
         if action in ("top", "list", "usage", "ram", "cpu"):
             sort = "cpu" if action == "cpu" or str(p.get("sort") or "").lower() == "cpu" else "memory"
             text = top_apps(sort, int(p.get("count") or 8))
@@ -349,14 +569,15 @@ def app_manager(parameters: dict, player=None, speak=None) -> str:
         return "Sir, I need the 'psutil' package: pip install psutil"
     except Exception as e:
         return f"App manager failed: {e}"
-    return "Unknown action. Available: close, minimize, maximize, restore, focus, top, find, startup."
+    return "Unknown action. Available: close, minimize, maximize, restore, focus, snap, tile, next_monitor, minimize_all, top, find, startup."
 
 
 TOOL = {
     "name": "app_manager",
     "description": (
         "Controls a NAMED application (Discord, Chrome, Spotify, Steam, any program): close/quit it, MINIMIZE, "
-        "MAXIMIZE, RESTORE or bring its window to the FRONT; also shows which apps use the most RAM or CPU, checks "
+        "MAXIMIZE, RESTORE or bring its window to the FRONT; SNAP it to the left / right / top / bottom / a corner / "
+        "centre of the screen, put TWO apps side by side (tile), send it to the NEXT MONITOR, or minimize everything; also shows which apps use the most RAM or CPU, checks "
         "whether an app is running, and lists programs that start with the computer. "
         "ALWAYS use this when the user names an app with close, quit, exit, kill, minimize, maximize, restore or "
         "'bring up' — never use computer_settings minimize/maximize or Alt+F4 for a named app: those act on the "
@@ -365,7 +586,10 @@ TOOL = {
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "close | minimize | maximize | restore | focus | top | find | startup"},
+            "action": {"type": "STRING", "description": "close | minimize | maximize | restore | focus | snap | tile | next_monitor | minimize_all | top | find | startup"},
+            "side": {"type": "STRING", "description": "For snap: left | right | top | bottom | center | full | topleft | topright | bottomleft | bottomright"},
+            "name2": {"type": "STRING", "description": "For tile: the second app (it goes on the right; `name` goes on the left)"},
+            "monitor": {"type": "STRING", "description": "For next_monitor: next | previous | a monitor number"},
             "name": {"type": "STRING", "description": "App name for close/minimize/maximize/restore/focus/find, e.g. 'Discord', 'Chrome'"},
             "force": {"type": "BOOLEAN", "description": "End the app even if it asks to save (for 'force close')"},
             "sort": {"type": "STRING", "description": "memory | cpu (for top)"},
