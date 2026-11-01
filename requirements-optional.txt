@@ -1,0 +1,18 @@
+# Optional tool dependencies
+playwright>=1.40,<2
+opencv-python>=4.8,<5
+python-pptx
+openpyxl
+google-api-python-client
+google-auth-oauthlib
+tinytuya
+pdfplumber                   # file_processor — PDF text and tables
+PyPDF2                       # file_processor — PDF fallback reader
+python-docx                  # file_processor — .docx reading
+paho-mqtt                    # printer_control plugin — MQTT printers
+mediapipe>=0.10
+pypdf>=4
+pymupdf>=1.24
+pytesseract>=0.3
+docx2pdf; sys_platform == "win32"
+yt-dlp>=2024.1             # optional YouTube URL resolver for muted HUD video
