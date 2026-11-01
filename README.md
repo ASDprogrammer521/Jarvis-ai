@@ -38,8 +38,6 @@ Voice, vision, desktop control, holographic HUD, and phone companion — one sys
 3. Extract the zip → run **`Jarvis.exe`**
 4. Enter your **Gemini API key** on first launch
 
-**Website / landing page:** link the same URL  
-`https://github.com/ASDprogrammer521/Jarvis-ai/releases/latest`
 
 > Windows may show SmartScreen (unsigned build) → **More info → Run anyway**.
 
@@ -88,8 +86,8 @@ python main.py
 | 💎 **Modern & Clean UI** | Dashboard · Chat · Settings tabs with a cinematic HUD |
 | 🧑‍🚀 **HUD modes & 3D models** | Holo · Crystal · Globe · Knot · Helix · Face — or drop in your own `.obj` |
 | 🎙️ **Voice + Wake word** | Push-to-talk, open mic, mute, optional local "Hey Jarvis" wake word |
-| 📱 **Jarvis App (phone)** | Native Android app + browser companion — **call by name or number**, incoming-call alerts on the PC, find my phone, big file transfer, SMS, lock, locate — no ADB |
-| 🔒 **Encrypted link** | HTTPS / WSS by default with a self-signed certificate the phone pins on first pairing |
+| 📱 **Jarvis App (phone)** | Native Android app — **call by name or number**, incoming-call alerts on the PC, find my phone, big file transfer, SMS, lock, locate — no ADB. A lightweight browser page covers chat and basic commands |
+| 🔒 **Encrypted link** | HTTPS / WSS by default. Jarvis makes its own certificate automatically — nothing to buy or install |
 | 🧩 **Modes** | "Work mode" opens and arranges a whole set-up; save your own by voice |
 | 🪟 **Window control by name** | "Minimize Discord", "snap Chrome left", "Chrome and Discord side by side", "move Chrome to the other monitor" act on *that* app's window |
 | ⌨️ **Custom shortcuts** | Mute, fullscreen and compact mode keys are yours to change in Settings → Shortcuts |
@@ -117,28 +115,6 @@ python main.py
 | **Developer** | `code_helper` write / edit / run code · `dev_agent` multi-file projects |
 
 Each tool is a drop-in file in `actions/`, discovered automatically.
-
-------- | ----------- |
-| 💎 **Modern & Clean UI** | Dashboard · Chat · Settings tabs with a cinematic HUD |
-| 🧑‍🚀 **HUD modes** | Animated face · Reactor core · Holo sphere · Iron Man armor |
-| 📊 **Admin Dashboard** | Remote control via pairing key / browser |
-| ⚡ **Fast Automation** | Apps, files, browser, system controls, messaging |
-| 📱 **Jarvis App (phone)** | Native Android app + web companion — no ADB required |
-| 🎙️ **Voice + Wake word** | Push-to-talk, mute, local wake-word detection |
-| 🧠 **Memory** | Long-term facts you can view and delete |
-| 🔌 **Plugins + store** | Drop-in tools in `plugins/`; list / enable / disable |
-| 👤 **Profiles** | `home` · `work` · `game` presets |
-| 🔄 **Self-update** | Check GitHub for updates |
-| 🖥️ **Compact mode** | Floating always-on-top mic (F12) |
-| 💻 **Windows EXE** | Single-folder build via GitHub Releases — no Python install |
-| 🏋️ **Push-up counter** | Live webcam rep counting with form checks (depth, hips) and workout history |
-| 🍎 **Calorie & nutrition tracker** | Log meals by text or photo, daily budget and macros |
-| 📊 **Presentations (PPTX)** | Multi-slide decks with diagrams, styling and speaker notes |
-| 📝 **Word documents (DOCX)** | Create and edit formatted documents, tables and lists |
-| 📄 **PDF toolkit** | Merge, split, convert, extract text/tables, OCR scanned pages |
-| 📈 **Spreadsheets (XLSX)** | Formatted workbooks with live formulas, totals and charts |
-| 🎵 **Spotify controller** | Play, pause, skip, volume and search playlists or tracks |
-| ▶️ **YouTube** | Play videos, get info, summarize from the transcript |
 
 ---
 
@@ -222,15 +198,20 @@ Jarvis connects **out** from the phone to your PC (reverse WebSocket), so there 
 
 Caller names need **Contacts** and caller numbers need **Call log** (Android 9+ hides the number without it). Calls need the **Phone** permission. Without it Jarvis opens the dialer with the number filled in instead of dialling. Answer / reject / hang up need **Answer phone calls** (Android 8+); on some phones the system dialer may still refuse to be controlled.
 
-### Option B — Browser companion
+### Option B — Browser page (no install)
 
 ```text
 https://<PC-IP>:8000/jarvis-app
 ```
 
-Same Wi‑Fi required. The first visit shows a certificate warning because Jarvis signs its own certificate: compare the **SHA-256** fingerprint with the one in Jarvis → Phone (or the Remote control panel), then continue. The page has a phone-style keypad: **Call** hands the number to the phone's own dialer (`tel:`), and it chats with Jarvis and receives messages and links. Answering and hanging up need the APK.
+Same Wi‑Fi required. Enter the pairing key (or scan the QR code from Remote Control). The page lets you:
 
-### Phone capabilities
+* chat with Jarvis and send quick commands (status, mute, unmute);
+* read Jarvis's replies, notifications and links.
+
+**Calls are not available in the browser.** A web page cannot place, answer, reject or hang up phone calls — and has no access to contacts or the call log. Use the Android APK (Option A) for calling, SMS, incoming-call alerts and file transfer.
+
+### Phone capabilities (Android app)
 
 | Capability | Notes |
 | ---------- | ----- |
@@ -247,16 +228,33 @@ Same Wi‑Fi required. The first visit shows a certificate warning because Jarvi
 | Auto-reconnect | The service retries the link if the socket drops |
 | Background link | A foreground notification keeps the connection alive |
 
+### Do I need a certificate?
+
+**No — you do not need to buy, create or install anything.** Jarvis handles it for you:
+
+| Question | Answer |
+| -------- | ------ |
+| Who creates the certificate? | Jarvis, automatically, the first time the dashboard starts (`config/certs/`). It is generated on *your* PC, so every install has its own key. |
+| Is it a "real" (CA-signed) certificate? | No. It is **self-signed**, which is fine for a private LAN link. A public certificate (Let's Encrypt etc.) needs a domain name and is meant for websites on the internet — not for `192.168.x.x`. |
+| Does the Android app need it? | The app pins the certificate's SHA-256 fingerprint the **first time** it pairs (trust on first use). Nothing to install on the phone. |
+| Does the browser need it? | Browsers show a **warning once** because the certificate is self-signed. Compare the SHA-256 fingerprint with the one shown in Jarvis → Phone, then continue. |
+| What does it need to work? | The `cryptography` Python package (installed by `setup.py`). Without it Jarvis falls back to plain HTTP and prints a warning. |
+| Can I turn it off? | Yes: set `JARVIS_TLS=0` (see `config/env.example`). The link then becomes **unencrypted** — use only on a network you fully trust. |
+| When is a new one created? | When your PC's LAN IP changes, or if you delete `config/certs/`. Then tap **Forget PC certificate** in the app and pair again. |
+
 ### Troubleshooting
 
-- Test on the PC: `https://127.0.0.1:8000/jarvis-app` (accept the certificate warning once)
-- Allow port **8000** in Windows Firewall
-- Same Wi‑Fi (not guest isolation)
-- **ADB is optional** — the main path is the Jarvis App reverse WebSocket
-- Set Jarvis App to **Unrestricted** battery so the background link stays alive
-- "Certificate changed" in the app? You reinstalled Jarvis (new certificate) — tap **Forget PC certificate** and connect again. If you did *not* reinstall anything, treat it as a warning.
-- Need plain HTTP on a trusted network? Set the environment variable `JARVIS_TLS=0` before starting Jarvis (not recommended; see `config/env.example`).
-- A call only opens the dialer? Grant **Phone** permission in Android → Apps → Jarvis App → Permissions
+| Problem | Fix |
+| ------- | --- |
+| Can't open the page | Test on the PC first: `https://127.0.0.1:8000/jarvis-app` (accept the warning once). |
+| Phone can't reach the PC | Allow port **8000** in Windows Firewall, and use the same Wi‑Fi (not a guest network with client isolation). |
+| "Invalid or expired key" | Pairing keys last 10 minutes and work once. Get a fresh one from Remote Control. |
+| "Certificate changed" in the app | You reinstalled Jarvis or your PC's IP changed → tap **Forget PC certificate** and connect again. If you changed nothing, treat it as a warning. |
+| Link keeps dropping | Set Jarvis App to **Unrestricted** battery use. |
+| A call only opens the dialer | Grant the **Phone** permission: Android → Apps → Jarvis App → Permissions. |
+| Need plain HTTP on a trusted network | Set `JARVIS_TLS=0` before starting Jarvis (not recommended). |
+
+> ADB is **not** required — the link is the Jarvis App's reverse WebSocket.
 
 ---
 
@@ -312,7 +310,7 @@ Jarvis-ai/
 
 ## 🔒 Security
 
-* **Encrypted link.** The dashboard serves HTTPS and the app connects over WSS. Jarvis creates a self-signed certificate in `config/certs/` (and a new one if your PC's LAN address changes). The Android app pins its SHA-256 fingerprint the first time it pairs and refuses any other certificate afterwards — it never silently drops back to plain HTTP once a certificate is pinned.
+* **Encrypted link.** The dashboard serves HTTPS and the app connects over WSS. Jarvis creates a self-signed certificate in `config/certs/` automatically (and a new one if your PC's LAN address changes). The private key is never shipped with the project. The Android app pins its SHA-256 fingerprint the first time it pairs and refuses any other certificate afterwards — it never silently drops back to plain HTTP once a certificate is pinned.
 * **Pairing key.** A one-time key (valid ten minutes) turns into a session token; "revoke devices" ends all sessions.
 * **Confirmations.** Shutdown, restart and outgoing messages need your click on the PC. A shutdown asked for from the phone starts a 15-second countdown (`shutdown /a` cancels it).
 * **Files.** PC → phone transfers are single-file links that expire; keys, certificates and `api_keys.json` are never sent.
