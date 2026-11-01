@@ -57,6 +57,7 @@ class MainActivity : AppCompatActivity() {
         val connectedBar = findViewById<View>(R.id.connectedBar)
         val linkedHost = findViewById<TextView>(R.id.linkedHost)
         callStateLabel = findViewById(R.id.callState)
+        val linkSecurity = findViewById<TextView>(R.id.linkSecurity)
 
         val prefs = getSharedPreferences("jarvis", Context.MODE_PRIVATE)
         hostInput.setText(prefs.getString("host", ""))
@@ -95,19 +96,16 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        findViewById<View>(R.id.forgetBtn).setOnClickListener {
+            val h = hostInput.text.toString().trim().removePrefix("https://").removePrefix("http://")
+            if (h.isEmpty()) appendLog("Enter the PC IP first") else {
+                LinkTls.forget(this, h)
+                appendLog("Forgot the certificate for $h — the next connect trusts the PC's current one")
+            }
+        }
         findViewById<View>(R.id.clearLog).setOnClickListener { logView.text = "" }
         findViewById<ImageButton>(R.id.sendBtn).setOnClickListener { sendChat() }
-        findViewById<ImageButton>(R.id.attachBtn).setOnClickListener {
-            startActivityForResult(
-                Intent.createChooser(
-                    Intent(Intent.ACTION_GET_CONTENT).apply {
-                        type = "*/*"; addCategory(Intent.CATEGORY_OPENABLE)
-                    },
-                    "Attach file"
-                ),
-                REQ_FILE
-            )
-        }
+        findViewById<ImageButton>(R.id.attachBtn).setOnClickListener { pickFile() }
 
         fun exec(action: String, value: String? = null): String {
             val o = org.json.JSONObject().put("action", action)
@@ -156,6 +154,38 @@ class MainActivity : AppCompatActivity() {
             appendLog(exec(if (torchOn) "flashlight" else "flashlight_off"))
         }
         findViewById<View>(R.id.qShot).setOnClickListener { appendLog(exec("screenshot")) }
+
+        findViewById<View>(R.id.qFind).setOnClickListener {
+            appendLog(exec(if (FindPhone.ringing) "ring_stop" else "ring"))
+        }
+        findViewById<View>(R.id.qContacts).setOnClickListener { showContacts() }
+        findViewById<View>(R.id.qFiles).setOnClickListener { pickFile() }
+
+        fun pc(cmd: String, label: String) {
+            if (JarvisLinkService.sendCommand("[PC_CONTROL] $cmd")) appendLog("Sent: $label")
+            else appendLog("Not connected")
+        }
+        findViewById<View>(R.id.qPcMute).setOnClickListener { pc("mute", "mute PC") }
+        findViewById<View>(R.id.qPcVolDown).setOnClickListener { pc("volume_down", "PC volume down") }
+        findViewById<View>(R.id.qPcVolUp).setOnClickListener { pc("volume_up", "PC volume up") }
+        findViewById<View>(R.id.qPcPlay).setOnClickListener { pc("play_pause", "play / pause") }
+        findViewById<View>(R.id.qPcPrev).setOnClickListener { pc("prev", "previous track") }
+        findViewById<View>(R.id.qPcNext).setOnClickListener { pc("next", "next track") }
+        findViewById<View>(R.id.qPcApp).setOnClickListener {
+            val input = EditText(this).apply { hint = "App name, e.g. Discord"; setSingleLine() }
+            val actions = arrayOf("Minimize", "Maximize", "Bring to front", "Close")
+            val cmds = arrayOf("minimize", "maximize", "focus", "close")
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Control an app on the PC")
+                .setView(input)
+                .setItems(actions) { _, i ->
+                    val app = input.text.toString().trim()
+                    if (app.isEmpty()) appendLog("Type the app name first")
+                    else pc("${cmds[i]} $app", "${actions[i].lowercase()} $app")
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
 
         // ── Calls ────────────────────────────────────────────────────────────
         findViewById<View>(R.id.qDial).setOnClickListener { showDialer() }
@@ -211,7 +241,14 @@ class MainActivity : AppCompatActivity() {
                 )
                 connectCard.visibility = if (online) View.GONE else View.VISIBLE
                 connectedBar.visibility = if (online) View.VISIBLE else View.GONE
-                if (online) linkedHost.text = prefs.getString("host", "") ?: ""
+                if (online) {
+                    val h = prefs.getString("host", "") ?: ""
+                    linkedHost.text = h
+                    val secure = LinkTls.base(this@MainActivity).startsWith("https://")
+                    linkSecurity.text = if (secure) "🔒 Encrypted · certificate pinned" else "⚠ Plain HTTP — not encrypted"
+                    linkSecurity.setTextColor(ContextCompat.getColor(
+                        this@MainActivity, if (secure) R.color.green else R.color.amber))
+                }
 
                 val lg = JarvisLinkService.lastLog
                 if (lg.isNotBlank() && lg != lastSeenLog) {
@@ -311,6 +348,45 @@ class MainActivity : AppCompatActivity() {
         sheet.show()
     }
 
+    private fun pickFile() {
+        startActivityForResult(
+            Intent.createChooser(
+                Intent(Intent.ACTION_GET_CONTENT).apply {
+                    type = "*/*"; addCategory(Intent.CATEGORY_OPENABLE)
+                },
+                "Send a file to the PC"
+            ),
+            REQ_FILE
+        )
+    }
+
+    private fun showContacts() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) !=
+            PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.READ_CONTACTS), REQ_PERMS)
+            appendLog("Contacts permission requested; allow it, then tap Contacts again.")
+            return
+        }
+        val input = EditText(this).apply { hint = "Name"; setSingleLine() }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Call a contact")
+            .setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Search") { _, _ ->
+                val hits = Contacts.search(this, input.text.toString())
+                if (hits.isEmpty()) { appendLog("No contact found"); return@setPositiveButton }
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("Tap to call")
+                    .setItems(hits.map { "${it.name}  ·  ${it.number}" }.toTypedArray()) { _, i ->
+                        val r = CommandExecutor.handle(
+                            this, org.json.JSONObject().put("action", "call").put("value", hits[i].number))
+                        callStateLabel.text = r; appendLog(r)
+                    }
+                    .show()
+            }
+            .show()
+    }
+
     private fun runCallAction(action: String) {
         val permission = when (action) {
             "call_status" -> Manifest.permission.READ_PHONE_STATE
@@ -346,33 +422,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestStartupPermissions() {
-        val need = mutableListOf<String>()
+        val wanted = mutableListOf(
+            Manifest.permission.CAMERA,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.CALL_PHONE,
+            Manifest.permission.SEND_SMS,
+            Manifest.permission.READ_PHONE_STATE,   // call state + incoming-call alerts on the PC
+            Manifest.permission.READ_CALL_LOG,      // caller's number on Android 9+
+            Manifest.permission.READ_CONTACTS       // "call Akam", caller names
+        )
         if (Build.VERSION.SDK_INT >= 33) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
-                need.add(Manifest.permission.POST_NOTIFICATIONS)
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED)
-                need.add(Manifest.permission.READ_MEDIA_IMAGES)
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED)
-                need.add(Manifest.permission.CAMERA)
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
-                need.add(Manifest.permission.ACCESS_FINE_LOCATION)
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
-                need.add(Manifest.permission.RECORD_AUDIO)
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED)
-                need.add(Manifest.permission.CALL_PHONE)
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED)
-                need.add(Manifest.permission.SEND_SMS)
+            wanted += Manifest.permission.POST_NOTIFICATIONS
+            wanted += Manifest.permission.READ_MEDIA_IMAGES
         } else {
-            listOf(
-                Manifest.permission.READ_EXTERNAL_STORAGE,
-                Manifest.permission.CAMERA,
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.RECORD_AUDIO,
-                Manifest.permission.CALL_PHONE,
-                Manifest.permission.SEND_SMS
-            ).forEach {
-                if (ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED) need.add(it)
-            }
+            wanted += Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        val need = wanted.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
         if (need.isNotEmpty()) {
             ActivityCompat.requestPermissions(this, need.toTypedArray(), REQ_PERMS)
@@ -428,6 +495,11 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         val size = querySize(uri)
 
+                        if (size > 400_000) {
+                            appendLog("Uploading $name (${size / 1024} KB)…")
+                            FileTransfer.upload(this, uri, name, mime)
+                            return
+                        }
                         if (size in 1..400_000) {
                             val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
                             if (bytes != null) {

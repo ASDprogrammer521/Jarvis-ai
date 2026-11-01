@@ -80,6 +80,13 @@ object CommandExecutor {
                 }
             }
             "call", "phone", "dial" -> placeCall(context, value)
+            "call_contact", "call_name" -> callContact(context, value)
+            "contacts", "find_contact", "search_contacts" -> findContacts(context, value)
+            "ring", "find_phone", "find" -> FindPhone.start(context)
+            "ring_stop", "stop_ring", "stop_find" -> FindPhone.stop(context)
+            "fetch_file", "download" -> FileTransfer.download(
+                context, msg.optString("url", value), msg.optString("name", "jarvis_file")
+            )
             "call_status", "call_state" -> callStatus(context)
             "answer", "answer_call" -> controlCall(context, "answer")
             "reject", "reject_call" -> controlCall(context, "reject")
@@ -154,6 +161,32 @@ object CommandExecutor {
             postNotice(context, "Jarvis Screen Share", "Tap to start sharing", trampoline)
             "Tap notification to start screen share"
         }
+    }
+
+    private fun callContact(context: Context, name: String): String {
+        if (!Contacts.allowed(context)) {
+            return "Contacts permission is off — open Jarvis App and allow Contacts, then ask again."
+        }
+        val hits = Contacts.search(context, name)
+        if (hits.isEmpty()) return "No contact found for \"$name\"."
+        val top = hits.first()
+        val sameName = hits.filter { it.name.equals(top.name, true) }
+        val distinctNumbers = sameName.map { it.number.filter { ch -> ch.isDigit() }.takeLast(9) }.distinct()
+        // One clear match → call it. Several people (or one person with several numbers) → ask which.
+        if (hits.size == 1 || (sameName.size == hits.size && distinctNumbers.size == 1) ||
+            (hits.size > 1 && top.name.equals(name.trim(), true) && distinctNumbers.size == 1)) {
+            return "${top.name}: " + placeCall(context, top.number)
+        }
+        return "Several matches for \"$name\": " +
+            hits.joinToString("; ") { "${it.name} (${it.number})" } +
+            ". Ask the user which one, then call by number."
+    }
+
+    private fun findContacts(context: Context, name: String): String {
+        if (!Contacts.allowed(context)) return "Contacts permission is off — allow Contacts in Jarvis App."
+        val hits = Contacts.search(context, name)
+        return if (hits.isEmpty()) "No contact found for \"$name\"."
+        else hits.joinToString("\n") { "${it.name} — ${it.number}" }
     }
 
     private fun placeCall(context: Context, raw: String): String {

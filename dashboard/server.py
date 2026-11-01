@@ -119,6 +119,22 @@ def _sanitize_phone_status(data):
     return {"type": "phone_status", "device_name": device_name,
             "battery_percent": battery, "charging": charging}
 
+_PHONE_EVENTS = {"incoming_call", "call_active", "call_ended", "missed_call", "ring_started", "ring_stopped"}
+
+
+def _sanitize_phone_event(data):
+    """Events come from the phone, and a contact's name is attacker-controllable text
+    (it ends up in what Jarvis reads), so keep only plain, short, bracket-free strings."""
+    if not isinstance(data, dict):
+        return None
+    event = str(data.get("event") or "").strip().lower()
+    if event not in _PHONE_EVENTS:
+        return None
+    number = re.sub(r"[^0-9+*#]", "", str(data.get("number") or ""))[:20]
+    name = re.sub(r"[^\w .,'’-]", "", str(data.get("name") or ""), flags=re.UNICODE).strip()[:40]
+    return {"event": event, "number": number, "name": name}
+
+
 def _make_uploads_dir() -> Path:
     """Return (and create) the cross-platform uploads folder."""
     for candidate in [
@@ -416,6 +432,33 @@ def _bind_host() -> str:
     return configured or _local_ip()
 
 
+def _cert_covers_current_ip(crt_p) -> bool:
+    """True when the saved certificate lists this PC's current LAN address."""
+    try:
+        import ipaddress
+        from cryptography import x509
+        lan = _local_ip()
+        if lan.startswith("127."):
+            return True
+        cert = x509.load_pem_x509_certificate(Path(crt_p).read_bytes())
+        san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        return ipaddress.IPv4Address(lan) in san.get_values_for_type(x509.IPAddress)
+    except Exception:
+        return True   # unreadable / unexpected: keep what the user has rather than loop
+
+
+def cert_fingerprint() -> str:
+    """SHA-256 fingerprint of the dashboard certificate (AA:BB:…), or '' if there is none."""
+    try:
+        import hashlib
+        import ssl
+        pem = (BASE_DIR / "config" / "certs" / "jarvis.crt").read_text(encoding="ascii")
+        digest = hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest().upper()
+        return ":".join(digest[i:i + 2] for i in range(0, len(digest), 2))
+    except Exception:
+        return ""
+
+
 def _ensure_certs() -> bool:
     """
     Make sure config/certs holds a TLS key pair, generating a self-signed one the
@@ -433,7 +476,15 @@ def _ensure_certs() -> bool:
     key_p = certs / "jarvis.key"
     crt_p = certs / "jarvis.crt"
     if key_p.exists() and crt_p.exists():
-        return True
+        if _cert_covers_current_ip(crt_p):
+            return True
+        # The PC's LAN address changed since the certificate was made: browsers and
+        # the phone check the address, so issue a fresh pair for the new one.
+        for old in (key_p, crt_p):
+            try:
+                old.unlink()
+            except OSError:
+                pass
 
     try:
         import datetime
@@ -524,6 +575,8 @@ class DashboardServer:
         self._device_sessions: dict[str, dict] = {}
         self._last_screen_frame = None
         self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=200)
+        self._shared_files: dict[str, tuple[Path, str, float]] = {}   # token -> (path, name, expiry)
+        self.last_call: dict               = {}
         self._uploads_dir                 = UPLOADS_DIR
         self._jarvis_app_html             = _read("jarvis_app.html")
         self.app                          = self._build_app()
@@ -539,15 +592,35 @@ class DashboardServer:
 
     @staticmethod
     def _ssl_enabled() -> bool:
-        return os.environ.get('JARVIS_TLS', '').lower() in ('1', 'true', 'yes')
+        """HTTPS is on by default; JARVIS_TLS=0 turns it off (plain HTTP, trusted LAN only)."""
+        return os.environ.get('JARVIS_TLS', '1').strip().lower() not in ('0', 'false', 'no', 'off')
 
     def get_url(self) -> str:
-        scheme = 'https' if self._ssl_enabled() else 'http'
+        active = getattr(self, '_tls_active', None)
+        scheme = 'https' if (self._ssl_enabled() if active is None else active) else 'http'
         host = _bind_host()
         advertised = self._ip if host in ('0.0.0.0', '::') else host
         if ':' in advertised and not advertised.startswith('['):
             advertised = '[' + advertised + ']'
         return f'{scheme}://{advertised}:{PORT}'
+
+    def fingerprint(self) -> str:
+        return cert_fingerprint() if getattr(self, '_tls_active', False) else ""
+
+    def share_file(self, path, ttl: int = 900) -> tuple[str, str]:
+        """Let a paired phone download one local file through a short-lived, single-purpose link.
+
+        Returns (url_path, filename). The link works only for this file, expires after
+        `ttl` seconds, and is not a login token — it cannot call any other endpoint.
+        """
+        p = Path(path).expanduser().resolve()
+        if not p.is_file():
+            raise FileNotFoundError(str(p))
+        now = time.time()
+        self._shared_files = {k: v for k, v in self._shared_files.items() if v[2] > now}
+        token = secrets.token_urlsafe(24)
+        self._shared_files[token] = (p, p.name, now + ttl)
+        return f"/api/share/{token}", p.name
 
     def get_manual_url(self) -> str:
         """Include scheme to avoid browser protocol/port guesses."""
@@ -566,6 +639,33 @@ class DashboardServer:
             return _decrypt_cbc(self._aes_key(sk), enc_b64)
         except Exception:
             return None
+
+    async def _handle_phone_event(self, event: dict) -> None:
+        """Calls and ring events from the phone: show them on the PC and let Jarvis say them."""
+        name = event["event"]
+        if name in ("incoming_call", "call_active", "call_ended", "missed_call"):
+            self.last_call = dict(event, at=time.time())
+        callback = self._phone_event_callback
+        if callback:
+            try:
+                callback({"type": "phone_call", **event})
+            except Exception:
+                pass
+        who = event.get("name") or event.get("number") or "an unknown number"
+        text = ""
+        if name == "incoming_call":
+            text = (f"[PHONE_EVENT] The user's phone is ringing: incoming call from {who}. Say in one short sentence "
+                    "who is calling and ask whether to answer or reject. If they say answer, call phone_control with "
+                    "action=answer; if reject, action=reject.")
+        elif name == "missed_call":
+            text = f"[PHONE_EVENT] The user missed a call from {who}. Mention it in one short sentence."
+        if text:
+            await self._command_queue.put(text)
+            if self._wake_callback:
+                try:
+                    self._wake_callback()
+                except Exception:
+                    pass
 
     def set_wake_callback(self, fn) -> None:
         self._wake_callback = fn
@@ -893,6 +993,13 @@ class DashboardServer:
                 pass
             return JSONResponse({"files": files})
 
+        @app.get("/api/share/{token}")
+        async def shared_file(token: str):
+            entry = self._shared_files.get(token)
+            if not entry or entry[2] < time.time() or not entry[0].is_file():
+                return JSONResponse({"error": "Link expired"}, status_code=404)
+            return FileResponse(str(entry[0]), filename=entry[1])
+
         @app.get("/uploads/{filename}")
         async def download_file(filename: str, token: str = ""):
             tok = token.strip()
@@ -990,6 +1097,10 @@ class DashboardServer:
                             self._phone_devices.pop(websocket, None)
                             self._phone_devices[websocket] = status
                             self._emit_phone_devices()
+                    elif data.get("type") == "phone_event":
+                        event = _sanitize_phone_event(data)
+                        if event:
+                            await self._handle_phone_event(event)
                     elif data.get("type") == "phone_notification" and websocket in self._phone_devices:
                         notification = _sanitize_phone_notification(data)
                         if notification and self._phone_event_callback:
@@ -1091,11 +1202,14 @@ class DashboardServer:
         host = _bind_host()
         tls = self._ssl_enabled()
         options = {}
+        if tls and not _ensure_certs():
+            print('[Dashboard] HTTPS certificate unavailable (pip install cryptography) — falling back to plain HTTP.')
+            tls = False
+        self._tls_active = tls
         if tls:
-            if not _ensure_certs():
-                raise RuntimeError('TLS requested but certificate creation failed; server NOT started')
             options = dict(ssl_keyfile=str(BASE_DIR / 'config/certs/jarvis.key'),
                            ssl_certfile=str(BASE_DIR / 'config/certs/jarvis.crt'))
+            print('[Dashboard] HTTPS on. Certificate fingerprint (SHA-256): ' + cert_fingerprint())
         elif host not in ('127.0.0.1', 'localhost', '::1'):
             print('[Dashboard] WARNING: LAN HTTP is unencrypted. Use only a trusted LAN.')
         cfg = uvicorn.Config(self.app, host=host, port=PORT, log_level='warning', **options)

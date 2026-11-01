@@ -126,6 +126,17 @@
                     android:background="@drawable/bg_btn_ghost"
                     android:clickable="true"
                     android:focusable="true" />
+                <TextView
+                    android:id="@+id/forgetBtn"
+                    android:layout_width="match_parent"
+                    android:layout_height="36dp"
+                    android:layout_marginTop="6dp"
+                    android:gravity="center"
+                    android:text="Forget PC certificate"
+                    android:textColor="@color/muted"
+                    android:textSize="11sp"
+                    android:clickable="true"
+                    android:focusable="true" />
             </LinearLayout>
 
             <!-- Connected bar (shown while online) -->
@@ -152,6 +163,13 @@
                         android:textColor="@color/text"
                         android:textSize="15sp"
                         android:textStyle="bold" />
+                    <TextView
+                        android:id="@+id/linkSecurity"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:textColor="@color/muted"
+                        android:textSize="11sp" />
                 </LinearLayout>
                 <TextView
                     android:id="@+id/disconnectBtn"
@@ -254,6 +272,9 @@
             <TextView android:id="@+id/qMic" style="@style/Tile" android:text="🎙  Voice" android:textColor="@color/text" />
             <TextView android:id="@+id/qTorch" style="@style/Tile" android:text="🔦  Torch" android:textColor="@color/text" />
             <TextView android:id="@+id/qShot" style="@style/Tile" android:text="🖼  Screenshot" android:textColor="@color/text" />
+            <TextView android:id="@+id/qFind" style="@style/Tile" android:text="📣  Find phone" android:textColor="@color/text" />
+            <TextView android:id="@+id/qContacts" style="@style/Tile" android:text="👥  Contacts" android:textColor="@color/text" />
+            <TextView android:id="@+id/qFiles" style="@style/Tile" android:text="📁  Send file" android:textColor="@color/text" />
             </GridLayout>
 
             <!-- PC control -->
@@ -262,9 +283,16 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
-                android:columnCount="2">
-                <TextView android:id="@+id/qPcLock" style="@style/Tile" android:text="🖥  Lock PC" />
-                <TextView android:id="@+id/qPcOff" style="@style/Tile" android:text="⏻  Shut down PC" android:textColor="@color/red" />
+                android:columnCount="3">
+                <TextView android:id="@+id/qPcLock" style="@style/Tile" android:text="🖥  Lock" />
+                <TextView android:id="@+id/qPcMute" style="@style/Tile" android:text="🔇  Mute" />
+                <TextView android:id="@+id/qPcOff" style="@style/Tile" android:text="⏻  Shut down" android:textColor="@color/red" />
+                <TextView android:id="@+id/qPcVolDown" style="@style/Tile" android:text="🔉  Vol −" />
+                <TextView android:id="@+id/qPcVolUp" style="@style/Tile" android:text="🔊  Vol +" />
+                <TextView android:id="@+id/qPcPlay" style="@style/Tile" android:text="⏯  Play" />
+                <TextView android:id="@+id/qPcPrev" style="@style/Tile" android:text="⏮  Prev" />
+                <TextView android:id="@+id/qPcNext" style="@style/Tile" android:text="⏭  Next" />
+                <TextView android:id="@+id/qPcApp" style="@style/Tile" android:text="🪟  App…" />
             </GridLayout>
 
             <!-- Log -->

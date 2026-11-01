@@ -283,7 +283,9 @@ TOOL_DECLARATIONS = [
         "description": (
             "Captures the screen or webcam image and lets you analyze it. "
             "MUST be called when user asks what is on screen, what you see, "
-            "look at camera, analyze my screen, etc. "
+            "look at camera, analyze my screen, etc. Also use it to EXPLAIN what is on screen: an error message or "
+            "dialog ('what does this error mean', 'how do I fix this'), code, a chart, a form, a web page, or text "
+            "in another language ('translate what is on my screen'). Put the user's question in `text`. "
             "You have NO visual ability without this tool. "
             "After the image is captured it is sent directly to you — describe what you see and answer the user's question. "
             "When using camera: the live view stays open until user says close it or calls close_camera."
@@ -716,7 +718,8 @@ class JarvisLive:
         key    = self._dashboard.new_key()
         url    = self._dashboard.get_url()
         manual = self._dashboard.get_manual_url()
-        return url, key, f"{url}/auto-login?key={key}", manual
+        fingerprint = self._dashboard.fingerprint() if hasattr(self._dashboard, "fingerprint") else ""
+        return url, key, f"{url}/auto-login?key={key}", manual, fingerprint
 
     def _on_text_command(self, text: str):
         if not self._loop or not self.session:
@@ -1686,6 +1689,16 @@ class JarvisLive:
             pass
 
 
+    def _on_phone_ui_command(self, action: str, value: str) -> None:
+        """A button on the Phone page: run it off the UI thread and report the outcome in the log."""
+        def work():
+            try:
+                from actions.phone_control import run
+                self.ui.write_log(f"[Phone] {run(action, value)}")
+            except Exception as e:
+                self.ui.write_log(f"[Phone] {action} failed: {e}")
+        threading.Thread(target=work, daemon=True).start()
+
     async def _process_dashboard_commands(self) -> None:
         while True:
             try:
@@ -1695,27 +1708,14 @@ class JarvisLive:
                 if not text:
                     continue
                 if isinstance(text, str) and text.strip().upper().startswith("[PC_CONTROL]"):
-                    cmd = text.split("]", 1)[-1].strip().lower()
+                    cmd = text.split("]", 1)[-1].strip()
+                    from core import pc_remote
+                    result = await asyncio.get_running_loop().run_in_executor(None, pc_remote.run, cmd)
+                    self.ui.write_log(f"[Phone] {result}")
                     try:
-                        import subprocess, sys
-                        if cmd in ("lock", "pc lock", "lock pc"):
-                            if sys.platform == "win32":
-                                subprocess.Popen(["rundll32.exe", "user32.dll,LockWorkStation"])
-                            elif sys.platform == "darwin":
-                                subprocess.Popen(["pmset", "displaysleepnow"])
-                            else:
-                                subprocess.Popen(["loginctl", "lock-session"])
-                            self.ui.write_log("[Phone] PC locked")
-                        elif cmd in ("shutdown", "off", "poweroff", "pc off"):
-                            if sys.platform == "win32":
-                                subprocess.Popen(["shutdown", "/s", "/t", "15"])
-                            else:
-                                subprocess.Popen(["shutdown", "-h", "+1"])
-                            self.ui.write_log("[Phone] PC shutdown scheduled")
-                        else:
-                            self.ui.write_log(f"[Phone] Unknown PC control: {cmd}")
-                    except Exception as e:
-                        self.ui.write_log(f"[Phone] PC control error: {e}")
+                        await self._dashboard.broadcast({"type": "sys", "text": result})
+                    except Exception:
+                        pass
                     continue
                 for _ in range(80):
                     if self.session:
@@ -1767,6 +1767,8 @@ class JarvisLive:
             self._dashboard = DashboardServer()
             self._dashboard.set_connect_callback(self._on_phone_connected)
             self._dashboard.set_phone_event_callback(self.ui.phone_event)
+            self.ui.on_phone_command = self._on_phone_ui_command
+            self.ui.set_phone_link_provider(lambda: (self._dashboard.get_url(), self._dashboard.fingerprint()))
             def _on_frame(b64):
                 try:
                     from PyQt6.QtCore import QMetaObject, Qt, Q_ARG

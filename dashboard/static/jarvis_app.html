@@ -171,7 +171,8 @@
       <input id="key" placeholder="Pairing key from Dashboard" autocomplete="off"/>
       <button class="btn btn-primary" id="connectBtn" onclick="connect()">CONNECT</button>
       <p class="hint">
-        Use <b>http</b> (not https). Same Wi‑Fi required.<br/>
+        Open this page from the address Jarvis shows (<b>https://…:8000</b>). The first time, the browser warns about the
+        certificate because Jarvis signs it itself: compare the <b>SHA-256</b> fingerprint with the one in Jarvis → Phone, then continue.<br/>
         Get a <b>fresh</b> key from Jarvis → Remote Control each time.
       </p>
     </div>
@@ -278,18 +279,20 @@ function callAction(a) {
 }
 
 function resolveOrigin(hostVal) {
-  if (location.protocol === 'http:' && location.port === '8000') {
+  // Opened from the PC itself (https://<ip>:8000/jarvis-app, or http when TLS is off): talk to the same origin.
+  if ((location.protocol === 'https:' || location.protocol === 'http:') && location.port === '8000') {
     return location.origin;
   }
   const clean = (hostVal || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
   const withPort = clean.includes(':') ? clean : (clean + ':8000');
-  return 'http://' + withPort;
+  const scheme = /^http:\/\//.test(hostVal || '') ? 'http://' : 'https://';
+  return scheme + withPort;
 }
 
 function openWs(origin, token) {
   return new Promise((resolve, reject) => {
     const u = new URL(origin);
-    const url = 'ws://' + u.host + '/ws?token=' + encodeURIComponent(token);
+    const url = (u.protocol === 'https:' ? 'wss://' : 'ws://') + u.host + '/ws?token=' + encodeURIComponent(token);
     log('WS → ' + url.replace(/token=.*/, 'token=***'));
     const socket = new WebSocket(url);
     const timer = setTimeout(() => {
@@ -348,7 +351,7 @@ async function connect() {
     log('Connected (login token).');
   } catch (e) {
     log('FAILED: ' + e.message);
-    log('Checklist: Jarvis running · same Wi‑Fi · http not https · NEW key · firewall 8000');
+    log('Checklist: Jarvis running · same Wi‑Fi · open the https:// address once and accept the certificate · NEW key · firewall 8000');
     setOnline(false);
   }
   $('connectBtn').disabled = false;

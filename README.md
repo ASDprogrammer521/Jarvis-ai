@@ -1,302 +1,156 @@
 <p align="center">
-  <img src="assets/banner.png" alt="JARVIS — Your personal AI assistant for PC & phone" width="100%">
+<img src="assets/banner.png" alt="JARVIS — Your personal AI assistant for PC &amp; phone" width="100%">
 </p>
 
-<h1 align="center">🤖 Jarvis AI</h1>
+# Jarvis-ai
 
 <p align="center">
-  <b>Voice · Vision · Desktop control · Holographic HUD · Phone companion — one assistant.</b><br>
-  A native desktop AI assistant that listens, sees your screen, controls your computer and your Android phone, and gets things done.
+<img src="https://img.shields.io/badge/Python-3.11%2B-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python">
+<img src="https://img.shields.io/badge/Windows-EXE-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Windows EXE">
+<img src="https://img.shields.io/badge/Status-Active-success?style=for-the-badge" alt="Status">
+<img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License">
+<img src="https://img.shields.io/badge/By-ASDcuber-orange?style=for-the-badge" alt="ASDcuber">
 </p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/Python-3.11%2B-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python">
-  <img src="https://img.shields.io/badge/UI-PyQt6-41CD52?style=for-the-badge&logo=qt&logoColor=white" alt="PyQt6">
-  <img src="https://img.shields.io/badge/AI-Gemini%20Live-8E75B2?style=for-the-badge&logo=googlegemini&logoColor=white" alt="Gemini">
-  <img src="https://img.shields.io/badge/Windows-EXE-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Windows EXE">
-  <img src="https://img.shields.io/badge/Android-APK-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android APK">
-  <img src="https://img.shields.io/badge/Version-5.2.1-orange?style=for-the-badge" alt="Version">
-  <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License">
-</p>
-
-<p align="center">
-  <a href="https://github.com/ASDprogrammer521/Jarvis-ai/releases/latest">
-    <img src="https://img.shields.io/badge/⬇%20Download-Windows%20EXE-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download Windows">
-  </a>
-  <a href="https://github.com/ASDprogrammer521/Jarvis-ai/releases/latest">
-    <img src="https://img.shields.io/badge/⬇%20Download-Android%20APK-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Download APK">
-  </a>
-</p>
-
----
-
-## 📑 Table of contents
-
-- [Overview](#-overview)
-- [Highlights](#-highlights)
-- [Quick start](#-quick-start)
-- [Configuration](#️-configuration)
-- [Built-in tools (full reference)](#-built-in-tools-full-reference)
-- [Voice, speech & AI engines](#️-voice-speech--ai-engines)
-- [3D HUD models](#-3d-hud-models)
-- [Phone connection](#-phone-connection)
-- [Remote dashboard](#-remote-dashboard)
-- [Profiles](#-profiles)
-- [Plugins — build your own tool](#-plugins--build-your-own-tool)
-- [Safety by design](#️-safety-by-design)
-- [UI navigation & shortcuts](#️-ui-navigation--shortcuts)
-- [Architecture & project structure](#-architecture--project-structure)
-- [Building from source](#-building-from-source)
-- [Troubleshooting](#-troubleshooting)
-- [License](#-license)
 
 ---
 
 ## 🌟 Overview
 
-**Jarvis AI** is an intelligent assistant that automates everyday computer work through natural conversation. Talk to it (or type), and it will open apps, manage windows and files, browse the web, build Word / Excel / PowerPoint / PDF files, track your habits and finances, play music, count your push-ups through the webcam, and even **make phone calls through your Android phone**.
+**Jarvis AI** is an advanced intelligent assistant built to automate workflows and simplify everyday computer tasks. It combines a clean modern interface with powerful tools: voice control, screen awareness, desktop automation, a holographic HUD, profiles, plugins, and a full phone companion — all in one system.
 
-It runs as a native desktop app with a cinematic holographic HUD, speaks and listens in **any language**, and replies in the language you use.
-
-> **Everything is a tool.** Each capability is a drop-in file in `actions/` that is discovered automatically — adding a new one takes a single file.
+Voice, vision, desktop control, holographic HUD, and phone companion — one system. Version **5.x**.
 
 ---
 
-## ✨ Highlights
+## 📥 Download (no Python required)
 
-| | Feature | Description |
-| :-: | ------- | ----------- |
-| 💎 | **Modern, clean UI** | Dashboard · Chat · Settings tabs with a cinematic HUD |
-| 🧑‍🚀 | **3D HUD models** | Holo · Crystal · Globe · Knot · Helix · Face — or load your own `.obj` |
-| 🎙️ | **Voice + wake word** | Push-to-talk, open mic, mute, and an optional local **"Hey Jarvis"** wake word |
-| 👁️ | **Vision** | Understands your screen and webcam on request ("what's on my screen?") |
-| 📱 | **Jarvis App (phone)** | Native Android app + browser companion — calls, SMS, lock, locate, flashlight — **no ADB** |
-| 🪟 | **Window control by name** | "Minimize Discord", "maximize Chrome", "bring Spotify forward" act on *that* app |
-| ⚡ | **Fast automation** | Apps, files, browser, system settings, clipboard, screenshots, messaging |
-| 🛡️ | **Safe by design** | Shutdown / restart / messages need an on-screen confirm · `undo` reverses your last change |
-| 📊 | **Admin dashboard** | Remote control from a browser or phone via a pairing key |
-| 🧠 | **Long-term memory** | Remembers facts about you — viewable and deletable |
-| 🔌 | **Plugins + store** | Drop-in tools in `plugins/`; list / enable / disable / install from URL |
-| 👤 | **Profiles** | `home` · `work` · `game` presets |
-| 🔄 | **Self-update** | Checks GitHub, installs updates, can roll back |
-| 🖥️ | **Compact mode** | Floating always-on-top mic (`F12`) |
-| 💻 | **Windows EXE** | One-folder build via GitHub Releases — no Python needed |
-
----
-
-## 🚀 Quick start
-
-### Option 1 — Download (no Python required)
+<p align="center">
+<a href="https://github.com/ASDprogrammer521/Jarvis-ai/releases/latest">
+<img src="https://img.shields.io/badge/Download-Windows%20EXE-blue?style=for-the-badge&logo=windows&logoColor=white" alt="Download Windows">
+</a>
+<a href="https://github.com/ASDprogrammer521/Jarvis-ai/releases/latest">
+<img src="https://img.shields.io/badge/Download-Android%20APK-brightgreen?style=for-the-badge&logo=android&logoColor=white" alt="Download APK">
+</a>
+</p>
 
 1. Open **[Releases](https://github.com/ASDprogrammer521/Jarvis-ai/releases/latest)**
 2. Download `Jarvis-Windows-x64-v*.zip`
 3. Extract the zip → run **`Jarvis.exe`**
 4. Enter your **Gemini API key** on first launch
 
-> Windows may show SmartScreen because the build is unsigned → **More info → Run anyway**.
+**Website / landing page:** link the same URL  
+`https://github.com/ASDprogrammer521/Jarvis-ai/releases/latest`
 
-### Option 2 — Run from source
+> Windows may show SmartScreen (unsigned build) → **More info → Run anyway**.
 
-**Requirements:** Python **3.11+**
+### Publish a new release (for maintainers)
 
 ```bash
-# 1. Get the code
-git clone https://github.com/ASDprogrammer521/Jarvis-ai.git
-cd Jarvis-ai
+git tag v1.0.1
+git push origin v1.0.1
+```
 
-# 2. Install dependencies for YOUR operating system + Playwright browsers
+Or: **Actions → Build Windows EXE + Release → Run workflow** (optional tag input).
+
+Local build on Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1
+```
+
+---
+
+## 🚀 Getting Started (from source)
+
+Follow these steps if you prefer Python source:
+
+* 📦 **Step 1:** Install dependencies with **`setup.py`** (it reads the single `requirements.txt`, skips packages for other operating systems and fetches the Playwright browsers):
+
+```bash
 python setup.py
+```
 
-# 3. Start Jarvis
+* 🔑 **Step 2:** Add your **Gemini API key**.  
+  On first launch the app will ask for it, or you can place it in `config/api_keys.json`.
+
+* ▶️ **Step 3:** Start the application:
+
+```bash
 python main.py
 ```
 
-`setup.py` reads the single `requirements.txt`, skips packages meant for other operating systems (Windows-only libs are marked `sys_platform == "win32"`), and fetches the Playwright browsers.
-
-**API key:** on first launch the app asks for your **Gemini API key**. You can also put it in `config/api_keys.json`:
-
-```json
-{
-  "gemini_api_key": "YOUR_KEY_HERE"
-}
-```
-
 ---
 
-## ⚙️ Configuration
+## ✨ Features
 
-All settings live in `config/api_keys.json` (most can also be changed in **Settings** inside the app).
+| Feature | Description |
+| ------- | ----------- |
+| 💎 **Modern & Clean UI** | Dashboard · Chat · Settings tabs with a cinematic HUD |
+| 🧑‍🚀 **HUD modes & 3D models** | Holo · Crystal · Globe · Knot · Helix · Face — or drop in your own `.obj` |
+| 🎙️ **Voice + Wake word** | Push-to-talk, open mic, mute, optional local "Hey Jarvis" wake word |
+| 📱 **Jarvis App (phone)** | Native Android app + browser companion — **call by name or number**, incoming-call alerts on the PC, find my phone, big file transfer, SMS, lock, locate — no ADB |
+| 🔒 **Encrypted link** | HTTPS / WSS by default with a self-signed certificate the phone pins on first pairing |
+| 🧩 **Modes** | "Work mode" opens and arranges a whole set-up; save your own by voice |
+| 🪟 **Window control by name** | "Minimize Discord", "snap Chrome left", "Chrome and Discord side by side", "move Chrome to the other monitor" act on *that* app's window |
+| ⌨️ **Custom shortcuts** | Mute, fullscreen and compact mode keys are yours to change in Settings → Shortcuts |
+| ⚡ **Fast Automation** | Apps, files, browser, system controls, clipboard, screenshots, messaging |
+| 🛡️ **Safe by design** | Shutdown / restart / messages need an on-screen confirm · `undo` reverses volume, brightness, files and more |
+| 📊 **Admin Dashboard** | Remote control from a browser or the phone via pairing key |
+| 🧠 **Memory** | Long-term facts you can view and delete |
+| 🔌 **Plugins + store** | Drop-in tools in `plugins/`; list / enable / disable / install from URL |
+| 👤 **Profiles** | `home` · `work` · `game` presets |
+| 🔄 **Self-update** | Checks GitHub for updates and applies them |
+| 🖥️ **Compact mode** | Floating always-on-top mic (F12) |
+| 💻 **Windows EXE** | Single-folder build via GitHub Releases — no Python install |
 
-| Key | Purpose |
-| --- | ------- |
-| `gemini_api_key` | Google Gemini API key (main brain, voice + vision) |
-| `assistant_name`, `user_name` | What Jarvis is called / what it calls you |
-| `llm_provider`, `llm_url`, `llm_model` | Use a **local LLM** instead of the cloud — `ollama` (default) or `openai` (LM Studio, Jan, LocalAI, llama.cpp, vLLM…) |
-| `stt_engine` | Speech-to-text engine (Whisper / Vosk, offline) |
-| `tts_engine`, `tts_voice`, `elevenlabs_api_key` | Text-to-speech engine and voice |
-| `wake_word_enabled` | Enable local "Hey Jarvis" detection |
-| `auto_update_check` | Check GitHub for new versions on start |
-| `spotify_client_id`, `spotify_client_secret` | Optional — one-step "play my playlist" |
-| `output_dir` | Where generated files are saved (default `Documents/Jarvis/`) |
-| `os_system` | Force `windows` / `mac` / `linux` (auto-detected by default) |
+### Built-in tools
 
-Environment template (`config/env.example`):
+| Area | Tools — try saying |
+| ---- | ------------------ |
+| **Computer** | `computer_settings` volume, brightness, dark mode, Wi-Fi · `app_manager` close / **minimize / maximize / restore / focus / snap / tile / next monitor** for a named app, minimize everything, top RAM/CPU apps, startup list · `macros` **modes** (work, game, relax, clean, or your own) · `screen_process` "what does this error mean?" — it looks at your screen and explains · `power_tools` battery, uptime, lock, sleep · `network_tools` IP, Wi-Fi, speed · `storage_analyzer` biggest folders and file types · `file_tools` duplicates and cleanup · `clipboard_tools` · `screen_capture` screenshots and recordings · `appearance_tools` wallpaper |
+| **Phone** | `phone_control` — "call Akam" · "call +998 90 123 45 67" · "answer" / "reject" / "hang up" · "who called?" · "find my phone" · "send report.pdf to my phone" · "text 901234567: I'm late" · "lock my phone" |
+| **Productivity** | `notes_tasks` to-do list and notes · `reminder` · `focus_timer` Pomodoro · `habit_tracker` streaks · `finance_tracker` expenses and income · `study_cards` spaced-repetition flashcards · `text_assistant` translate, summarize, rewrite, fix grammar |
+| **Office** | PowerPoint decks · Word documents · Excel workbooks with formulas and charts · PDF merge / split / convert / OCR |
+| **Fitness & health** | `pushup_counter` webcam rep counting with form checks · `calorie_counter` meals by text or photo |
+| **Media & games** | `spotify_controller` · `youtube_video` summaries · `play_hud_video` muted video in the HUD · `game_updater` Steam / Epic installs and updates |
+| **Info** | `web_search` · `knowledge_lookup` · `weather_report` · `flight_finder` · `utility_tools` calculator, units, live currency |
+| **Developer** | `code_helper` write / edit / run code · `dev_agent` multi-file projects |
 
-```ini
-GEMINI_API_KEY=
-JARVIS_BIND_HOST=127.0.0.1   # dashboard bind address (loopback by default)
-JARVIS_TLS=0                 # set to 1 to serve the dashboard over HTTPS
-```
+Each tool is a drop-in file in `actions/`, discovered automatically.
 
----
-
-## 🧰 Built-in tools (full reference)
-
-Jarvis exposes **40+ tools** to the AI. You never call them by name — just talk. The "Try saying" column shows the idea.
-
-### 🖥️ Computer & system
-
-| Tool | What it does | Try saying |
-| ---- | ------------ | ---------- |
-| `open_app` | Opens any application, program or website | "Open Chrome", "launch Steam" |
-| `app_manager` | Close / **minimize / maximize / restore / focus** a *named* app; top RAM/CPU apps; startup programs | "Minimize Discord", "what's eating my RAM?" |
-| `computer_settings` | Volume, brightness, mute, window snapping & centering, dark mode, Wi-Fi, tabs, zoom, scrolling, shortcuts, screenshots, lock, shutdown/restart (with on-screen confirm) | "Volume to 30", "snap this window left" |
-| `computer_control` | Direct mouse & keyboard: type, click, hotkeys, scroll, find things on screen, smart click/type | "Click the Submit button" |
-| `power_tools` | Battery, uptime, lock, sleep, scheduled shutdown/restart, cancel | "How much battery is left?" |
-| `system_status` | Live CPU, RAM, GPU load, CPU temperature, uptime, process count | "How is my PC doing?" |
-| `network_tools` | Online check, public/local IP, Wi-Fi name & signal, ping, speed test | "Test my internet speed" |
-| `storage_analyzer` | Free space per drive, biggest folders/files/types, junk estimate, safe temp cleanup | "What's using my disk?" |
-| `appearance_tools` | Wallpaper (file or random from a folder), dark/light mode | "Random wallpaper from Pictures" |
-| `clipboard_tools` | Read, write or clear the clipboard | "What did I copy?" |
-| `screen_capture` | Screenshots (full / monitor / region / delayed), screen **recording** to MP4, **OCR** of the screen | "Record my screen" |
-| `screen_process` | Captures screen or webcam and lets the AI **look** at it | "What's on my screen?" |
-| `close_camera` | Closes the live camera view | "Close the camera" |
-
-### 📁 Files & folders
-
-| Tool | What it does | Try saying |
-| ---- | ------------ | ---------- |
-| `file_controller` | List, create, delete, move, copy, rename, read, write, find, largest files, disk usage, organize desktop | "Move report.docx to Documents" |
-| `file_tools` | Find **duplicate files**, move extras to a safe folder, sort a messy folder (e.g. Downloads) — both undoable | "Clean up my Downloads" |
-| `desktop_control` | Wallpaper, organize / clean the desktop, list items, stats | "Organize my desktop" |
-| `file_processor` | Work on **dropped/uploaded files**: images (describe, OCR, resize, compress, convert), PDF, Word/text, CSV/Excel (analyze, stats, filter, sort), JSON/XML, code (explain, review, fix, run, test), audio & video (transcribe, trim, convert, extract audio/frames), archives | "Summarize this PDF" |
-
-### 🌐 Web & information
-
-| Tool | What it does | Try saying |
-| ---- | ------------ | ---------- |
-| `browser_control` | Any browser (Chrome, Edge, Firefox…): open sites, search, click, fill forms, scroll, tabs, screenshots | "Open Edge and search for…" |
-| `web_search` | Live web search with modes: **search · news · research · price · compare** | "Latest news on SpaceX" |
-| `knowledge_lookup` | Wikipedia summaries (any language) and English dictionary definitions | "Who is Ada Lovelace?" |
-| `weather_report` | Weather for any city | "Weather in Tashkent" |
-| `flight_finder` | Searches Google Flights and reads out the best options | "Flights Tashkent → Istanbul on Friday" |
-| `manage_monitor` | Watches topics daily and alerts you to new headlines | "Monitor AI news" |
-
-### 🗂️ Productivity & learning
-
-| Tool | What it does | Try saying |
-| ---- | ------------ | ---------- |
-| `notes_tasks` | To-do list (shown on the Dashboard) and quick notes | "Add a task: call the bank" |
-| `reminder` | Timed reminders | "Remind me at 6 pm to…" |
-| `focus_timer` | Pomodoro sessions with breaks and rounds | "Start a 45-minute focus session" |
-| `habit_tracker` | Daily habits with goals and **streaks** (water, steps, reading, sleep…) | "I drank two glasses of water" |
-| `finance_tracker` | Expenses & income, auto-categories, monthly summaries, **budgets** with warnings, Excel export with chart | "I spent 50 on lunch" |
-| `study_cards` | **Spaced-repetition flashcards** (Leitner boxes): AI-generated decks, voice quiz, stats | "Quiz me on Spanish verbs" |
-| `text_assistant` | Translate, summarize, rewrite in a tone, fix grammar, explain simply, expand, bullet-ize, draft replies (can use the clipboard) | "Translate my clipboard to English" |
-| `utility_tools` | Calculator, unit & **live currency** conversion, secure password generator, QR codes, time in any city, days until a date, dice / coin / random pick | "Convert 100 USD to UZS" |
-
-### 📄 Office documents
-
-| Tool | What it does | Try saying |
-| ---- | ------------ | ---------- |
-| `create_presentation` | Full **PowerPoint** decks: title, bullet / two-column / comparison / process / timeline / stats / quote slides, speaker notes, closing slide | "Make a presentation about solar energy" |
-| `word_document` | **Word** documents: create, append, find-and-replace, read — real typography, headings, lists, tables, page numbers | "Write a CV as a Word file" |
-| `generate_spreadsheet` | Designs an **Excel** workbook from a plain description (budgets, trackers, invoices, grade books…) with formulas & charts | "Make a monthly budget spreadsheet" |
-| `build_spreadsheet` | Builds Excel from structured data or CSV: styled headers, formulas, totals, charts, conditional formatting, filters | "Turn this CSV into a formatted sheet" |
-| `pdf_tools` | **Merge, split, extract text, OCR, extract tables → Excel, convert to PDF, info** | "Merge these two PDFs" |
-
-### 🏋️ Fitness & health
-
-| Tool | What it does | Try saying |
-| ---- | ------------ | ---------- |
-| `pushup_counter` | Live webcam **push-up counter** with AI pose detection, form checks (depth, hips, lockout), spoken feedback and workout history | "Count my push-ups" |
-| `calorie_counter` | Logs meals by **text or photo**, estimates calories & macros, personal daily budget, history | "I had a chicken wrap" |
-
-### 🎵 Media & games
-
-| Tool | What it does | Try saying |
-| ---- | ------------ | ---------- |
-| `spotify_controller` | Play song / artist / album / playlist, pause, skip, volume, now playing | "Play Believer" |
-| `youtube_video` | Play videos, get info, **summarize from transcript**, trending | "Summarize this YouTube video" |
-| `play_hud_video` | Plays a local or direct-URL video silently inside the HUD | "Play this video in the HUD" |
-| `game_updater` | **Steam & Epic**: install, update, list games, download status, scheduled updates (optional shutdown when done) | "Update all my Steam games at 3 am" |
-
-### 💬 Communication & phone
-
-| Tool | What it does | Try saying |
-| ---- | ------------ | ---------- |
-| `send_message` | Drafts a message for **WhatsApp, Telegram, Instagram** or other desktop apps — sent **only after you confirm** on the HUD | "Send Ali a WhatsApp: I'm late" |
-| `phone_control` | Android control: **call, answer, reject, hang up**, SMS, open apps/links, lock/unlock, flashlight, location, battery, notifications, screenshot, volume | "Call +998 90 123 45 67" |
-
-### 👨‍💻 Developer
-
-| Tool | What it does | Try saying |
-| ---- | ------------ | ---------- |
-| `code_helper` | Write, edit, explain, **run** or build code files | "Write a Python script that…" |
-| `dev_agent` | Builds **complete multi-file projects**: plans, writes files, installs deps, opens VS Code, runs and fixes errors | "Build me a Flask to-do app" |
-
-### 🧠 Assistant core
-
-| Tool | What it does | Try saying |
-| ---- | ------------ | ---------- |
-| `save_memory` / `recall_memory` | Long-term memory of facts about you (identity, preferences, projects, relationships, wishes, notes) | "What do you remember about me?" |
-| `undo` | Reverses Jarvis's last change: files moved/renamed/written, volume, brightness, dark mode, Wi-Fi | "Undo that" |
-| `profile_switch` | Switch / list `home`, `work`, `game` profiles | "Switch to work mode" |
-| `plugin_store` | List, enable, disable, install plugins | "List my plugins" |
-| `self_update` | Check, install, **roll back** updates; restart Jarvis | "Check for updates" |
-| `shutdown_jarvis` | Ends the session ("goodbye") | "That's all, goodbye" |
-
-> 💡 **Note on Spotify:** works out of the box with the desktop app (media keys, volume, search). For "play my chill playlist" in one step, add `spotify_client_id` / `spotify_client_secret` (free from [developer.spotify.com](https://developer.spotify.com/dashboard)), register `http://127.0.0.1:8888/callback` as the Redirect URI, then say **"log in to Spotify"** once.
-
-### Tool-specific requirements
-
-| Tool | Needs |
-| ---- | ----- |
-| `pushup_counter` | `opencv-python`, `mediapipe` — downloads a ~6 MB pose model to `config/models/` on first use. Put the camera at your side so your whole body is visible. |
-| PDF OCR | [Tesseract](https://github.com/tesseract-ocr/tesseract) installed on your system |
-| Word/PowerPoint/Excel → PDF | [LibreOffice](https://www.libreoffice.org) (or Microsoft Word + `docx2pdf` on Windows) |
-| `play_hud_video` (YouTube) | `yt-dlp` + OpenCV |
-| `system_monitor` / GPU meter | `pynvml` (NVIDIA GPUs) |
-
-Generated files are saved under `Documents/Jarvis/` (change with `output_dir`). Workout and nutrition logs live in `memory/`.
-
----
-
-## 🎙️ Voice, speech & AI engines
-
-| Layer | Options |
-| ----- | ------- |
-| **Brain** | **Gemini Live** (real-time voice + vision + tool calling) — or a **local LLM** through `llm_client` (Ollama, or any OpenAI-compatible server: LM Studio, Jan, LocalAI, llama.cpp, vLLM) |
-| **Speech-to-text** | **Whisper** (offline, `faster-whisper`) · **Vosk** (offline, lightweight) |
-| **Text-to-speech** | **EdgeTTS** (free, internet) · **Kokoro** (fully offline neural, ~330 MB) · **ElevenLabs** (cloud, best quality) |
-| **Wake word** | Local **"Hey Jarvis"** via `openwakeword` — zero cost when disabled |
-| **Talk modes** | Push-to-talk (hold a key), open mic, mute (`F4`) |
-| **Audio devices** | Pick your microphone and speakers explicitly (no more "wrong default device" after plugging in a headset) |
-| **Echo guard** | Jarvis won't hear and answer its own voice coming back through the speakers |
-| **Lip-sync** | Text + audio fused viseme engine drives the avatar's mouth |
-| **Language** | Replies in the language of your **most recent message** — speak any language |
+------- | ----------- |
+| 💎 **Modern & Clean UI** | Dashboard · Chat · Settings tabs with a cinematic HUD |
+| 🧑‍🚀 **HUD modes** | Animated face · Reactor core · Holo sphere · Iron Man armor |
+| 📊 **Admin Dashboard** | Remote control via pairing key / browser |
+| ⚡ **Fast Automation** | Apps, files, browser, system controls, messaging |
+| 📱 **Jarvis App (phone)** | Native Android app + web companion — no ADB required |
+| 🎙️ **Voice + Wake word** | Push-to-talk, mute, local wake-word detection |
+| 🧠 **Memory** | Long-term facts you can view and delete |
+| 🔌 **Plugins + store** | Drop-in tools in `plugins/`; list / enable / disable |
+| 👤 **Profiles** | `home` · `work` · `game` presets |
+| 🔄 **Self-update** | Check GitHub for updates |
+| 🖥️ **Compact mode** | Floating always-on-top mic (F12) |
+| 💻 **Windows EXE** | Single-folder build via GitHub Releases — no Python install |
+| 🏋️ **Push-up counter** | Live webcam rep counting with form checks (depth, hips) and workout history |
+| 🍎 **Calorie & nutrition tracker** | Log meals by text or photo, daily budget and macros |
+| 📊 **Presentations (PPTX)** | Multi-slide decks with diagrams, styling and speaker notes |
+| 📝 **Word documents (DOCX)** | Create and edit formatted documents, tables and lists |
+| 📄 **PDF toolkit** | Merge, split, convert, extract text/tables, OCR scanned pages |
+| 📈 **Spreadsheets (XLSX)** | Formatted workbooks with live formulas, totals and charts |
+| 🎵 **Spotify controller** | Play, pause, skip, volume and search playlists or tracks |
+| ▶️ **YouTube** | Play videos, get info, summarize from the transcript |
 
 ---
 
 ## 🧊 3D HUD models
 
-The centre of the Dashboard shows an animated 3D model. Switch it in **Settings → Appearance** (or double-click it).
+The centre of the home screen shows an animated 3D model. Switch it in **Settings → Appearance** (or double-click it).
+Built-in: **Holo** (golden hologram sphere), **Crystal**, **Globe**, **Knot**, **Helix** and **Face**.
 
-Built-in: **Holo** (golden hologram sphere) · **Crystal** · **Globe** · **Knot** · **Helix** · **Face**.
+Models are plain `.obj` files in `assets/models/`. Drop your own file there and it appears in the list after a restart.
+Layers are OBJ groups named `kind:key=value,...`, for example:
 
-Models are plain `.obj` files in `assets/models/`. Drop yours there and it appears in the list after a restart. Layers are OBJ groups named `kind:key=value,...`:
-
-```obj
+```
 g lines:w=1.5,a=1,mix=.3,spin=.6,add=1
 l 1 2 3 4
 g points:size=6,mix=.5,scan=lon
@@ -305,271 +159,172 @@ g faces:amp=.16,spec=1
 f 1 2 3
 ```
 
-| | |
-| --- | --- |
-| **Kinds** | `lines`, `points`, `faces`, `sparks`, `pulse` |
-| **Keys** | `w` width · `a` opacity · `mix` colour blend (0 = main, 1 = accent) · `spin` rotation (negative = reverse) · `tilt` · `scale` · `amp` (grows with voice) · `blink` · `add` (glow blending) · `lite=0` (hidden in lightweight mode) |
-| **File options** | `#@hud 1` · `#@glow 1` · `#@rim 1` · `#@palette gold` |
+Kinds: `lines`, `points`, `faces`, `sparks`, `pulse`. Useful keys: `w` width, `a` opacity, `mix` colour blend (0 = main, 1 = accent),
+`spin` rotation speed (negative = reverse), `tilt`, `scale`, `amp` (grows with voice), `blink`, `add` (glow blending), `lite=0` (hidden in lightweight mode).
+File-level options use `#@hud 1`, `#@glow 1`, `#@rim 1`, `#@palette gold`. The built-in models are generated by `python tools/make_models.py`.
 
-The built-in models are generated by `python tools/make_models.py`.
+---
 
-**GPU hologram:** with GPU acceleration on, the Holo model is drawn by a shader. If the shader can't run, Jarvis checks itself and falls back to the standard renderer automatically (**Settings → Appearance → Performance**).
+## 🧰 Tool setup notes
+
+Setup notes:
+
+* **Memory:** heavy tools (PowerPoint, Word, PDF, Excel, push-up counter) are loaded only when you ask for them. At startup only a tiny declaration file is read; the libraries (`python-pptx`, `python-docx`, `openpyxl`, `pypdf`, `mediapipe`, OpenCV) are imported on first use. To make your own action lazy, keep `TOOL` in a small file and import the heavy code inside the handler.
+* **GPU hologram:** with GPU acceleration on, the Holo model is drawn by a shader on the graphics card. If the shader cannot run, Jarvis checks itself and switches to the standard renderer automatically (Settings → Appearance → Performance).
+* **Profiles:** Settings → General → Profile (or "switch to work mode") changes the 3D model, push-to-talk / open mic and graphics quality: Home = Holo, Work = Crystal, Game = Globe + lightweight.
+* **Push-up counter** needs `opencv-python` and `mediapipe`. On first use it downloads a small pose model (about 6 MB) to `config/models/`. Place the camera at your side so your whole body is visible.
+* **PDF OCR** needs the free [Tesseract](https://github.com/tesseract-ocr/tesseract) program installed. Converting Word/PowerPoint/Excel to PDF needs [LibreOffice](https://www.libreoffice.org) (or Microsoft Word with `docx2pdf` on Windows).
+* **Spotify** works out of the box with the desktop app (media keys, volume, search page). For one-step "play my chill playlist", add `spotify_client_id` and `spotify_client_secret` (free, from developer.spotify.com/dashboard) to `config/api_keys.json`, register `http://127.0.0.1:8888/callback` as the Redirect URI, then say "log in to Spotify" once.
+* Generated files are saved under `Documents/Jarvis/` (change with `"output_dir"` in `config/api_keys.json`). Workout and nutrition logs live in `memory/`.
 
 ---
 
 ## 📱 Phone connection
 
-Jarvis connects **out** from the phone to your PC (reverse WebSocket) — nothing to port-forward, **no ADB**.
+Jarvis connects **out** from the phone to your PC (reverse WebSocket), so there is nothing to forward and no ADB.
 
 ### Option A — Android APK (recommended)
 
-1. Install the APK on your phone (allow unknown sources if asked).
-2. On first open, grant **notifications**, **phone / calls**, **SMS**, **location**, **mic** and **camera** as prompted.
+<p align="center">
+<a href="https://github.com/ASDprogrammer521/Jarvis-ai/releases/latest">
+<img src="https://img.shields.io/badge/Download-Jarvis%20APK-brightgreen?style=for-the-badge&logo=android&logoColor=white" alt="Download APK">
+</a>
+</p>
+
+1. Install the APK on your phone (allow install from unknown sources if needed).
+2. On first open, allow **notifications**, **phone / calls**, **call log**, **contacts**, **SMS**, **location**, **mic** and **camera** as prompted.
 3. Start Jarvis on the PC and get a **fresh pairing key** (Remote Control / Dashboard).
-4. In the app enter **PC IP** + **key** → **Connect**.
-5. The status pill turns **● ONLINE** and a persistent *Jarvis Connected* notification appears.
-6. Optional: **Enable lock permission** (Device Admin) so Jarvis can lock the screen.
+4. In the app: enter **PC IP** + **key** → **Connect**.
+5. The pill in the corner turns **● ONLINE** and a persistent **Jarvis Connected** notification appears.
+6. Optional: **Enable lock permission** so Jarvis can lock the screen.
 
-**Build the APK yourself:** open `android/JarvisApp` in Android Studio, or push to GitHub → **Actions → Build Jarvis App APK** → download the `JarvisApp-debug` artifact.
+**Build the APK yourself:** open `android/JarvisApp` in Android Studio, or push to GitHub → **Actions** → **Build Jarvis App APK** → download the `JarvisApp-debug` artifact.
 
-### In the app
+### The app
 
-- **Header** — live status (online / connecting / offline)
-- **Phone card** — call state, big **Make a call** button, **Answer / Reject / Hang up**
-- **Dialer** — full keypad, long-press `0` for `+`, **Paste**, backspace (long-press clears), redial
-- **Quick actions** — YouTube, Lock, Home, Notifications, Location, Camera, Voice, Torch, Screenshot
-- **Control the PC** — lock or shut down the PC (shutdown asks for confirmation)
-- **Activity log** and a chat bar with file attach
+* **Header** — live status pill (online / connecting / offline).
+* **Phone card** — current call state (refreshed every two seconds), a big **Make a call** button, and **Answer / Reject / Hang up**.
+* **Dialer** — bottom sheet with a full keypad, long-press `0` for `+`, **Paste**, backspace (long-press clears) and redial of the last number.
+* **Quick actions** — YouTube, Lock, Home, Notifications, Location, Camera, Voice, Torch, Screenshot, **Find phone**, **Contacts**, **Send file**.
+* **Control the PC** — lock, mute, volume, play / pause / next / previous, **App…** (minimize, maximize, bring forward or close any app by name) and shut down (asks for confirmation).
+* **Link line** — 🔒 shows the link is encrypted and the certificate is pinned; **Forget PC certificate** is for after you reinstall Jarvis.
+* **Activity log** and a chat bar with file attach.
 
-### Calling & messaging
+### Phone calls
 
 | From | How |
 | ---- | --- |
-| **The phone** | Tap **Make a call**, type or paste a number, press green |
-| **Your voice, on the PC** | "Call +998 90 123 45 67" → the PC tells the phone to dial *(a number is required — Jarvis asks if you only give a name and never invents one)* |
-| **Incoming calls** | "Answer the call" · "reject it" · "hang up" · "is anyone calling?" |
+| **The phone** | Tap **Make a call**, type or paste a number, press the green button. |
+| **Your voice, on the PC** | "Call +998 90 123 45 67" → the PC tells the phone to dial. Jarvis needs a **number**; it will ask if you only give a name. |
+| **By name** | "Call Akam" — the phone searches its contacts. If two people match, Jarvis asks which one. |
+| **Incoming calls** | The PC shows a banner (Phone page, plus a pop-up), Jarvis tells you who is calling and asks: *answer* or *reject*? |
 | **SMS** | "Text 901234567: I'll be there in ten minutes" |
+
+Caller names need **Contacts** and caller numbers need **Call log** (Android 9+ hides the number without it). Calls need the **Phone** permission. Without it Jarvis opens the dialer with the number filled in instead of dialling. Answer / reject / hang up need **Answer phone calls** (Android 8+); on some phones the system dialer may still refuse to be controlled.
+
+### Option B — Browser companion
+
+```text
+https://<PC-IP>:8000/jarvis-app
+```
+
+Same Wi‑Fi required. The first visit shows a certificate warning because Jarvis signs its own certificate: compare the **SHA-256** fingerprint with the one in Jarvis → Phone (or the Remote control panel), then continue. The page has a phone-style keypad: **Call** hands the number to the phone's own dialer (`tel:`), and it chats with Jarvis and receives messages and links. Answering and hanging up need the APK.
 
 ### Phone capabilities
 
 | Capability | Notes |
 | ---------- | ----- |
-| Calls & SMS | Dial, answer, reject, hang up, call state, send SMS |
-| Chat with Jarvis | Type in the bottom bar |
-| Attach files | **+** button — text inline, small binaries as base64 |
-| Message previews | With **Notification access**: SMS, WhatsApp and Telegram previews appear in the Phone section on the PC (read-only — no replies, SMS storage is never read) |
-| Phone status | Name, battery and charging state every 5 minutes |
+| Calls and SMS | Dial by number or name, answer, reject, hang up, call state, incoming-call alerts, send SMS |
+| Chat with Jarvis | Type in the bottom bar and send |
+| Files, phone → PC | **+** or **Send file** — any size (up to the server limit) over the encrypted link; saved in the dashboard uploads folder |
+| Files, PC → phone | "Send report.pdf to my phone" — a one-file link that expires in 15 minutes; the file lands in `Downloads/Jarvis` |
+| Find my phone | Rings on the alarm channel at full volume (even when silent) for up to 90 s; "stop ringing" or the tile stops it |
+| Quick actions | YouTube, Lock, Home, Notifs, Location, Camera, Voice, Torch, Screenshot |
+| Message previews | Enable **Notification access**; SMS, WhatsApp and Telegram previews show in the Phone section on the PC (read-only — no replies, SMS storage is never read) |
+| Phone status | Name, battery and charging state reported every five minutes |
 | Voice to PC | **Voice** uses on-device speech recognition |
-| Screen share | Phone screen can be viewed from the dashboard |
-| Auto-reconnect | The service retries if the socket drops |
+| PC Lock / Shutdown | Secure control commands to the PC |
+| Auto-reconnect | The service retries the link if the socket drops |
 | Background link | A foreground notification keeps the connection alive |
 
-### Option B — Browser companion
+### Troubleshooting
 
-```text
-http://<PC-IP>:8000/jarvis-app
-```
-
-Same Wi-Fi required; use **http** (not https) unless you configured certificates. It has a phone-style keypad (**Call** hands the number to the phone's own dialer), chats with Jarvis and receives messages/links. Answering and hanging up need the APK.
-
----
-
-## 📊 Remote dashboard
-
-A FastAPI/Uvicorn server runs on port **8000** (loopback by default) and powers remote control and the phone link.
-
-| Route | Purpose |
-| ----- | ------- |
-| `/` · `/login` | Web dashboard and login |
-| `/jarvis-app` · `/app` | Browser phone companion |
-| `/plugin-store` | Web plugin manager |
-| `/ws` | Main WebSocket |
-| `/ws/phone-audio` | Phone audio stream |
-| `/api/command` · `/api/wake` | Send a command / wake Jarvis |
-| `/api/upload` · `/api/files` | Upload and list files |
-| `/api/plugins` (+ `enable` / `disable` / `install`) | Plugin management |
-| `/api/phone_screen` | Phone screen view |
-| `/api/device-login` · `/api/revoke-devices` | Pairing and device revocation |
-
-> 🔒 Bind address and TLS are controlled by `JARVIS_BIND_HOST` and `JARVIS_TLS`. For access beyond your own machine, use explicit **TLS** and a trusted network.
+- Test on the PC: `https://127.0.0.1:8000/jarvis-app` (accept the certificate warning once)
+- Allow port **8000** in Windows Firewall
+- Same Wi‑Fi (not guest isolation)
+- **ADB is optional** — the main path is the Jarvis App reverse WebSocket
+- Set Jarvis App to **Unrestricted** battery so the background link stays alive
+- "Certificate changed" in the app? You reinstalled Jarvis (new certificate) — tap **Forget PC certificate** and connect again. If you did *not* reinstall anything, treat it as a warning.
+- Need plain HTTP on a trusted network? Set the environment variable `JARVIS_TLS=0` before starting Jarvis (not recommended; see `config/env.example`).
+- A call only opens the dialer? Grant **Phone** permission in Android → Apps → Jarvis App → Permissions
 
 ---
 
-## 👤 Profiles
-
-Profiles change the 3D model, push-to-talk / open mic and graphics quality. Use **Settings → General → Profile** or say *"switch to work mode"*.
-
-| Profile | HUD model | Notes |
-| ------- | --------- | ----- |
-| 🏠 `home` | Holo | Full visual effects |
-| 💼 `work` | Crystal | Calm, focused |
-| 🎮 `game` | Globe | **Lightweight** graphics to save resources |
-
----
-
-## 🔌 Plugins — build your own tool
-
-Every tool is auto-discovered. To add your own, copy `plugins/_template.py`, rename it (no leading underscore) and fill it in — **no other file needs to change**.
-
-```python
-PLUGIN = {
-    "name": "my_plugin",
-    "description": "When should the AI call this? Mention trigger phrases.",
-    "parameters": {
-        "type": "OBJECT",
-        "properties": {
-            "example_arg": {"type": "STRING", "description": "What this argument means"},
-        },
-        "required": [],
-    },
-}
-
-def run(parameters: dict, player=None, session_memory=None) -> str:
-    example_arg = parameters.get("example_arg", "")
-    try:
-        return f"Did the thing with {example_arg}."   # spoken back to the user
-    except Exception as e:
-        return f"Sir, my_plugin failed: {e}"          # never raise
-```
-
-Manage plugins by voice (*"list my plugins"*), from `/plugin-store`, or via the `plugin_store` tool: **list / enable / disable / install from URL**.
-
-**Built-in actions work the same way:** any `actions/*.py` exposing a module-level `TOOL` dict (`name`, `description`, `parameters`, `handler`) is picked up by `core/action_loader.py`. Broken files are logged and skipped — they never crash the app.
-
-> ⚡ **Keep memory low:** heavy libraries (`python-pptx`, `python-docx`, `openpyxl`, `pypdf`, `mediapipe`, OpenCV) are imported only on first use. For your own lazy tool, keep `TOOL` in a small file and import heavy code inside the handler.
-
----
-
-## 🛡️ Safety by design
-
-- **Unforgeable confirmations** — shutdown, restart, Wi-Fi toggle, message sending and disk cleanup ask for confirmation on your **screen** (`core/confirm.py`); the AI cannot approve them for itself.
-- **Undo stack** — `undo` reverses files you moved/renamed/wrote and settings like volume, brightness, dark mode, Wi-Fi.
-- **Never claims success it didn't achieve** — tools that need confirmation report "waiting for you", not "done".
-- **No uninvited tracking** — background monitoring only covers topics *you* add (and never crypto/finance).
-- **Phone privacy** — notification previews are read-only; SMS storage is never read.
-- **Local-first dashboard** — loopback by default, optional TLS, revocable paired devices.
-- **Passwords** are copied to the clipboard and **never read aloud**.
-
----
-
-## 🖥️ UI navigation & shortcuts
+## 🖥️ UI navigation
 
 | Tab | What it does |
 | --- | ------------ |
-| **Dashboard** | Main holographic HUD with live clock and date |
+| **Dashboard** | Main holographic HUD |
 | **Chat** | Conversation history (toggle open/close) |
-| **Settings** | Full-screen options (appearance, voice, profile, plugins, performance…) |
+| **Settings** | Full-screen options |
 
 The **Ask anything** command bar stays visible at the bottom.
 
-| Key | Action |
-| --- | ------ |
-| `F4` | Mute / unmute |
-| `F11` | Fullscreen |
-| `F12` | Compact mode (floating always-on-top mic) |
+**Shortcuts:** `F4` mute · `F11` fullscreen · `F12` compact mode  
 
-**Window commands:** say the app's name — *"minimize Discord"*, *"maximize Chrome"*, *"restore Spotify"*, *"bring Steam to the front"*. Jarvis finds that app's own window and never minimizes itself by mistake. Without a name it asks which app you mean.
+**Window commands:** say the app's name — "minimize Discord", "maximize Chrome", "restore Spotify", "bring Steam to the front". Jarvis finds that app's own window; it never minimizes itself by mistake. Without a name, minimize / maximize act on the focused window — which is Jarvis while you talk to it — so it refuses and asks which app you mean.
+
+Top-left shows the live clock and date.
 
 ---
 
-## 📁 Architecture & project structure
+## 👤 Profiles & plugins
+
+**Profiles** (`home` / `work` / `game`) store preferred HUD and talk-mode style. Ask Jarvis to list or switch profiles, or use the `profile_switch` tool.
+
+**Plugin store:** drop a `.py` file into `plugins/`, then list / enable / disable via the `plugin_store` tool (or Settings plugins UI where available).
+
+---
+
+## 📁 Project structure
 
 ```text
 Jarvis-ai/
-├── main.py                  # entry point: Gemini Live session, audio, tool dispatch
-├── setup.py                 # OS-aware dependency installer (+ Playwright browsers)
-├── requirements.txt         # the only requirements file
-├── Jarvis.spec              # PyInstaller spec (Windows EXE)
-├── VERSION                  # current version (5.2.1)
-│
-├── actions/                 # 40+ built-in tools — auto-discovered via TOOL dict
-├── plugins/                 # drop-in plugins (+ _template.py)
-├── core/                    # engine room
-│   ├── action_loader.py     #   tool discovery, validation, dispatch
-│   ├── plugin_loader.py     #   plugin discovery & enable/disable
-│   ├── gemini.py            #   one-shot Gemini calls with fallbacks & timeouts
-│   ├── llm_client.py        #   local LLM (Ollama / OpenAI-compatible)
-│   ├── stt.py · tts.py      #   speech-to-text / text-to-speech engines
-│   ├── wake_word.py         #   "Hey Jarvis" detection
-│   ├── hotkey.py            #   push-to-talk
-│   ├── audio_devices.py     #   microphone / speaker selection
-│   ├── echo.py              #   echo-tail guard
-│   ├── viseme.py            #   lip-sync
-│   ├── confirm.py           #   on-screen confirmations
-│   ├── undo.py              #   shared undo stack
-│   ├── updater.py           #   self-update & rollback
-│   └── prompt.txt           #   the assistant's core protocol
-│
-├── ui/                      # PyQt6 window, pages, panels, widgets, 3D stage, effects, theme
-├── dashboard/               # FastAPI server + web companion (jarvis_app, plugin store)
-├── memory/                  # long-term memory + config manager
-├── config/                  # api_keys.json, env.example, icon
-├── assets/                  # banner + 3D models (assets/models/*.obj)
-├── tools/make_models.py     # regenerates the built-in .obj models
-├── scripts/build_exe.ps1    # local Windows packaging
-├── android/JarvisApp/       # native Android companion (Kotlin)
-└── .github/workflows/       # APK + Windows EXE release pipelines
+├── main.py                 # entry point
+├── ui/                     # window, pages, 3D stage, settings, theme
+├── assets/models/          # 3D HUD models (.obj)
+├── tools/make_models.py    # regenerates the built-in .obj models
+├── setup.py                # dependency installer
+├── Jarvis.spec             # PyInstaller (Windows EXE)
+├── requirements.txt        # the only requirements file
+├── actions/                # built-in tools
+├── plugins/                # drop-in plugins
+├── core/                   # avatar, audio, LLM, updater…
+├── dashboard/              # remote server + web companion
+├── android/JarvisApp/      # native Android companion (Kotlin) — dialer, calls, quick actions
+├── scripts/build_exe.ps1   # local Windows packaging
+├── memory/                 # config + long-term memory
+├── config/                 # API keys, certificates
+└── .github/workflows/      # APK + Windows EXE releases
 ```
-
-### Android app (Kotlin)
-
-| File | Role |
-| ---- | ---- |
-| `MainActivity.kt` | UI: dialer, phone card, quick actions, chat |
-| `JarvisLinkService.kt` | Foreground service keeping the reverse WebSocket alive |
-| `CommandExecutor.kt` | Executes commands from the PC (calls, SMS, apps, lock, torch…) |
-| `JarvisNotificationListener.kt` | Read-only SMS / WhatsApp / Telegram previews |
-| `ScreenShareService.kt` · `ScreenshotActivity.kt` | Screen sharing and screenshots |
-| `JarvisDeviceAdmin.kt` · `UnlockActivity.kt` | Screen lock / unlock support |
 
 ---
 
-## 🔨 Building from source
+## 🔒 Security
 
-**Windows EXE (local):**
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1
-```
-
-**Publish a release (maintainers):**
-
-```bash
-git tag v5.2.1
-git push origin v5.2.1
-```
-
-Or run **Actions → Build Python to EXE** manually. The workflow builds with PyInstaller and publishes `Jarvis-Windows-x64-v<version>.zip` to GitHub Releases.
-
-**Android APK:** open `android/JarvisApp` in Android Studio (**Build → Build APK**), or use **Actions → Build Jarvis App APK**.
-
----
-
-## 🩺 Troubleshooting
-
-| Problem | Fix |
-| ------- | --- |
-| Jarvis can't hear me | Pick the correct microphone in **Settings**; the OS default can change when a headset is plugged in |
-| Phone won't connect | Test `http://127.0.0.1:8000/jarvis-app` on the PC · allow port **8000** in Windows Firewall · same Wi-Fi (no guest isolation) |
-| Phone link drops in background | Set Jarvis App battery to **Unrestricted** |
-| A call only opens the dialer | Grant **Phone** permission: Android → Apps → Jarvis App → Permissions |
-| Push-up counter sees nothing | Place the camera at your side so your whole body is visible |
-| PDF OCR fails | Install Tesseract |
-| Office → PDF fails | Install LibreOffice (or Word + `docx2pdf` on Windows) |
-| Holo model looks plain | Shader fallback is automatic — see **Settings → Appearance → Performance** |
-| SmartScreen warning | Build is unsigned → **More info → Run anyway** |
-
-> ADB is **optional** — the main path is the Jarvis App reverse WebSocket.
+* **Encrypted link.** The dashboard serves HTTPS and the app connects over WSS. Jarvis creates a self-signed certificate in `config/certs/` (and a new one if your PC's LAN address changes). The Android app pins its SHA-256 fingerprint the first time it pairs and refuses any other certificate afterwards — it never silently drops back to plain HTTP once a certificate is pinned.
+* **Pairing key.** A one-time key (valid ten minutes) turns into a session token; "revoke devices" ends all sessions.
+* **Confirmations.** Shutdown, restart and outgoing messages need your click on the PC. A shutdown asked for from the phone starts a 15-second countdown (`shutdown /a` cancels it).
+* **Files.** PC → phone transfers are single-file links that expire; keys, certificates and `api_keys.json` are never sent.
 
 ---
 
 ## 📜 License
 
-Released under the **[MIT License](LICENSE)** — © 2026 ASDprogrammer521.
+This project is licensed under the **MIT License**.
 
 ---
 
 <p align="center">
-  <b>Made with ❤️ by ASDcuber</b><br>
-  <sub>If Jarvis helps you, give the repo a ⭐</sub>
+<b>By ASDcuber</b>
 </p>

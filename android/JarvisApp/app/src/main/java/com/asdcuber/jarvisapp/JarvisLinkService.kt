@@ -22,6 +22,8 @@ import java.net.URL
 import java.util.concurrent.Executors
 import android.content.Context
 import android.provider.Settings
+import android.content.BroadcastReceiver
+import android.telephony.TelephonyManager
 
 class JarvisLinkService : Service() {
 
@@ -97,6 +99,7 @@ class JarvisLinkService : Service() {
         keyRaw = key
 
         startForeground(NOTIF_ID, buildNotification("Connecting…", connected = false))
+        registerCallEvents()
         statusLine = "Connecting…"
         lastLog = "Connecting to $host"
         io.execute { connectPipeline(host, key) }
@@ -122,11 +125,78 @@ class JarvisLinkService : Service() {
         sendRaw(payload.toString())
     }
 
+
+    // ── Call events → PC ("kim qo'ng'iroq qilyapti") ────────────────────────
+    private var callReceiver: BroadcastReceiver? = null
+    private var ringing = false
+    private var answered = false
+    private var ringNumber = ""
+    private var ringAnnounced = false
+    private var pendingRing: Runnable? = null
+
+    private fun sendPhoneEvent(event: String, number: String) {
+        if (!connected) return
+        val name = Contacts.nameFor(applicationContext, number).orEmpty()
+        sendRaw(
+            JSONObject().put("type", "phone_event").put("event", event)
+                .put("number", number).put("name", name).toString()
+        )
+    }
+
+    private fun announceRing() {
+        if (ringAnnounced) return
+        ringAnnounced = true
+        pendingRing?.let { mainHandler.removeCallbacks(it) }
+        sendPhoneEvent("incoming_call", ringNumber)
+    }
+
+    private fun onCallState(state: String, number: String) {
+        when (state) {
+            TelephonyManager.EXTRA_STATE_RINGING -> {
+                if (!ringing) { ringing = true; answered = false; ringAnnounced = false; ringNumber = "" }
+                if (number.isNotBlank()) { ringNumber = number; announceRing() }
+                else if (!ringAnnounced && pendingRing == null) {
+                    // Android 9+ sends the number in a second broadcast; wait briefly for it.
+                    val r = Runnable { pendingRing = null; announceRing() }
+                    pendingRing = r
+                    mainHandler.postDelayed(r, 900)
+                }
+            }
+            TelephonyManager.EXTRA_STATE_OFFHOOK -> {
+                if (ringing) answered = true
+                sendPhoneEvent("call_active", ringNumber)
+            }
+            TelephonyManager.EXTRA_STATE_IDLE -> {
+                pendingRing?.let { mainHandler.removeCallbacks(it) }
+                pendingRing = null
+                if (ringing && !answered) sendPhoneEvent("missed_call", ringNumber)
+                else sendPhoneEvent("call_ended", ringNumber)
+                ringing = false; answered = false; ringAnnounced = false; ringNumber = ""
+            }
+        }
+    }
+
+    private fun registerCallEvents() {
+        if (callReceiver != null) return
+        val r = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                val state = intent.getStringExtra(TelephonyManager.EXTRA_STATE) ?: return
+                val number = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER).orEmpty()
+                onCallState(state, number)
+            }
+        }
+        try {
+            registerReceiver(r, IntentFilter(TelephonyManager.ACTION_PHONE_STATE_CHANGED))
+            callReceiver = r
+        } catch (_: Exception) {}
+    }
+
+
     private fun connectPipeline(hostRaw: String, key: String) {
         try {
             var host = hostRaw.removePrefix("http://").removePrefix("https://").trimEnd('/')
             if (!host.contains(":")) host = "$host:8000"
-            val base = "http://$host"
+            val bare = host.substringBefore(":")
 
             var token = key.trim().uppercase()
 
@@ -136,45 +206,65 @@ class JarvisLinkService : Service() {
                 token = saved
                 lastLog = "Reconnecting with saved session…"
             }
-            try {
-                val url = URL("$base/login")
-                val conn = (url.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    setRequestProperty("Content-Type", "application/json")
-                    doOutput = true
-                    connectTimeout = 8000
-                    readTimeout = 8000
-                }
-                conn.outputStream.use { os ->
-                    os.write("""{"key":"$token"}""".toByteArray(Charsets.UTF_8))
-                }
-                val code = conn.responseCode
-                val body = try {
-                    (if (code in 200..299) conn.inputStream else conn.errorStream)
-                        ?.bufferedReader()?.readText().orEmpty()
-                } catch (_: Exception) { "" }
-                if (code in 200..299 && body.contains("token")) {
-                    val t = JSONObject(body).optString("token", "")
-                    if (t.isNotBlank()) {
-                        token = t
-                        getSharedPreferences("jarvis_link", Context.MODE_PRIVATE)
-                            .edit()
-                            .putString("session_token", t)
-                            .putString("host", host)
-                            .apply()
-                        lastLog = "Login OK — opening socket…"
-                        statusLine = "Login OK…"
-                        updateNotification("Login OK…", false)
-                    }
-                } else {
-                    lastLog = "Login $code — trying pairing key on socket…"
-                }
-            } catch (e: Exception) {
-                lastLog = "Login skip: ${e.message}"
-            }
 
-            val uri = URI("ws://$host/ws?token=${java.net.URLEncoder.encode(token, "UTF-8")}")
-            mainHandler.post { openSocket(uri) }
+            // HTTPS first (pinned certificate). Plain HTTP only if this PC has never offered a certificate.
+            var useTls = true
+            var loginDone = false
+            val schemes = if (LinkTls.pinned(this, bare).isNotEmpty()) listOf(true) else listOf(true, false)
+            for (tls in schemes) {
+                try {
+                    val base = (if (tls) "https://" else "http://") + host
+                    val conn = LinkTls.open(this, "$base/login").apply {
+                        requestMethod = "POST"
+                        setRequestProperty("Content-Type", "application/json")
+                        doOutput = true
+                        connectTimeout = 8000
+                        readTimeout = 8000
+                    }
+                    conn.outputStream.use { os ->
+                        os.write("""{"key":"$token"}""".toByteArray(Charsets.UTF_8))
+                    }
+                    val code = conn.responseCode
+                    val body = try {
+                        (if (code in 200..299) conn.inputStream else conn.errorStream)
+                            ?.bufferedReader()?.readText().orEmpty()
+                    } catch (_: Exception) { "" }
+                    useTls = tls
+                    LinkTls.saveBase(this, base)
+                    if (code in 200..299 && body.contains("token")) {
+                        val t = JSONObject(body).optString("token", "")
+                        if (t.isNotBlank()) {
+                            token = t
+                            prefs.edit().putString("session_token", t).putString("host", host).apply()
+                            lastLog = (if (tls) "Secure login OK" else "Login OK (plain HTTP)") + " — opening socket…"
+                            statusLine = "Login OK…"
+                            updateNotification("Login OK…", false)
+                        }
+                    } else {
+                        lastLog = "Login $code — trying pairing key on socket…"
+                    }
+                    loginDone = true
+                    break
+                } catch (e: Exception) {
+                    if (LinkTls.isPinFailure(e)) {
+                        connected = false
+                        statusLine = "Disconnected"
+                        lastLog = "⚠ " + LinkTls.pinMessage(e)
+                        updateNotification("Certificate rejected", false)
+                        reconnectAttempts = maxReconnect   // never retry (or downgrade) after a pin failure
+                        return
+                    }
+                    lastLog = "Login skip (${if (tls) "https" else "http"}): ${e.message}"
+                }
+            }
+            if (!loginDone) {
+                // Nothing answered. Fall back to the scheme we used last time, or HTTPS.
+                useTls = !LinkTls.base(this).startsWith("http://")
+            }
+            if (LinkTls.lastNote.isNotEmpty()) { lastLog = LinkTls.lastNote; LinkTls.lastNote = "" }
+
+            val uri = URI("${if (useTls) "wss" else "ws"}://$host/ws?token=${java.net.URLEncoder.encode(token, "UTF-8")}")
+            mainHandler.post { openSocket(uri, useTls, bare) }
         } catch (e: Exception) {
             connected = false
             statusLine = "Disconnected"
@@ -183,7 +273,7 @@ class JarvisLinkService : Service() {
         }
     }
 
-    private fun openSocket(uri: URI) {
+    private fun openSocket(uri: URI, tls: Boolean, bareHost: String) {
         client?.close()
         lastLog = "WS ${uri.host}…"
         client = object : WebSocketClient(uri) {
@@ -259,11 +349,16 @@ class JarvisLinkService : Service() {
             }
         }
         client?.connectionLostTimeout = 30
+        if (tls) {
+            try { client?.setSocketFactory(LinkTls.sslContext(this, bareHost).socketFactory) } catch (_: Exception) {}
+        }
         client?.connect()
     }
 
     override fun onDestroy() {
         mainHandler.removeCallbacks(phoneStatusTicker)
+        callReceiver?.let { try { unregisterReceiver(it) } catch (_: Exception) {} }
+        callReceiver = null
         client?.close()
         activeClient = null
         connected = false
