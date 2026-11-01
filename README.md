@@ -271,7 +271,7 @@ There is no top bar — the whole window is the page. Navigation lives in a slim
 | **Home** | Main holographic HUD with the **Ask anything** command bar |
 | **Chat** | Conversation history |
 | **Dashboard** | System stats, tasks, activity and music |
-| **Phone** | Paired phone, calls, files and quick actions |
+| **Phone** | Phone Link-style page: device card with battery and link status, three big actions (Find phone · Lock · Screenshot), a **Notifications** list (Call / Mark as read / Clear all) and **Messages · Calls · Actions** tabs |
 | **Voice & AI** / **Settings** | Full-screen options |
 
 **Shortcuts:** `F4` mute · `F11` fullscreen · `F12` compact mode  
