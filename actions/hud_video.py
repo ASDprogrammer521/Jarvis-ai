@@ -1,6 +1,6 @@
-"""Muted local/direct-URL video playback in the Jarvis HUD."""
+"""Local/direct-URL/YouTube video playback in the Jarvis HUD (audio via ffplay when available)."""
 from __future__ import annotations
-import re, threading, time
+import re, shutil, subprocess, threading, time
 from pathlib import Path
 from urllib.parse import urlparse
 _ACTIVE_LOCK=threading.Lock()
@@ -22,16 +22,42 @@ def _validate_source(source: str) -> str:
     if not path.is_file(): raise ValueError(f"Local video file was not found: {path}")
     return str(path.resolve())
 
-def _resolve_stream(source: str) -> str:
-    if not _is_youtube(source): return source
+def _resolve_stream(source: str) -> tuple[str, str | None]:
+    """Return (video_url, audio_url). audio_url may equal video_url (muxed) or be None."""
+    if not _is_youtube(source): return source, source
     try: import yt_dlp
     except ImportError as exc: raise RuntimeError("YouTube HUD playback needs optional yt-dlp: pip install yt-dlp") from exc
-    opts={"quiet":True,"no_warnings":True,"noplaylist":True,"format":"best[height<=720]/best"}
-    with yt_dlp.YoutubeDL(opts) as ydl: info=ydl.extract_info(source,download=False)
-    stream=info.get("url")
-    if not stream and info.get("requested_downloads"): stream=info["requested_downloads"][0].get("url")
-    if not isinstance(stream,str) or not stream.startswith(("http://","https://")): raise RuntimeError("Could not resolve a playable YouTube stream.")
-    return stream
+    # YouTube rarely offers muxed formats now, so ask for separate video + audio streams.
+    selectors=("bv*[height<=720]+ba/b[height<=720]/bv*+ba/b","bv*/b","best")
+    last_exc: Exception | None=None; info=None
+    for fmt in selectors:
+        opts={"quiet":True,"no_warnings":True,"noplaylist":True,"format":fmt}
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl: info=ydl.extract_info(source,download=False)
+            break
+        except Exception as exc: last_exc=exc
+    if info is None: raise RuntimeError(f"yt-dlp could not find a playable format. Update it with 'pip install -U yt-dlp'. ({last_exc})")
+    fmts=info.get("requested_formats") or info.get("requested_downloads") or [info]
+    def _url(f): 
+        u=f.get("url"); return u if isinstance(u,str) and u.startswith(("http://","https://")) else None
+    video=next((_url(f) for f in fmts if f.get("vcodec") not in (None,"none") and _url(f)),None)
+    audio=next((_url(f) for f in fmts if f.get("acodec") not in (None,"none") and f.get("vcodec") in (None,"none") and _url(f)),None)
+    if video and not audio:  # muxed single format carries its own audio
+        muxed=next((f for f in fmts if _url(f)==video),{})
+        if muxed.get("acodec") not in (None,"none"): audio=video
+    if not video: video=_url(info)
+    if not video: raise RuntimeError("Could not resolve a playable YouTube stream.")
+    return video, audio
+
+def _start_audio(url: str | None):
+    """Play the audio track with ffplay (no window). Returns the process or None."""
+    exe=shutil.which("ffplay")
+    if not url or not exe: return None
+    try:
+        flags=getattr(subprocess,"CREATE_NO_WINDOW",0)
+        return subprocess.Popen([exe,"-nodisp","-vn","-autoexit","-loglevel","quiet",url],
+                                stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,creationflags=flags)
+    except Exception: return None
 
 def stop_hud_video() -> str:
     with _ACTIVE_LOCK: event=_ACTIVE_STOP
@@ -50,10 +76,10 @@ def _log(ui,message: str):
     except Exception: pass
 
 def _play_worker(source: str,title: str,ui,stop_event: threading.Event):
-    capture=None
+    capture=None; audio_proc=None
     try:
         import cv2
-        stream=_resolve_stream(source); capture=cv2.VideoCapture(); params=[]
+        stream,audio_url=_resolve_stream(source); capture=cv2.VideoCapture(); params=[]
         for prop_name,timeout in (("CAP_PROP_OPEN_TIMEOUT_MSEC",5000),("CAP_PROP_READ_TIMEOUT_MSEC",3000)):
             prop=getattr(cv2,prop_name,None)
             if prop is not None: params.extend([prop,timeout])
@@ -63,19 +89,38 @@ def _play_worker(source: str,title: str,ui,stop_event: threading.Event):
         except (TypeError,cv2.error):
             capture.release(); capture=cv2.VideoCapture(stream)
         if not capture.isOpened(): raise RuntimeError("OpenCV could not open the video; check URL, codec, and FFmpeg support.")
-        fps=capture.get(getattr(cv2,"CAP_PROP_FPS",5)) or 24.0; delay=1.0/max(1.0,min(float(fps),30.0))
-        _log(ui,f"MEDIA: Muted HUD playback started — {title}")
+        fps=capture.get(getattr(cv2,"CAP_PROP_FPS",5)) or 24.0
+        if not (1.0<=fps<=120.0): fps=24.0
+        audio_proc=_start_audio(audio_url)
+        note="" if audio_proc else " (no sound: install ffmpeg/ffplay for audio)"
+        _log(ui,f"MEDIA: HUD playback started — {title}{note}")
+        t0=time.monotonic(); idx=0; min_gap=1.0/30.0; last_shown=0.0
         while not stop_event.is_set():
-            started=time.monotonic(); ok,frame=capture.read()
+            # Keep video on the wall clock so it stays in sync with the audio: skip frames when late.
+            expected=int((time.monotonic()-t0)*fps)
+            while idx<expected and not stop_event.is_set():
+                if not capture.grab(): expected=-1; break
+                idx+=1
+            if expected<0: break
+            ok,frame=capture.read()
             if not ok: break
-            h,w=frame.shape[:2]; scale=min(1.0,960.0/max(w,1),540.0/max(h,1))
+            idx+=1
+            wait=(idx/fps)-(time.monotonic()-t0)
+            if wait>0 and stop_event.wait(wait): break
+            if time.monotonic()-last_shown<min_gap: continue
+            last_shown=time.monotonic()
+            h,w=frame.shape[:2]; scale=min(1.0,1600.0/max(w,1),900.0/max(h,1))
             if scale<1.0: frame=cv2.resize(frame,(max(1,int(w*scale)),max(1,int(h*scale))))
-            ok,encoded=cv2.imencode(".jpg",frame,[int(getattr(cv2,"IMWRITE_JPEG_QUALITY",1)),82])
+            ok,encoded=cv2.imencode(".jpg",frame,[int(getattr(cv2,"IMWRITE_JPEG_QUALITY",1)),85])
             if ok: ui.show_media_frame(encoded.tobytes(),title)
-            stop_event.wait(max(0.0,delay-(time.monotonic()-started)))
         _log(ui,f"MEDIA: HUD playback {'stopped' if stop_event.is_set() else 'ended'} — {title}")
     except Exception as exc: _log(ui,f"ERR: HUD video playback failed — {exc}")
     finally:
+        if audio_proc is not None:
+            try: audio_proc.terminate(); audio_proc.wait(timeout=2)
+            except Exception:
+                try: audio_proc.kill()
+                except Exception: pass
         if capture is not None:
             try: capture.release()
             except Exception: pass
@@ -109,8 +154,8 @@ def play_hud_video(parameters: dict,response=None,player=None,session_memory=Non
         with _ACTIVE_LOCK:
             if _ACTIVE_STOP is event: _ACTIVE_STOP=None
         return f"Could not start HUD video playback: {exc}"
-    return "Muted HUD video playback started in the background. Close the HUD media panel or use action='stop' to stop it. The stream and delivery are not verified."
+    return "HUD video playback started in the background (with sound if ffplay is installed). Close the HUD media panel or use action='stop' to stop it. The stream and delivery are not verified."
 
-TOOL={"name":"play_hud_video","description":"Play a local video file or direct HTTP(S) video URL silently in Jarvis's HUD. YouTube URLs require optional yt-dlp and OpenCV. Use action='stop' to stop playback. Audio is not played.","parameters":{"type":"OBJECT","properties":{"action":{"type":"STRING","description":"play (default) or stop"},"source":{"type":"STRING","description":"Local file path or direct HTTP(S)/YouTube URL"},"title":{"type":"STRING","description":"Optional short HUD title"}},"required":[]},"handler":play_hud_video}
+TOOL={"name":"play_hud_video","description":"Play a local video file, direct HTTP(S) video URL or YouTube URL in Jarvis's HUD, with sound (needs ffplay) and a full-screen button. YouTube needs yt-dlp; all need OpenCV. Use action='stop' to stop playback.","parameters":{"type":"OBJECT","properties":{"action":{"type":"STRING","description":"play (default) or stop"},"source":{"type":"STRING","description":"Local file path or direct HTTP(S)/YouTube URL"},"title":{"type":"STRING","description":"Optional short HUD title"}},"required":[]},"handler":play_hud_video}
 
 #by ASDcuber521

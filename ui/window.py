@@ -15,7 +15,7 @@ from PyQt6.QtCore import QCoreApplication, QEasingCurve, QPoint, QPropertyAnimat
 from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QFont, QImage, QKeySequence, QPainter, QPen, QPixmap, QRadialGradient, QSurfaceFormat
 from PyQt6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
-    QPushButton, QStackedWidget, QTextEdit, QVBoxLayout, QWidget,
+    QPushButton, QSizePolicy, QStackedWidget, QTextEdit, QVBoxLayout, QWidget,
 )
 
 import ui.theme as ui_theme
@@ -91,6 +91,7 @@ class StageHost(QWidget):
         self.stage = stage
         stage.setParent(self)
         self.floats: dict[str, QWidget] = {}
+        self.media_full = False
 
     def resizeEvent(self, e):
         self.stage.setGeometry(0, 0, self.width(), self.height())
@@ -105,9 +106,12 @@ class StageHost(QWidget):
             c.setGeometry(18, H - h - 10, W - 36, h)
         m = self.floats.get("media")
         if m is not None and m.isVisible():
-            media_w = min(640, max(360, min(int(W * 0.50), W - 28)))
-            media_h = max(220, min(H - 24, int(media_w * 0.75) + 58))
-            m.setGeometry(max(12, W - media_w - 12), 12, media_w, media_h)
+            if self.media_full:
+                m.setGeometry(0, 0, W, H)
+            else:
+                media_w = min(960, max(360, min(int(W * 0.66), W - 28)))
+                media_h = max(220, min(H - 24, int(media_w * 9 / 16) + 58))
+                m.setGeometry(max(12, W - media_w - 12), 12, media_w, media_h)
         k = self.floats.get("clip")
         if k is not None and k.isVisible():
             k.setGeometry(int((W - min(W - 40, 620)) / 2), 12, min(W - 40, 620), 96)
@@ -467,12 +471,18 @@ class MainWindow(QMainWindow):
         self._media_title.setStyleSheet(f"color: {C.ACC}; font-weight: 700; letter-spacing: 2px; font-size: 10px;")
         h.addWidget(self._media_title)
         h.addStretch()
+        self._media_full_btn = IconButton("full", 26, flat=True, tip="Full screen (Esc to exit)")
+        self._media_full_btn.clicked.connect(self._toggle_media_full)
+        h.addWidget(self._media_full_btn)
         x = IconButton("close", 26, flat=True)
         x.clicked.connect(self._close_media_user)
         h.addWidget(x)
         l.addLayout(h)
         self._media_lbl = QLabel()
         self._media_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._media_lbl.setMinimumSize(1, 1)
+        self._media_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self._media_lbl.mouseDoubleClickEvent = lambda e: self._toggle_media_full()
         l.addWidget(self._media_lbl, 1)
         return c
 
@@ -1231,7 +1241,7 @@ class MainWindow(QMainWindow):
             threading.Thread(target=self._cam_worker, daemon=True).start()
         elif not on:
             self._cam_run = False
-            self._media.hide()
+            self._hide_media()
 
     def _cam_worker(self):
         try:
@@ -1287,7 +1297,7 @@ class MainWindow(QMainWindow):
     def _on_media_frame(self, data: bytes, title: str):
         if not data:
             if not self._cam_run:
-                self._media.hide()
+                self._hide_media()
             return
         if self._cam_run:
             return
@@ -1305,7 +1315,32 @@ class MainWindow(QMainWindow):
 
     def _close_media(self):
         if not self._cam_run:
-            self._media.hide()
+            self._hide_media()
+
+    def _hide_media(self):
+        self._exit_media_full()
+        self._media.hide()
+
+    def _toggle_media_full(self):
+        if self.host.media_full:
+            self._exit_media_full()
+            return
+        self._media_was_fs = self.isFullScreen()
+        if not self._media_was_fs:
+            self.showFullScreen()
+        self.host.media_full = True
+        self._media_full_btn.set_icon("compact")
+        self._media.raise_()
+        self.host.layout_floats()
+
+    def _exit_media_full(self):
+        if not self.host.media_full:
+            return
+        self.host.media_full = False
+        self._media_full_btn.set_icon("full")
+        if not getattr(self, "_media_was_fs", True) and self.isFullScreen():
+            self.showNormal()
+        self.host.layout_floats()
 
     def _close_media_user(self):
         self._cam_run = False
@@ -1314,7 +1349,7 @@ class MainWindow(QMainWindow):
             stop_hud_video()
         except Exception:
             pass
-        self._media.hide()
+        self._hide_media()
 
     def show_confirm(self, title: str, detail: str = ""):
         self._confirm_sig.emit(title, detail)
@@ -1397,6 +1432,8 @@ class MainWindow(QMainWindow):
             self.toggle_fullscreen()
         elif hk == "compact":
             self.enter_compact()
+        elif k == Qt.Key.Key_Escape and self.host.media_full:
+            self._exit_media_full()
         elif k == Qt.Key.Key_Escape and self.isFullScreen() and not self.modal.is_open():
             self.showNormal()
         elif (self._ptt_on and k == Qt.Key.Key_Space and e.modifiers() & Qt.KeyboardModifier.ControlModifier
