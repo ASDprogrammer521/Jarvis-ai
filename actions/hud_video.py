@@ -27,10 +27,44 @@ def _import_mpv():
     import mpv
     return mpv
 
+def _download_libmpv(log=lambda m: None) -> Path:
+    """Windows: fetch libmpv-2.dll (one time, ~30 MB) from the shinchiro mpv builds into the Jarvis folder."""
+    import json, shutil, subprocess, tempfile, urllib.request
+    target=_ROOT/"libmpv-2.dll"
+    if target.is_file(): return target
+    api="https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest"
+    headers={"User-Agent":"Jarvis-AI","Accept":"application/vnd.github+json"}
+    with urllib.request.urlopen(urllib.request.Request(api,headers=headers),timeout=30) as r: release=json.load(r)
+    assets=[a for a in release.get("assets",[]) if re.match(r"^mpv-dev-x86_64-(?!v3)\S+\.7z$",a.get("name",""))]
+    if not assets: raise RuntimeError("no libmpv build found in the latest release")
+    asset=assets[0]; log(f"MEDIA: Downloading libmpv (one time, {asset.get('size',0)//1048576} MB) — {asset['name']}")
+    with tempfile.TemporaryDirectory() as tmp:
+        archive=Path(tmp)/asset["name"]; out=Path(tmp)/"out"; out.mkdir()
+        req=urllib.request.Request(asset["browser_download_url"],headers={"User-Agent":"Jarvis-AI"})
+        with urllib.request.urlopen(req,timeout=120) as r, open(archive,"wb") as f: shutil.copyfileobj(r,f)
+        extracted=False
+        tar=shutil.which("tar")  # Windows 10+ ships bsdtar, which reads .7z
+        if tar:
+            extracted=subprocess.run([tar,"-xf",str(archive),"-C",str(out)],capture_output=True).returncode==0
+        if not extracted:
+            try:
+                import py7zr
+                with py7zr.SevenZipFile(archive) as z: z.extractall(out)
+                extracted=True
+            except Exception: pass
+        if not extracted: raise RuntimeError("could not unpack the .7z (install 7-Zip or run: pip install py7zr)")
+        dll=next(out.rglob("libmpv-2.dll"),None) or next(out.rglob("mpv-2.dll"),None)
+        if dll is None: raise RuntimeError("libmpv-2.dll was not inside the archive")
+        shutil.copyfile(dll,target)
+    log("MEDIA: libmpv installed")
+    return target
+
 def _mpv_problem() -> str | None:
     try: _import_mpv(); return None
     except ImportError: return "python-mpv is not installed. "+_MPV_HELP
-    except OSError as exc: return f"libmpv was not found ({exc}). "+_MPV_HELP
+    except OSError as exc:
+        if sys.platform=="win32": return None  # the worker downloads libmpv automatically
+        return f"libmpv was not found ({exc}). "+_MPV_HELP
 
 def _is_youtube(source: str) -> bool:
     host=(urlparse(source).hostname or "").lower().removeprefix("www.")
@@ -123,7 +157,13 @@ def _log(ui,message: str):
 def _play_worker(source: str,title: str,ui,stop_event: threading.Event):
     player=None; window_open=False
     try:
-        mpv=_import_mpv()
+        try: mpv=_import_mpv()
+        except OSError:
+            if sys.platform!="win32": raise
+            try: _download_libmpv(lambda m: _log(ui,m))
+            except Exception as exc: raise RuntimeError(f"libmpv download failed ({exc}). "+_MPV_HELP) from exc
+            mpv=_import_mpv()
+        if stop_event.is_set(): return
         if source.startswith("search:"):
             latest=source.startswith("search:latest:")
             query=source.split(":",2)[2] if latest else source[len("search:"):]
