@@ -15,7 +15,7 @@ from PyQt6.QtCore import QCoreApplication, QEasingCurve, QPoint, QPropertyAnimat
 from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QFont, QImage, QKeySequence, QPainter, QPen, QPixmap, QRadialGradient, QSurfaceFormat
 from PyQt6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
-    QPushButton, QSizePolicy, QStackedWidget, QTextEdit, QVBoxLayout, QWidget,
+    QPushButton, QSizePolicy, QSlider, QStackedWidget, QStyle, QTextEdit, QVBoxLayout, QWidget,
 )
 
 import ui.theme as ui_theme
@@ -110,7 +110,7 @@ class StageHost(QWidget):
                 m.setGeometry(0, 0, W, H)
             else:
                 media_w = min(960, max(360, min(int(W * 0.66), W - 28)))
-                media_h = max(220, min(H - 24, int(media_w * 9 / 16) + 58))
+                media_h = max(220, min(H - 24, int(media_w * 9 / 16) + 58 + getattr(self, "media_extra", 0)))
                 m.setGeometry(max(12, W - media_w - 12), 12, media_w, media_h)
         k = self.floats.get("clip")
         if k is not None and k.isVisible():
@@ -121,10 +121,50 @@ class StageHost(QWidget):
             t.move(int((W - t.width()) / 2), 14)
 
 
+class SeekSlider(QSlider):
+    """Seek bar for the HUD video: a click or drag jumps straight to that position (a plain QSlider only pages)."""
+    seek_to = pyqtSignal(int)
+
+    def __init__(self):
+        super().__init__(Qt.Orientation.Horizontal)
+        self.setRange(0, 1000)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.dragging = False
+
+    def _val(self, x) -> int:
+        x = max(0, min(int(x), self.width()))
+        return QStyle.sliderValueFromPosition(self.minimum(), self.maximum(), x, max(1, self.width()))
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.dragging = True
+            self.setValue(self._val(e.position().x()))
+            e.accept()
+        else:
+            super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        if self.dragging:
+            self.setValue(self._val(e.position().x()))
+            e.accept()
+        else:
+            super().mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        if self.dragging and e.button() == Qt.MouseButton.LeftButton:
+            self.dragging = False
+            self.seek_to.emit(self._val(e.position().x()))
+            e.accept()
+        else:
+            super().mouseReleaseEvent(e)
+
+
 class MpvWindow(QWidget):
     """Frameless native window that mpv renders into. It floats over the HUD media panel
     (the same window goes full screen, so playback never restarts)."""
     want_toggle = pyqtSignal()
+    key_handler = None  # set by the HUD: handles Space / arrows (see MainWindow._video_key)
 
     def __init__(self, owner):
         super().__init__(owner, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
@@ -138,6 +178,8 @@ class MpvWindow(QWidget):
         k = e.key()
         if k in (Qt.Key.Key_F, Qt.Key.Key_F11) or (k == Qt.Key.Key_Escape and self.isFullScreen()):
             self.want_toggle.emit()
+        elif self.key_handler is not None and self.key_handler(e):
+            pass
         else:
             super().keyPressEvent(e)
 
@@ -248,7 +290,7 @@ class MainWindow(QMainWindow):
         self._mpv_close_sig.connect(self._hide_media)
         self._mpv_cmd_sig.connect(self._mpv_cmd)
         self._mpv_timer = QTimer(self)
-        self._mpv_timer.timeout.connect(self._sync_mpv_geometry)
+        self._mpv_timer.timeout.connect(self._mpv_tick)
         self._confirm_sig.connect(self._show_confirm)
         self._confirm_hide_sig.connect(self._hide_confirm)
         self._wake_dl_sig.connect(self._on_wake_dl)
@@ -521,7 +563,57 @@ class MainWindow(QMainWindow):
         self._media_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self._media_lbl.mouseDoubleClickEvent = lambda e: self._toggle_media_full()
         l.addWidget(self._media_lbl, 1)
+        l.addWidget(self._make_video_bar())
         return c
+
+    def _make_video_bar(self) -> QWidget:
+        """Control bar shown under the video while mpv plays: seek bar, time, -5 min / pause / +5 min / stop."""
+        bar = QWidget()
+        bar.setFixedHeight(64)
+        bar.setStyleSheet("background: transparent;")
+        bl = QVBoxLayout(bar)
+        bl.setContentsMargins(0, 2, 0, 0)
+        bl.setSpacing(4)
+        sl = SeekSlider()
+        sl.setStyleSheet(
+            f"QSlider::groove:horizontal {{ height: 4px; background: {rgba(C.TEXT_MED, .25)}; border-radius: 2px; }}"
+            f"QSlider::sub-page:horizontal {{ background: {C.PRI}; border-radius: 2px; }}"
+            f"QSlider::handle:horizontal {{ background: {C.PRI}; width: 12px; margin: -5px 0; border-radius: 6px; }}")
+        sl.seek_to.connect(self._mpv_seek_fraction)
+        self._mpv_slider = sl
+        bl.addWidget(sl)
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        self._mpv_time = QLabel("0:00 / --:--")
+        self._mpv_time.setStyleSheet(f"color: {C.TEXT_MED}; font-size: 11px;")
+        row.addWidget(self._mpv_time)
+        row.addStretch()
+
+        def btn(text, slot):
+            b = QPushButton(text)
+            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # never steal Space / arrows from the video
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setFixedHeight(26)
+            b.setStyleSheet(
+                f"QPushButton {{ color: {C.TEXT_MED}; background: {rgba(C.PRI, .10)}; border: 1px solid {rgba(C.PRI, .35)};"
+                f" border-radius: 8px; padding: 0 12px; font-size: 11px; font-weight: 600; }}"
+                f"QPushButton:hover {{ background: {rgba(C.PRI, .28)}; color: white; }}")
+            b.clicked.connect(slot)
+            row.addWidget(b)
+            return b
+
+        btn("-5 min", lambda: self._video_ctl("seek", -300))
+        self._mpv_play_btn = btn("Pause", lambda: self._video_ctl("pause"))
+        btn("+5 min", lambda: self._video_ctl("seek", 300))
+        btn("Stop", self._close_media_user)
+        row.addStretch()
+        self._mpv_status = QLabel("")
+        self._mpv_status.setStyleSheet(f"color: {C.ACC}; font-size: 10px; font-weight: 700;")
+        row.addWidget(self._mpv_status)
+        bl.addLayout(row)
+        bar.hide()
+        self._mpv_bar = bar
+        return bar
 
     def _make_clip(self) -> GlassCard:
         c = GlassCard(self.host, radius=20, tint=210, accent=C.PRI)
@@ -1388,7 +1480,18 @@ class MainWindow(QMainWindow):
             self._mpv_close()
             vw = MpvWindow(self)
             vw.want_toggle.connect(self._toggle_media_full)
+            vw.key_handler = self._video_key
             self._mpv_win = vw
+            self._mpv_slider.setValue(0)
+            self._mpv_time.setText("0:00 / --:--")
+            self._mpv_status.setText("")
+            self._mpv_play_btn.setText("Pause")
+            self._mpv_bar.show()
+            self.host.media_extra = 76
+            fw = QApplication.focusWidget()
+            if isinstance(fw, (QLineEdit, QTextEdit)):
+                fw.clearFocus()  # so Space / arrows reach the video instead of a text box
+            self.setFocus()
             self._media_title.setText(title or "VIDEO")
             self._media_lbl.clear()
             self._media_timer.stop()
@@ -1422,6 +1525,9 @@ class MainWindow(QMainWindow):
 
     def _mpv_close(self):
         self._mpv_timer.stop()
+        if getattr(self, "_mpv_bar", None) is not None:
+            self._mpv_bar.hide()
+        self.host.media_extra = 0
         vw, self._mpv_win = self._mpv_win, None
         if vw is not None:
             try:
@@ -1429,6 +1535,84 @@ class MainWindow(QMainWindow):
                 vw.deleteLater()
             except Exception:
                 pass
+
+    # ── HUD video controls ──
+    @staticmethod
+    def _fmt_time(sec: float) -> str:
+        sec = int(max(0, sec))
+        h, rem = divmod(sec, 3600)
+        m, s = divmod(rem, 60)
+        return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+    def _video_ctl(self, cmd: str, value=None):
+        try:
+            from actions.hud_video import video_control
+            video_control(cmd, value)
+        except Exception:
+            pass
+
+    def _mpv_seek_fraction(self, v: int):
+        try:
+            from actions.hud_video import get_video_state
+            dur = get_video_state()["dur"]
+        except Exception:
+            return
+        if dur > 0:
+            self._mpv_hold_until = time.monotonic() + 1.5  # keep the bar where the user dropped it until mpv has sought
+            self._video_ctl("seek_abs", dur * max(0, min(1000, v)) / 1000.0)
+
+    def _video_key(self, e) -> bool:
+        """Space = pause, ←/→ = 5 s, Shift+←/→ = 5 min, ↑/↓ = volume. True when the key was used."""
+        mods = e.modifiers()
+        if mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.MetaModifier):
+            return False
+        k = e.key()
+        shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+        if k == Qt.Key.Key_Space:
+            if not e.isAutoRepeat():
+                self._video_ctl("pause")
+        elif k == Qt.Key.Key_Left:
+            self._video_ctl("seek", -300 if shift else -5)
+        elif k == Qt.Key.Key_Right:
+            self._video_ctl("seek", 300 if shift else 5)
+        elif k == Qt.Key.Key_Up:
+            self._video_ctl("volume", 5)
+        elif k == Qt.Key.Key_Down:
+            self._video_ctl("volume", -5)
+        else:
+            return False
+        return True
+
+    def _mpv_tick(self):
+        self._sync_mpv_geometry()
+        self._update_mpv_bar()
+
+    def _update_mpv_bar(self):
+        if self._mpv_win is None or not self._mpv_bar.isVisible():
+            return
+        try:
+            from actions.hud_video import get_video_state
+            st = get_video_state()
+        except Exception:
+            return
+        pos, dur = st["pos"], st["dur"]
+        sl = self._mpv_slider
+        if sl.dragging and dur > 0:
+            pos = dur * sl.value() / 1000.0
+        elif dur > 0 and time.monotonic() >= getattr(self, "_mpv_hold_until", 0.0):
+            sl.setValue(int(max(0.0, min(1.0, pos / dur)) * 1000))
+        self._mpv_time.setText(f"{self._fmt_time(pos)} / {self._fmt_time(dur) if dur > 0 else '--:--'}")
+        self._mpv_play_btn.setText("Play" if st["paused"] and not st["buffering"] else "Pause")
+        if st["buffering"]:
+            status = "BUFFERING…"
+        else:
+            parts = []
+            if st["cache"] >= 1:
+                parts.append(f"buffer {st['cache']:.0f}s")
+            if st["drops"] > 0:
+                parts.append(f"dropped {st['drops']}")
+            status = "  ·  ".join(parts)
+        self._mpv_status.setText(status)
 
     def _close_media(self):
         if not self._cam_run:
@@ -1565,6 +1749,8 @@ class MainWindow(QMainWindow):
             self.toggle_fullscreen()
         elif hk == "compact":
             self.enter_compact()
+        elif self._mpv_win is not None and not self.modal.is_open() and self._video_key(e):
+            pass
         elif k == Qt.Key.Key_Escape and self.host.media_full:
             self._exit_media_full()
         elif k == Qt.Key.Key_Escape and self.isFullScreen() and not self.modal.is_open():
