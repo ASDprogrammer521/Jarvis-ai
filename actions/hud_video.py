@@ -10,9 +10,14 @@ def _is_youtube(source: str) -> bool:
     host=(urlparse(source).hostname or "").lower().removeprefix("www.")
     return host in {"youtube.com","youtu.be","m.youtube.com","music.youtube.com","youtube-nocookie.com"}
 
+def _looks_like_path(value: str) -> bool:
+    return bool(re.search(r"[\\/]",value) or re.search(r"\.(mp4|mkv|webm|avi|mov|m4v|flv|wmv|ts)$",value,re.IGNORECASE))
+
 def _validate_source(source: str) -> str:
     value=str(source or "").strip()
-    if not value or len(value)>2048: raise ValueError("Provide a video file path or an HTTP(S) URL (max 2048 characters).")
+    if not value or len(value)>2048: raise ValueError("Provide a video file path, an HTTP(S) URL, or a search query (max 2048 characters).")
+    if not re.match(r"^[a-z][a-z0-9+.-]*://",value,re.IGNORECASE) and not _looks_like_path(value):
+        return "search:"+value  # plain words -> search YouTube
     if re.match(r"^https?://",value,re.IGNORECASE):
         parsed=urlparse(value)
         if not parsed.hostname or parsed.username or parsed.password: raise ValueError("The video URL must have a host and no embedded credentials.")
@@ -21,6 +26,23 @@ def _validate_source(source: str) -> str:
     path=Path(value).expanduser()
     if not path.is_file(): raise ValueError(f"Local video file was not found: {path}")
     return str(path.resolve())
+
+def _search_video(query: str,latest: bool=False) -> tuple[str,str]:
+    """Find a YouTube video for a text query. Returns (watch_url, title)."""
+    try: import yt_dlp
+    except ImportError as exc: raise RuntimeError("Video search needs optional yt-dlp: pip install yt-dlp") from exc
+    prefix="ytsearchdate10" if latest else "ytsearch10"
+    opts={"quiet":True,"no_warnings":True,"extract_flat":True,"skip_download":True}
+    with yt_dlp.YoutubeDL(opts) as ydl: info=ydl.extract_info(f"{prefix}:{query}",download=False)
+    entries=[e for e in (info.get("entries") or []) if e and (e.get("id") or e.get("url"))]
+    if not entries: raise RuntimeError(f"No YouTube results for: {query}")
+    def ok(e):
+        dur=e.get("duration")
+        return e.get("live_status") not in ("is_live","is_upcoming") and (dur is None or 45<=dur<=4*3600)
+    pick=next((e for e in entries if ok(e)),entries[0])
+    url=pick.get("url") or f"https://www.youtube.com/watch?v={pick.get('id')}"
+    if not url.startswith("http"): url=f"https://www.youtube.com/watch?v={pick.get('id') or url}"
+    return url,str(pick.get("title") or query)
 
 def _resolve_stream(source: str) -> tuple[str, str | None, str | None]:
     """Return (video_url, audio_url, user_agent). audio_url may equal video_url (muxed) or be None."""
@@ -111,6 +133,14 @@ def _log(ui,message: str):
 def _play_worker(source: str,title: str,ui,stop_event: threading.Event):
     capture=None; audio_proc=None
     try:
+        if source.startswith("search:"):
+            latest=source.startswith("search:latest:")
+            query=source.split(":",2)[2] if latest else source[len("search:"):]
+            _log(ui,f"MEDIA: Searching YouTube — {query}")
+            source,found=_search_video(query,latest)
+            if not title or title==query[:60]: title=found[:60]
+            _log(ui,f"MEDIA: Found — {found}")
+        if stop_event.is_set(): return
         stream,audio_url,ua=_resolve_stream(source)
         def _begin():
             nonlocal audio_proc
@@ -174,17 +204,23 @@ def play_hud_video(parameters: dict,response=None,player=None,session_memory=Non
     params=parameters or {}; action=str(params.get("action","play")).strip().lower()
     if action=="stop": return stop_hud_video()
     if action!="play": return "Unknown action. Use action='play' or action='stop'."
-    try: source=_validate_source(params.get("source",""))
+    query=str(params.get("query") or "").strip()
+    try: source=_validate_source(query or params.get("source",""))
     except Exception as exc: return str(exc)
+    if source.startswith("search:"):
+        raw=source[len("search:"):]
+        source="search:latest:"+raw if bool(params.get("latest")) else source
     ui=_ui_for(player)
     if ui is None: return "HUD video cannot start because the media panel is unavailable. Nothing was opened."
     if bool(getattr(getattr(ui,"_win",None),"_cam_run",False)): return "The HUD media panel is in camera mode. Close the camera panel before starting video."
     try: import cv2 # noqa: F401
     except ImportError: return "HUD video needs optional OpenCV: pip install opencv-python"
-    if _is_youtube(source):
+    if _is_youtube(source) or source.startswith("search:"):
         try: import yt_dlp # noqa: F401
         except ImportError: return "YouTube HUD playback needs optional yt-dlp: pip install yt-dlp"
-    parsed=urlparse(source); title=str(params.get("title") or Path(parsed.path).name or "HUD VIDEO").strip()[:60] or "HUD VIDEO"
+    if source.startswith("search:"): default_title=source.split(":",2)[2] if source.startswith("search:latest:") else source[len("search:"):]
+    else: default_title=Path(urlparse(source).path).name
+    title=str(params.get("title") or default_title or "HUD VIDEO").strip()[:60] or "HUD VIDEO"
     global _ACTIVE_STOP
     stop_hud_video(); event=threading.Event()
     with _ACTIVE_LOCK: _ACTIVE_STOP=event
@@ -196,6 +232,6 @@ def play_hud_video(parameters: dict,response=None,player=None,session_memory=Non
         return f"Could not start HUD video playback: {exc}"
     return "HUD video playback started in the background (with sound if ffplay is installed). Close the HUD media panel or use action='stop' to stop it. The stream and delivery are not verified."
 
-TOOL={"name":"play_hud_video","description":"Play a local video file, direct HTTP(S) video URL or YouTube URL in Jarvis's HUD, with sound (needs ffplay) and a full-screen button. YouTube needs yt-dlp; all need OpenCV. Use action='stop' to stop playback.","parameters":{"type":"OBJECT","properties":{"action":{"type":"STRING","description":"play (default) or stop"},"source":{"type":"STRING","description":"Local file path or direct HTTP(S)/YouTube URL"},"title":{"type":"STRING","description":"Optional short HUD title"}},"required":[]},"handler":play_hud_video}
+TOOL={"name":"play_hud_video","description":"WATCH a video in Jarvis's HUD. Use this whenever the user asks to play/put on/watch a video: pass a YouTube link or local file in source, OR just describe it in query (e.g. 'good minecraft video', 'Parrot X2 new video') and Jarvis finds one on YouTube; set latest=true when they want the newest. Plays a local video file, direct HTTP(S) video URL or YouTube URL, with sound (needs ffplay) and a full-screen button. YouTube needs yt-dlp; all need OpenCV. Use action='stop' to stop playback.","parameters":{"type":"OBJECT","properties":{"action":{"type":"STRING","description":"play (default) or stop"},"source":{"type":"STRING","description":"Local file path or direct HTTP(S)/YouTube URL"},"query":{"type":"STRING","description":"What to watch, in plain words; Jarvis searches YouTube and plays the best match"},"latest":{"type":"BOOLEAN","description":"With query: pick the newest upload instead of the most relevant"},"title":{"type":"STRING","description":"Optional short HUD title"}},"required":[]},"handler":play_hud_video}
 
 #by ASDcuber521

@@ -423,7 +423,7 @@ def youtube_video(
 
 TOOL = {
     "name": "youtube_video",
-    "description": "Controls YouTube summaries, info, and trends. For muted in-HUD playback of a YouTube or local/direct video URL, use play_hud_video.",
+    "description": "Controls YouTube summaries, info, and trends. To WATCH a video inside the Jarvis HUD (by link or just by describing it, e.g. 'a good minecraft video'), use play_hud_video instead of the play action.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
