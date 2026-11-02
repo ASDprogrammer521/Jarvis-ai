@@ -178,6 +178,9 @@ class MainWindow(QMainWindow):
         self._ptt_on = False
         self._ptt_down = False
         self._cam_run = False
+        self._media_lock = threading.Lock()
+        self._media_pending = None
+        self._media_queued = False
         self._compact: CompactMic | None = None
         self._t0 = time.time()
         self._confirm_panel = None
@@ -471,7 +474,7 @@ class MainWindow(QMainWindow):
         self._media_title.setStyleSheet(f"color: {C.ACC}; font-weight: 700; letter-spacing: 2px; font-size: 10px;")
         h.addWidget(self._media_title)
         h.addStretch()
-        self._media_full_btn = IconButton("full", 26, flat=True, tip="Full screen (Esc to exit)")
+        self._media_full_btn = IconButton("full", 26, flat=True, tip="Enlarge (Esc to shrink)")
         self._media_full_btn.clicked.connect(self._toggle_media_full)
         h.addWidget(self._media_full_btn)
         x = IconButton("close", 26, flat=True)
@@ -1292,9 +1295,20 @@ class MainWindow(QMainWindow):
         self._media_timer.start(6000)
 
     def show_media_frame(self, data: bytes, title: str = ""):
-        self._media_frame_sig.emit(bytes(data or b""), str(title or ""))
+        with self._media_lock:
+            self._media_pending = (bytes(data or b""), str(title or ""))
+            if self._media_queued:
+                return
+            self._media_queued = True
+        self._media_frame_sig.emit(b"", "")
 
-    def _on_media_frame(self, data: bytes, title: str):
+    def _on_media_frame(self, _d: bytes = b"", _t: str = ""):
+        with self._media_lock:
+            pending, self._media_pending = self._media_pending, None
+            self._media_queued = False
+        if pending is None:
+            return
+        data, title = pending
         if not data:
             if not self._cam_run:
                 self._hide_media()
@@ -1310,7 +1324,7 @@ class MainWindow(QMainWindow):
             self.host.layout_floats()
         self._media.raise_()
         self._media_lbl.setPixmap(QPixmap.fromImage(img).scaled(
-            self._media_lbl.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            self._media_lbl.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.FastTransformation))
         self._media_timer.stop()  # video panel is closed by the player (empty frame) or the user, not by a timeout
 
     def _close_media(self):
@@ -1325,9 +1339,6 @@ class MainWindow(QMainWindow):
         if self.host.media_full:
             self._exit_media_full()
             return
-        self._media_was_fs = self.isFullScreen()
-        if not self._media_was_fs:
-            self.showFullScreen()
         self.host.media_full = True
         self._media_full_btn.set_icon("compact")
         self._media.raise_()
@@ -1338,8 +1349,6 @@ class MainWindow(QMainWindow):
             return
         self.host.media_full = False
         self._media_full_btn.set_icon("full")
-        if not getattr(self, "_media_was_fs", True) and self.isFullScreen():
-            self.showNormal()
         self.host.layout_floats()
 
     def _close_media_user(self):

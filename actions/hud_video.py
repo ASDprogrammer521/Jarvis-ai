@@ -70,7 +70,7 @@ def _pump_ffmpeg(stream: str,ua: str | None,ui,title: str,stop_event: threading.
     if stream.startswith("http"):
         cmd+=["-reconnect","1","-reconnect_streamed","1","-reconnect_delay_max","5"]
         if ua: cmd+=["-user_agent",ua]
-    cmd+=["-re","-i",stream,"-an","-sn","-vf","fps=30,scale='min(1280,iw)':-2","-q:v","4","-f","image2pipe","-vcodec","mjpeg","-"]
+    cmd+=["-re","-i",stream,"-an","-sn","-vf","fps=24,scale='min(1280,iw)':-2","-q:v","4","-f","image2pipe","-vcodec","mjpeg","-"]
     proc=subprocess.Popen(cmd,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
     frames=0; buf=b""; started=False
     try:
