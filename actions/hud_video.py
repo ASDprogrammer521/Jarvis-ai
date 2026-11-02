@@ -3,10 +3,11 @@
 mpv renders straight into a native window placed over the HUD media panel (GPU decoding, sound,
 60 fps, perfect A/V sync, seeking). YouTube links are resolved with yt-dlp; plain-text requests
 ("a good minecraft video", "Parrot X2 new video") are searched on YouTube first.
-Keys while the video has focus: Space pause · ←/→ seek 5 s · ↑/↓ volume · F / F11 / double-click full screen · Esc leave full screen.
+Keys: Space pause · ←/→ seek 5 s · Shift+←/→ seek 5 min · ↑/↓ volume · F / F11 / double-click full screen · Esc leave full screen.
+The HUD shows a control bar under the video (position/length, seek bar, -5 min / pause / +5 min / stop).
 """
 from __future__ import annotations
-import os, re, sys, threading, time
+import collections, os, queue, re, sys, threading, time
 from pathlib import Path
 from urllib.parse import quote, urlparse
 _ACTIVE_LOCK=threading.Lock()
@@ -15,6 +16,54 @@ _ROOT=Path(__file__).resolve().parent.parent
 _MPV_HELP=("HUD video needs mpv: 1) pip install python-mpv  2) put libmpv next to main.py "
            "(Windows: download libmpv from https://sourceforge.net/projects/mpv-player-windows/files/libmpv/ "
            "and copy libmpv-2.dll — or mpv-2.dll — into the Jarvis folder; Linux: sudo apt install libmpv2; macOS: brew install mpv).")
+
+# Videos longer than this are played at most at _LONG_VIDEO_MAX_HEIGHT (multi-hour 1080p streams are heavy).
+_LONG_VIDEO_SECS=3600
+_LONG_VIDEO_MAX_HEIGHT=720
+
+# Playback control: the HUD / key handlers put commands in _CMD_Q, the worker thread applies them to mpv and
+# publishes the player state in _STATE (so the GUI thread never talks to libmpv directly).
+_CMD_Q: "queue.Queue[tuple]"=queue.Queue()
+_STATE_LOCK=threading.Lock()
+_STATE={"active":False,"pos":0.0,"dur":0.0,"paused":False,"buffering":False,"cache":0.0,"drops":0}
+# key -> (command, value); used for the mpv window's own key bindings (the HUD window has the same map in Qt)
+_CONTROL_KEYS=(("SPACE","pause",None),("LEFT","seek",-5),("RIGHT","seek",5),("Shift+LEFT","seek",-300),
+               ("Shift+RIGHT","seek",300),("UP","volume",5),("DOWN","volume",-5))
+
+def get_video_state() -> dict:
+    """Snapshot of the current playback state (position/duration in seconds)."""
+    with _STATE_LOCK: return dict(_STATE)
+
+def video_control(cmd: str,value=None) -> bool:
+    """Queue a control command: pause | play | seek (relative s) | seek_abs (s) | volume (delta). False if no video is active."""
+    with _STATE_LOCK: active=_STATE["active"]
+    if not active: return False
+    _CMD_Q.put((cmd,value)); return True
+
+def _apply_control(player,cmd: str,value):
+    if cmd=="pause": player.pause=not bool(player.pause)
+    elif cmd=="play": player.pause=False
+    elif cmd=="seek": player.command("seek",str(float(value)),"relative")
+    elif cmd=="seek_abs": player.command("seek",str(max(0.0,float(value))),"absolute")
+    elif cmd=="volume": player.volume=max(0.0,min(130.0,float(player.volume or 100)+float(value)))
+
+def _poll_state(player):
+    def g(name,default=None):
+        try:
+            v=getattr(player,name)
+            return default if v is None else v
+        except Exception: return default
+    drops=0
+    for name in ("frame_drop_count","decoder_frame_drop_count"):
+        try: drops+=int(g(name,0) or 0)
+        except Exception: pass
+    with _STATE_LOCK:
+        _STATE.update(pos=float(g("time_pos",_STATE["pos"]) or 0),dur=float(g("duration",0) or 0),paused=bool(g("pause",False)),
+                      buffering=bool(g("paused_for_cache",False)),cache=float(g("demuxer_cache_duration",0) or 0),drops=drops)
+
+def _fmt_time(sec: float) -> str:
+    sec=int(max(0,sec)); h,rem=divmod(sec,3600); m,s=divmod(rem,60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 def _import_mpv():
     """Import python-mpv, letting a libmpv DLL that sits in the Jarvis folder be found."""
@@ -128,6 +177,13 @@ def _resolve_stream(source: str) -> tuple[str, str | None, str | None]:
             break
         except Exception as exc: last_exc=exc
     if info is None: raise RuntimeError(f"yt-dlp could not find a playable format. Update it with 'pip install -U yt-dlp'. ({last_exc})")
+    if (info.get("duration") or 0)>_LONG_VIDEO_SECS and (info.get("height") or 0)>_LONG_VIDEO_MAX_HEIGHT:
+        h=_LONG_VIDEO_MAX_HEIGHT  # long video: re-pick a lighter format; keep the first result if this fails
+        opts={"quiet":True,"no_warnings":True,"noplaylist":True,"format":f"bv*[height<={h}]+ba/b[height<={h}]/bv*+ba/b",
+              "format_sort":[f"res:{h}","fps:30","vcodec:h264"]}
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl: info=ydl.extract_info(source,download=False)
+        except Exception: pass
     fmts=info.get("requested_formats") or info.get("requested_downloads") or [info]
     def _url(f):
         u=f.get("url"); return u if isinstance(u,str) and u.startswith(("http://","https://")) else None
@@ -155,7 +211,7 @@ def _log(ui,message: str):
     except Exception: pass
 
 def _play_worker(source: str,title: str,ui,stop_event: threading.Event):
-    player=None; window_open=False
+    player=None; window_open=False; mpv_errors=collections.deque(maxlen=5)
     try:
         try: mpv=_import_mpv()
         except OSError:
@@ -186,13 +242,23 @@ def _play_worker(source: str,title: str,ui,stop_event: threading.Event):
                   hwdec="auto-safe",keep_open="no",cache="yes",demuxer_max_bytes="400MiB",demuxer_max_back_bytes="150MiB",
                   network_timeout=30,volume=100)
         if ua: opts["user_agent"]=ua
-        player=mpv.MPV(**opts)
+        def _mpv_log(level,prefix,text):  # keep the last mpv errors so a failed/early-ended video can say why
+            try:
+                if str(level) in ("error","fatal"): mpv_errors.append(f"{prefix}: {str(text).strip()}"[:200])
+            except Exception: pass
+        try: player=mpv.MPV(log_handler=_mpv_log,loglevel="error",**opts)
+        except TypeError: player=mpv.MPV(**opts)  # very old python-mpv without log_handler
+        # Long streams: let ffmpeg reconnect when the connection drops (harmless if this build ignores it).
+        try: player["stream-lavf-o"]="reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5"
+        except Exception: pass
         state={"error":None}
         @player.event_callback("end-file")
         def _end(event):  # noqa: ANN001
             try:
                 d=event.as_dict() if hasattr(event,"as_dict") else {}
-                if "error" in str(d.get("reason","")).lower(): state["error"]=str(d.get("file_error") or d)
+                payload=d.get("event") if isinstance(d.get("event"),dict) else d
+                reason=payload.get("reason",d.get("reason",""))
+                if reason==4 or "error" in str(reason).lower(): state["error"]=str(payload.get("file_error") or payload.get("error") or payload)
             except Exception: pass
         def _key(cmd):
             def handler(key_state="d-",key_name="",key_char=""):
@@ -200,26 +266,53 @@ def _play_worker(source: str,title: str,ui,stop_event: threading.Event):
                     try: ui.mpv_command(cmd)
                     except Exception: pass
             return handler
+        def _ctl(cmd,value):  # Space / arrows while the mpv window itself has keyboard focus
+            def handler(key_state="d-",key_name="",key_char=""):
+                if str(key_state)[:1] in ("d","p","r"): _CMD_Q.put((cmd,value))
+            return handler
         for key,cmd in (("f","fs"),("F11","fs"),("MBTN_LEFT_DBL","fs"),("ESC","esc")):
             try: player.register_key_binding(key,_key(cmd))
             except Exception: pass
+        for key,cmd,value in _CONTROL_KEYS:
+            try: player.register_key_binding(key,_ctl(cmd,value))
+            except Exception: pass
+        while not _CMD_Q.empty():  # drop commands left over from a previous video
+            try: _CMD_Q.get_nowait()
+            except queue.Empty: break
+        with _STATE_LOCK: _STATE.update(active=True,pos=0.0,dur=0.0,paused=False,buffering=False,cache=0.0,drops=0)
         if audio_url and audio_url!=stream: player.loadfile(stream,**{"audio-file":f"%{len(audio_url.encode())}%{audio_url}"})  # %n% = length-prefixed value, safe for any characters
         else: player.loadfile(stream)
         _log(ui,f"MEDIA: HUD playback started — {title}")
-        started=False; t0=time.monotonic()
+        started=False; t0=time.monotonic(); last_poll=0.0
         while not stop_event.is_set():
-            if stop_event.wait(0.25): break
+            try: cmd,value=_CMD_Q.get(timeout=0.1)
+            except queue.Empty: cmd=value=None
+            if cmd is not None:
+                try: _apply_control(player,cmd,value)
+                except Exception: pass  # e.g. seek before the stream is ready
+            now=time.monotonic()
+            if cmd is None and now-last_poll<0.25: continue
+            last_poll=now
             try: idle=bool(player.idle_active)
             except Exception: break  # mpv shut down (window closed)
-            if state["error"] and not started: raise RuntimeError(f"mpv could not play this video: {state['error']}")
+            if state["error"]:
+                detail=" | ".join(mpv_errors)
+                raise RuntimeError(f"mpv could not play this video: {state['error']}"+(f" — {detail}" if detail else ""))
             if not idle: started=True
             elif started: break
-            elif time.monotonic()-t0>60: raise RuntimeError("mpv could not open the video (timeout).")
-        _log(ui,f"MEDIA: HUD playback {'stopped' if stop_event.is_set() else 'ended'} — {title}")
+            elif now-t0>60: raise RuntimeError("mpv could not open the video (timeout).")
+            _poll_state(player)
+        with _STATE_LOCK: end_pos,end_dur=_STATE["pos"],_STATE["dur"]
+        if stop_event.is_set(): _log(ui,f"MEDIA: HUD playback stopped — {title}")
+        elif end_dur and end_pos<end_dur-5:  # the video ended long before its end: say why
+            detail=" | ".join(mpv_errors)
+            _log(ui,f"ERR: HUD video ended early at {_fmt_time(end_pos)} of {_fmt_time(end_dur)}"+(f" — {detail}" if detail else ""))
+        else: _log(ui,f"MEDIA: HUD playback ended — {title}")
     except ImportError: _log(ui,"ERR: HUD video playback failed — python-mpv is not installed. "+_MPV_HELP)
     except OSError as exc: _log(ui,f"ERR: HUD video playback failed — libmpv was not found ({exc}). "+_MPV_HELP)
     except Exception as exc: _log(ui,f"ERR: HUD video playback failed — {exc}")
     finally:
+        with _STATE_LOCK: _STATE.update(active=False,pos=0.0,dur=0.0,paused=False,buffering=False,cache=0.0,drops=0)
         if player is not None:
             try: player.terminate()
             except Exception: pass
@@ -258,8 +351,8 @@ def play_hud_video(parameters: dict,response=None,player=None,session_memory=Non
         with _ACTIVE_LOCK:
             if _ACTIVE_STOP is event: _ACTIVE_STOP=None
         return f"Could not start HUD video playback: {exc}"
-    return "HUD video playback started in the background (mpv, with sound). Space pauses, arrow keys seek and change volume, F or double-click toggles full screen. Use action='stop' to stop it. The stream and delivery are not verified."
+    return "HUD video playback started in the background (mpv, with sound). Space pauses, left/right arrows seek 5 s (Shift = 5 min), up/down change volume, F or double-click toggles full screen; the HUD has a control bar under the video. Use action='stop' to stop it. The stream and delivery are not verified."
 
-TOOL={"name":"play_hud_video","description":"WATCH a video in Jarvis's HUD (mpv player with sound, seeking, 60 fps and full screen). Use this whenever the user asks to play/put on/watch a video: pass a YouTube link or local file in source, OR just describe it in query (e.g. 'good minecraft video', 'Parrot X2 new video') and Jarvis finds one on YouTube; set latest=true when they want the newest. Videos of any length work, including multi-hour ones. Use action='stop' to stop playback.","parameters":{"type":"OBJECT","properties":{"action":{"type":"STRING","description":"play (default) or stop"},"source":{"type":"STRING","description":"Local file path or direct HTTP(S)/YouTube URL"},"query":{"type":"STRING","description":"What to watch, in plain words; Jarvis searches YouTube and plays the best match"},"latest":{"type":"BOOLEAN","description":"With query: pick the newest upload instead of the most relevant"},"title":{"type":"STRING","description":"Optional short HUD title"}},"required":[]},"handler":play_hud_video}
+TOOL={"name":"play_hud_video","description":"WATCH a video in Jarvis's HUD (mpv player with sound, seeking, 60 fps and full screen). Use this whenever the user asks to play/put on/watch a video: pass a YouTube link or local file in source, OR just describe it in query (e.g. 'good minecraft video', 'Parrot X2 new video') and Jarvis finds one on YouTube; set latest=true when they want the newest. Videos of any length work, including multi-hour ones (videos over 1 hour are played at up to 720p). The HUD shows a control bar under the video; Space pauses, arrows seek. Use action='stop' to stop playback.","parameters":{"type":"OBJECT","properties":{"action":{"type":"STRING","description":"play (default) or stop"},"source":{"type":"STRING","description":"Local file path or direct HTTP(S)/YouTube URL"},"query":{"type":"STRING","description":"What to watch, in plain words; Jarvis searches YouTube and plays the best match"},"latest":{"type":"BOOLEAN","description":"With query: pick the newest upload instead of the most relevant"},"title":{"type":"STRING","description":"Optional short HUD title"}},"required":[]},"handler":play_hud_video}
 
 #by ASDcuber521
