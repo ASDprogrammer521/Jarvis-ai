@@ -160,6 +160,8 @@ class MainWindow(QMainWindow):
     _cam_frame_sig = pyqtSignal(bytes)
     _phone_frame_sig = pyqtSignal(str)
     _media_frame_sig = pyqtSignal(bytes, str)
+    _native_sig = pyqtSignal(object)
+    _native_stop_sig = pyqtSignal()
     _confirm_sig = pyqtSignal(str, str)
     _confirm_hide_sig = pyqtSignal()
     _wake_dl_sig = pyqtSignal(bool, str)
@@ -247,6 +249,9 @@ class MainWindow(QMainWindow):
         self._cam_frame_sig.connect(self._camera_frame)
         self._phone_frame_sig.connect(self._phone_frame)
         self._media_frame_sig.connect(self._on_media_frame)
+        self._native_sig.connect(self._native_start)
+        self._native_stop_sig.connect(self._native_stop)
+        self._native = None
         self._confirm_sig.connect(self._show_confirm)
         self._confirm_hide_sig.connect(self._hide_confirm)
         self._wake_dl_sig.connect(self._on_wake_dl)
@@ -1351,6 +1356,9 @@ class MainWindow(QMainWindow):
         img = QImage.fromData(data)
         if img.isNull():
             return
+        self._show_video_image(img, title)
+
+    def _show_video_image(self, img, title: str):
         if not self._media.isVisible() or self._media_title.text() != (title or "VIDEO"):
             self._media_title.setText(title or "VIDEO")
             self._media.show()
@@ -1365,6 +1373,115 @@ class MainWindow(QMainWindow):
             self._media_lbl.setPixmap(QPixmap.fromImage(img).scaled(
                 self._media_lbl.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.FastTransformation))
         self._media_timer.stop()  # video panel is closed by the player (empty frame) or the user, not by a timeout
+
+    # ── Native (Qt) video playback: built-in media engine, no external ffmpeg needed ──
+    def start_native_video(self, video_url, audio_url, title, result):
+        self._native_sig.emit((video_url, audio_url, title, result))
+
+    def stop_native_video(self):
+        self._native_stop_sig.emit()
+
+    def _native_start(self, payload):
+        video_url, audio_url, title, result = payload
+        self._native_stop()
+        try:
+            from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoSink
+
+            def src(u):
+                return QUrl(u) if str(u).startswith(("http://", "https://")) else QUrl.fromLocalFile(str(u))
+
+            vp = QMediaPlayer(self)
+            sink = QVideoSink(self)
+            vp.setVideoSink(sink)
+            ap = None
+            keep = [sink]
+            if audio_url and audio_url == video_url:
+                vo = QAudioOutput(self)
+                vo.setVolume(1.0)
+                vp.setAudioOutput(vo)
+                keep.append(vo)
+            elif audio_url:
+                ap = QMediaPlayer(self)
+                ao = QAudioOutput(self)
+                ao.setVolume(1.0)
+                ap.setAudioOutput(ao)
+                ap.setSource(src(audio_url))
+                keep.append(ao)
+            st = {"vp": vp, "ap": ap, "keep": keep, "title": title, "result": result, "timer": QTimer(self)}
+            self._native = st
+            sink.videoFrameChanged.connect(lambda fr, st=st: self._native_frame(st, fr))
+            vp.errorOccurred.connect(lambda err, msg="", st=st: self._native_finish(st, str(msg or err), True))
+            if ap is not None:
+                ap.errorOccurred.connect(lambda err, msg="": self._log_sig.emit(f"MEDIA: audio track problem — {msg or err}"))
+            vp.mediaStatusChanged.connect(
+                lambda status, st=st: self._native_finish(st, "", False)
+                if status == QMediaPlayer.MediaStatus.EndOfMedia else None)
+            st["timer"].timeout.connect(lambda st=st: self._native_sync(st))
+            st["timer"].start(400)
+            vp.setSource(src(video_url))
+            vp.play()
+            if ap is not None:
+                ap.play()
+        except Exception as exc:  # QtMultimedia missing or setup failed: the caller falls back to ffmpeg
+            result["error"] = str(exc)
+            result["done"].set()
+            self._native = None
+
+    def _native_frame(self, st, frame):
+        if st is not self._native or self._cam_run:
+            return
+        try:
+            if not frame.isValid():
+                return
+            img = frame.toImage()
+        except Exception:
+            return
+        if img.isNull():
+            return
+        st["result"]["frames"] += 1
+        self._show_video_image(img, st["title"])
+
+    def _native_sync(self, st):
+        if st is not self._native or st["ap"] is None:
+            return
+        try:
+            vp, ap = st["vp"], st["ap"]
+            d = vp.position() - ap.position()
+            if abs(d) > 400:
+                vp.setPosition(ap.position())
+                vp.setPlaybackRate(1.0)
+            elif d > 80:
+                vp.setPlaybackRate(0.97)
+            elif d < -80:
+                vp.setPlaybackRate(1.03)
+            else:
+                vp.setPlaybackRate(1.0)
+        except Exception:
+            pass
+
+    def _native_finish(self, st, message: str, is_error: bool):
+        if st is not self._native:
+            return
+        if is_error:
+            st["result"]["error"] = message or "unknown player error"
+        st["result"]["done"].set()
+
+    def _native_stop(self):
+        st, self._native = self._native, None
+        if not st:
+            return
+        try:
+            st["timer"].stop()
+            for k in ("vp", "ap"):
+                pl = st.get(k)
+                if pl is not None:
+                    pl.stop()
+                    pl.setSource(QUrl())
+                    pl.deleteLater()
+            for o in st.get("keep", []):
+                o.deleteLater()
+        except Exception:
+            pass
 
     def _close_media(self):
         if not self._cam_run:
@@ -1624,6 +1741,12 @@ class JarvisUI:
 
     def show_media_frame(self, data: bytes, title: str = ""):
         self._win.show_media_frame(data, title)
+
+    def start_native_video(self, video_url, audio_url, title, result):
+        self._win.start_native_video(video_url, audio_url, title, result)
+
+    def stop_native_video(self):
+        self._win.stop_native_video()
 
     def notify_phone_connected(self):
         self._win.notify_phone_connected()

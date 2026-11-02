@@ -1,8 +1,8 @@
 """Local/direct-URL/YouTube video playback in the Jarvis HUD (audio via ffplay when available)."""
 from __future__ import annotations
-import re, shutil, subprocess, threading, time
+import os, re, shutil, subprocess, threading, time
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 _ACTIVE_LOCK=threading.Lock()
 _ACTIVE_STOP: threading.Event | None=None
 
@@ -31,11 +31,20 @@ def _search_video(query: str,latest: bool=False) -> tuple[str,str]:
     """Find a YouTube video for a text query. Returns (watch_url, title)."""
     try: import yt_dlp
     except ImportError as exc: raise RuntimeError("Video search needs optional yt-dlp: pip install yt-dlp") from exc
-    prefix="ytsearchdate10" if latest else "ytsearch10"
+    # Try several search routes: some yt-dlp builds don't know the 'ytsearchdate' prefix.
+    q=quote(query)
+    routes=[]
+    if latest: routes+=[f"https://www.youtube.com/results?search_query={q}&sp=CAI%3D",f"ytsearchdate10:{query}"]
+    routes+=[f"ytsearch10:{query}",f"https://www.youtube.com/results?search_query={q}"]
     opts={"quiet":True,"no_warnings":True,"extract_flat":True,"skip_download":True}
-    with yt_dlp.YoutubeDL(opts) as ydl: info=ydl.extract_info(f"{prefix}:{query}",download=False)
-    entries=[e for e in (info.get("entries") or []) if e and (e.get("id") or e.get("url"))]
-    if not entries: raise RuntimeError(f"No YouTube results for: {query}")
+    entries=[]; last_exc: Exception | None=None
+    for route in routes:
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl: info=ydl.extract_info(route,download=False)
+            entries=[e for e in (info.get("entries") or []) if e and (e.get("id") or e.get("url"))]
+            if entries: break
+        except Exception as exc: last_exc=exc
+    if not entries: raise RuntimeError(f"No YouTube results for: {query}. Update yt-dlp with 'pip install -U yt-dlp'. ({last_exc})")
     def ok(e):
         dur=e.get("duration")
         return e.get("live_status") not in ("is_live","is_upcoming") and (dur is None or 45<=dur<=4*3600)
@@ -147,6 +156,17 @@ def _play_worker(source: str,title: str,ui,stop_event: threading.Event):
             audio_proc=_start_audio(audio_url,ua)
             note="" if audio_proc else " (no sound: install ffmpeg/ffplay for audio)"
             _log(ui,f"MEDIA: HUD playback started — {title}{note}")
+        if os.environ.get("JARVIS_HUD_BACKEND","").lower()!="ffmpeg" and callable(getattr(ui,"start_native_video",None)):
+            # Built-in Qt media engine (bundled with PyQt6, uses the system audio): no ffmpeg install needed.
+            result={"done":threading.Event(),"error":None,"frames":0}
+            _log(ui,f"MEDIA: HUD playback started — {title}")
+            ui.start_native_video(stream,audio_url,title,result)
+            while not stop_event.is_set() and not result["done"].is_set(): stop_event.wait(0.2)
+            try: ui.stop_native_video()
+            except Exception: pass
+            if stop_event.is_set() or not result["error"] or result["frames"]>0:
+                _log(ui,f"MEDIA: HUD playback {'stopped' if stop_event.is_set() else 'ended'} — {title}"); return
+            _log(ui,f"MEDIA: Built-in player failed ({result['error']}); trying ffmpeg")
         if _pump_ffmpeg(stream,ua,ui,title,stop_event,_begin):
             _log(ui,f"MEDIA: HUD playback {'stopped' if stop_event.is_set() else 'ended'} — {title}"); return
         if stop_event.is_set(): return
