@@ -11,7 +11,7 @@ import time
 import webbrowser
 from pathlib import Path
 
-from PyQt6.QtCore import QCoreApplication, QEasingCurve, QPoint, QPropertyAnimation, QRectF, Qt, QTimer, QUrl, pyqtSignal
+from PyQt6.QtCore import QCoreApplication, QEasingCurve, QPoint, QPropertyAnimation, QRect, QRectF, Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QFont, QImage, QKeySequence, QPainter, QPen, QPixmap, QRadialGradient, QSurfaceFormat
 from PyQt6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
@@ -121,34 +121,28 @@ class StageHost(QWidget):
             t.move(int((W - t.width()) / 2), 14)
 
 
-class VideoFullscreen(QWidget):
-    """Frameless black window covering the whole screen; shows only the HUD video."""
-    closed = pyqtSignal()
+class MpvWindow(QWidget):
+    """Frameless native window that mpv renders into. It floats over the HUD media panel
+    (the same window goes full screen, so playback never restarts)."""
+    want_toggle = pyqtSignal()
 
-    def __init__(self):
-        super().__init__(None, Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
+    def __init__(self, owner):
+        super().__init__(owner, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setStyleSheet("background: #000;")
         self.setWindowTitle("Jarvis video")
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        self.lbl = QLabel()
-        self.lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl.setMinimumSize(1, 1)
-        self.lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
-        lay.addWidget(self.lbl)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def keyPressEvent(self, e):
-        if e.key() in (Qt.Key.Key_Escape, Qt.Key.Key_F, Qt.Key.Key_F11, Qt.Key.Key_Q):
-            self.close()
+        k = e.key()
+        if k in (Qt.Key.Key_F, Qt.Key.Key_F11) or (k == Qt.Key.Key_Escape and self.isFullScreen()):
+            self.want_toggle.emit()
         else:
             super().keyPressEvent(e)
 
     def mouseDoubleClickEvent(self, e):
-        self.close()
-
-    def closeEvent(self, e):
-        super().closeEvent(e)
-        self.closed.emit()
+        self.want_toggle.emit()
 
 
 class MainWindow(QMainWindow):
@@ -160,8 +154,9 @@ class MainWindow(QMainWindow):
     _cam_frame_sig = pyqtSignal(bytes)
     _phone_frame_sig = pyqtSignal(str)
     _media_frame_sig = pyqtSignal(bytes, str)
-    _native_sig = pyqtSignal(object)
-    _native_stop_sig = pyqtSignal()
+    _mpv_open_sig = pyqtSignal(object)
+    _mpv_close_sig = pyqtSignal()
+    _mpv_cmd_sig = pyqtSignal(str)
     _confirm_sig = pyqtSignal(str, str)
     _confirm_hide_sig = pyqtSignal()
     _wake_dl_sig = pyqtSignal(bool, str)
@@ -214,7 +209,7 @@ class MainWindow(QMainWindow):
         self._media_pending = None
         self._media_queued = False
         self._media_scene_paused = False
-        self._video_fs = None
+        self._mpv_win = None
         self._compact: CompactMic | None = None
         self._t0 = time.time()
         self._confirm_panel = None
@@ -249,9 +244,11 @@ class MainWindow(QMainWindow):
         self._cam_frame_sig.connect(self._camera_frame)
         self._phone_frame_sig.connect(self._phone_frame)
         self._media_frame_sig.connect(self._on_media_frame)
-        self._native_sig.connect(self._native_start)
-        self._native_stop_sig.connect(self._native_stop)
-        self._native = None
+        self._mpv_open_sig.connect(self._mpv_open)
+        self._mpv_close_sig.connect(self._hide_media)
+        self._mpv_cmd_sig.connect(self._mpv_cmd)
+        self._mpv_timer = QTimer(self)
+        self._mpv_timer.timeout.connect(self._sync_mpv_geometry)
         self._confirm_sig.connect(self._show_confirm)
         self._confirm_hide_sig.connect(self._hide_confirm)
         self._wake_dl_sig.connect(self._on_wake_dl)
@@ -1364,159 +1361,106 @@ class MainWindow(QMainWindow):
             self._media.show()
             self.host.layout_floats()
         self._set_media_scene(True)
-        fs = self._video_fs
-        if fs is not None:
-            fs.lbl.setPixmap(QPixmap.fromImage(img).scaled(
-                fs.lbl.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.FastTransformation))
-        else:
-            self._media.raise_()
-            self._media_lbl.setPixmap(QPixmap.fromImage(img).scaled(
-                self._media_lbl.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.FastTransformation))
+        self._media.raise_()
+        self._media_lbl.setPixmap(QPixmap.fromImage(img.scaled(
+            self._media_lbl.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.FastTransformation)))
         self._media_timer.stop()  # video panel is closed by the player (empty frame) or the user, not by a timeout
 
-    # ── Native (Qt) video playback: built-in media engine, no external ffmpeg needed ──
-    def start_native_video(self, video_url, audio_url, title, result):
-        self._native_sig.emit((video_url, audio_url, title, result))
+    # ── mpv video: a native window floats over the media panel and mpv draws into it ──
+    def start_mpv_window(self, title, result):
+        self._mpv_open_sig.emit((title, result))
 
-    def stop_native_video(self):
-        self._native_stop_sig.emit()
+    def stop_mpv_window(self):
+        self._mpv_close_sig.emit()
 
-    def _native_start(self, payload):
-        video_url, audio_url, title, result = payload
-        self._native_stop()
+    def mpv_command(self, cmd: str):
+        self._mpv_cmd_sig.emit(str(cmd))
+
+    def _mpv_cmd(self, cmd: str):
+        if cmd == "fs":
+            self._toggle_media_full()
+        elif cmd == "esc":
+            self._exit_media_full()
+
+    def _mpv_open(self, payload):
+        title, result = payload
         try:
-            from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoSink
-
-            def src(u):
-                return QUrl(u) if str(u).startswith(("http://", "https://")) else QUrl.fromLocalFile(str(u))
-
-            vp = QMediaPlayer(self)
-            sink = QVideoSink(self)
-            vp.setVideoSink(sink)
-            ap = None
-            keep = [sink]
-            if audio_url and audio_url == video_url:
-                vo = QAudioOutput(self)
-                vo.setVolume(1.0)
-                vp.setAudioOutput(vo)
-                keep.append(vo)
-            elif audio_url:
-                ap = QMediaPlayer(self)
-                ao = QAudioOutput(self)
-                ao.setVolume(1.0)
-                ap.setAudioOutput(ao)
-                ap.setSource(src(audio_url))
-                keep.append(ao)
-            st = {"vp": vp, "ap": ap, "keep": keep, "title": title, "result": result, "timer": QTimer(self)}
-            self._native = st
-            sink.videoFrameChanged.connect(lambda fr, st=st: self._native_frame(st, fr))
-            vp.errorOccurred.connect(lambda err, msg="", st=st: self._native_finish(st, str(msg or err), True))
-            if ap is not None:
-                ap.errorOccurred.connect(lambda err, msg="": self._log_sig.emit(f"MEDIA: audio track problem — {msg or err}"))
-            vp.mediaStatusChanged.connect(
-                lambda status, st=st: self._native_finish(st, "", False)
-                if status == QMediaPlayer.MediaStatus.EndOfMedia else None)
-            st["timer"].timeout.connect(lambda st=st: self._native_sync(st))
-            st["timer"].start(400)
-            vp.setSource(src(video_url))
-            vp.play()
-            if ap is not None:
-                ap.play()
-        except Exception as exc:  # QtMultimedia missing or setup failed: the caller falls back to ffmpeg
+            self._mpv_close()
+            vw = MpvWindow(self)
+            vw.want_toggle.connect(self._toggle_media_full)
+            self._mpv_win = vw
+            self._media_title.setText(title or "VIDEO")
+            self._media_lbl.clear()
+            self._media_timer.stop()
+            if not self._media.isVisible():
+                self._media.show()
+            self.host.layout_floats()
+            self._media.raise_()
+            self._set_media_scene(True)
+            self._sync_mpv_geometry()
+            vw.show()
+            result["wid"] = int(vw.winId())
+            self._mpv_timer.start(100)
+        except Exception as exc:
             result["error"] = str(exc)
-            result["done"].set()
-            self._native = None
+        finally:
+            result["ready"].set()
 
-    def _native_frame(self, st, frame):
-        if st is not self._native or self._cam_run:
+    def _sync_mpv_geometry(self):
+        vw = self._mpv_win
+        if vw is None or vw.isFullScreen():
             return
-        try:
-            if not frame.isValid():
-                return
-            img = frame.toImage()
-        except Exception:
+        if self.isMinimized() or not self._media.isVisible():
+            vw.hide()
             return
-        if img.isNull():
-            return
-        st["result"]["frames"] += 1
-        self._show_video_image(img, st["title"])
+        lbl = self._media_lbl
+        rect = QRect(lbl.mapToGlobal(QPoint(0, 0)), lbl.size())
+        if vw.geometry() != rect:
+            vw.setGeometry(rect)
+        if not vw.isVisible():
+            vw.show()
 
-    def _native_sync(self, st):
-        if st is not self._native or st["ap"] is None:
-            return
-        try:
-            vp, ap = st["vp"], st["ap"]
-            d = vp.position() - ap.position()
-            if abs(d) > 400:
-                vp.setPosition(ap.position())
-                vp.setPlaybackRate(1.0)
-            elif d > 80:
-                vp.setPlaybackRate(0.97)
-            elif d < -80:
-                vp.setPlaybackRate(1.03)
-            else:
-                vp.setPlaybackRate(1.0)
-        except Exception:
-            pass
-
-    def _native_finish(self, st, message: str, is_error: bool):
-        if st is not self._native:
-            return
-        if is_error:
-            st["result"]["error"] = message or "unknown player error"
-        st["result"]["done"].set()
-
-    def _native_stop(self):
-        st, self._native = self._native, None
-        if not st:
-            return
-        try:
-            st["timer"].stop()
-            for k in ("vp", "ap"):
-                pl = st.get(k)
-                if pl is not None:
-                    pl.stop()
-                    pl.setSource(QUrl())
-                    pl.deleteLater()
-            for o in st.get("keep", []):
-                o.deleteLater()
-        except Exception:
-            pass
+    def _mpv_close(self):
+        self._mpv_timer.stop()
+        vw, self._mpv_win = self._mpv_win, None
+        if vw is not None:
+            try:
+                vw.close()
+                vw.deleteLater()
+            except Exception:
+                pass
 
     def _close_media(self):
         if not self._cam_run:
             self._hide_media()
 
     def _hide_media(self):
-        self._exit_media_full()
+        self._mpv_close()
         self._set_media_scene(False)
         self._media.hide()
 
     def _toggle_media_full(self):
-        if self._video_fs is not None:
-            self._exit_media_full()
+        vw = self._mpv_win
+        if vw is None:
             return
-        fs = VideoFullscreen()
-        fs.closed.connect(self._on_video_fs_closed)
-        try:
-            screen = self.screen() or QApplication.primaryScreen()
-            if screen is not None:
-                fs.setGeometry(screen.geometry())
-        except Exception:
-            pass
-        self._video_fs = fs
-        fs.showFullScreen()
-        fs.activateWindow()
-        fs.setFocus()
+        if vw.isFullScreen():
+            vw.showNormal()
+            self._sync_mpv_geometry()
+        else:
+            try:
+                scr = self.screen() or QApplication.primaryScreen()
+                if scr is not None:
+                    vw.setGeometry(scr.geometry())
+            except Exception:
+                pass
+            vw.showFullScreen()
+            vw.activateWindow()
+            vw.setFocus()
 
     def _exit_media_full(self):
-        fs = self._video_fs
-        if fs is not None:
-            fs.close()
-
-    def _on_video_fs_closed(self):
-        self._video_fs = None
-        self.activateWindow()
+        vw = self._mpv_win
+        if vw is not None and vw.isFullScreen():
+            self._toggle_media_full()
 
     def _set_media_scene(self, on: bool):
         """Freeze the animated HUD background while a video plays; resume afterwards."""
@@ -1533,7 +1477,12 @@ class MainWindow(QMainWindow):
             stop_hud_video()
         except Exception:
             pass
-        self._hide_media()
+        if self._mpv_win is not None:
+            self._mpv_win.hide()
+            self._set_media_scene(False)
+            self._media.hide()
+        else:
+            self._hide_media()
 
     def show_confirm(self, title: str, detail: str = ""):
         self._confirm_sig.emit(title, detail)
@@ -1639,9 +1588,17 @@ class MainWindow(QMainWindow):
         super().resizeEvent(e)
         if hasattr(self, "modal"):
             self.modal.setGeometry(self.backdrop.rect())
+        if getattr(self, "_mpv_win", None) is not None:
+            self._sync_mpv_geometry()
+
+    def moveEvent(self, e):
+        super().moveEvent(e)
+        if getattr(self, "_mpv_win", None) is not None:
+            self._sync_mpv_geometry()
 
     def closeEvent(self, e):
         self._close_media_user()
+        self._mpv_close()
         if self._compact is not None:
             self._compact.close()
         super().closeEvent(e)
@@ -1742,11 +1699,14 @@ class JarvisUI:
     def show_media_frame(self, data: bytes, title: str = ""):
         self._win.show_media_frame(data, title)
 
-    def start_native_video(self, video_url, audio_url, title, result):
-        self._win.start_native_video(video_url, audio_url, title, result)
+    def start_mpv_window(self, title, result):
+        self._win.start_mpv_window(title, result)
 
-    def stop_native_video(self):
-        self._win.stop_native_video()
+    def stop_mpv_window(self):
+        self._win.stop_mpv_window()
+
+    def mpv_command(self, cmd):
+        self._win.mpv_command(cmd)
 
     def notify_phone_connected(self):
         self._win.notify_phone_connected()

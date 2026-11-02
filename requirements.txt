@@ -30,8 +30,9 @@ qrcode[pil]>=7,<9
 # ── Tools ────────────────────────────────────────────
 ddgs>=9,<10                          # web_search
 youtube-transcript-api
-yt-dlp>=2024.1                       # play_hud_video for YouTube URLs
-opencv-python>=4.8,<5                # camera, push-up counter, HUD video
+yt-dlp>=2024.1                       # play_hud_video: resolves YouTube links and searches
+python-mpv>=1.0.6                    # play_hud_video player (also needs the libmpv DLL, see README)
+opencv-python>=4.8,<5                # camera, push-up counter
 mediapipe>=0.10                      # push-up counter pose detection
 python-pptx                          # presentations
 openpyxl                             # spreadsheets
