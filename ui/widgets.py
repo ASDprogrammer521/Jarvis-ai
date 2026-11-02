@@ -339,15 +339,15 @@ class ChatView(QScrollArea):
         self._body = QWidget()
         self._body.setAutoFillBackground(False)
         self._lay = QVBoxLayout(self._body)
-        self._lay.setContentsMargins(6, 6, 10, 6)
-        self._lay.setSpacing(10)
+        self._lay.setContentsMargins(6, 6, 12, 6)
+        self._lay.setSpacing(12)
         self._lay.addStretch()
         self.setWidget(self._body)
         self._count = 0
         self.verticalScrollBar().rangeChanged.connect(self._stick)
 
     def _bw(self) -> int:
-        return max(240, int(self.viewport().width() * 0.88))
+        return max(260, int(self.viewport().width() * 0.92))
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -378,13 +378,13 @@ class ChatView(QScrollArea):
         bub = QLabel(text)
         bub.setWordWrap(True)
         bub.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        bub.setFont(font(11))
+        bub.setFont(font(12))
         bub.setProperty("bub", True)
         bub.setMaximumWidth(self._bw())
         if kind == "user":
             bub.setStyleSheet(
                 f"background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {rgba(C.PRI, .30)}, stop:1 {rgba(C.ACC, .30)});"
-                f"border: 1px solid {rgba(C.PRI, .45)}; border-radius: 16px; padding: 10px 15px; color: {C.TEXT};")
+                f"border: 1px solid {rgba(C.PRI, .45)}; border-radius: 18px; padding: 12px 17px; color: {C.TEXT};")
             h.addStretch()
             h.addWidget(bub)
         elif kind in ("sys", "err"):
@@ -396,7 +396,7 @@ class ChatView(QScrollArea):
         else:
             bub.setStyleSheet(
                 f"background: {rgba('#ffffff', .07)}; border: 1px solid {rgba('#ffffff', .10)};"
-                f"border-radius: 16px; padding: 10px 15px; color: {C.TEXT};")
+                f"border-radius: 18px; padding: 12px 17px; color: {C.TEXT};")
             if who:
                 bub.setText(f"<span style='color:{C.PRI};font-weight:600'>{who}</span><br>{text}")
             h.addWidget(bub)

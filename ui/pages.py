@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QStackedWidget, QTextEdit, QVBoxLayout, QWidget,
 )
 
-from ui.fx import GlassCard, GlowButton, mix
+from ui.fx import GlassCard, GlowButton, fade_in, mix
 from ui.theme import C, hotkeys, patch_cfg, qcol, read_cfg, rgba
 from ui.widgets import IconButton, MetricTile, draw_icon, font
 
@@ -737,7 +737,7 @@ def _link_btn(text: str, color: str | None = None) -> QPushButton:
     b.setFlat(True)
     b.setStyleSheet(
         f"QPushButton {{ background: transparent; border: none; color: {color or C.PRI}; "
-        "font-size: 11px; font-weight: 600; padding: 2px 0; }}"
+        f"font-size: 11px; font-weight: 600; padding: 2px 0; }}"
         f"QPushButton:hover {{ color: {C.TEXT}; }}")
     return b
 
@@ -796,7 +796,7 @@ class PhoneGlyph(QWidget):
 class PhoneAction(HoverAnimationMixin, QPushButton):
     """Rounded tile: emoji on top, caption below (the three big actions + the Actions tab)."""
 
-    def __init__(self, glyph: str, caption: str, parent=None, height: int = 66):
+    def __init__(self, glyph: str, caption: str, parent=None, height: int = 74):
         super().__init__(parent)
         self._glyph = glyph
         self._caption = caption
@@ -823,11 +823,11 @@ class PhoneAction(HoverAnimationMixin, QPushButton):
         p.setPen(QPen(QColor(255, 255, 255, int(26 + 70 * h)), 1))
         p.drawRoundedRect(r, 16, 16)
         p.setPen(qcol(C.TEXT if en else C.TEXT_DIM))
-        p.setFont(QFont("Segoe UI Emoji", 15))
-        p.drawText(QRectF(r.left(), r.top() + 7, r.width(), 28), Qt.AlignmentFlag.AlignCenter, self._glyph)
+        p.setFont(QFont("Segoe UI Emoji", 17))
+        p.drawText(QRectF(r.left(), r.top() + 8, r.width(), 32), Qt.AlignmentFlag.AlignCenter, self._glyph)
         p.setFont(font(9, QFont.Weight.DemiBold))
         p.setPen(qcol(C.TEXT_MED if en else C.TEXT_DIM))
-        p.drawText(QRectF(r.left(), r.top() + 36, r.width(), r.height() - 38), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, self._caption)
+        p.drawText(QRectF(r.left(), r.top() + 43, r.width(), r.height() - 45), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, self._caption)
 
 
 class NotificationCard(QWidget):
@@ -986,7 +986,7 @@ class PhonePage(QWidget):
 
         # ── left column: device · call banner · 3 actions · notifications ──
         left_w = QWidget()
-        left_w.setFixedWidth(340)
+        left_w.setFixedWidth(360)
         left = QVBoxLayout(left_w)
         left.setContentsMargins(0, 0, 0, 0)
         left.setSpacing(12)
@@ -1082,9 +1082,9 @@ class PhonePage(QWidget):
         self.notif_count.setStyleSheet(f"color: {C.TEXT_DIM}; font-size: 11px;")
         nh.addWidget(self.notif_count)
         nh.addStretch(1)
-        clear_all = _link_btn("Clear all")
-        clear_all.clicked.connect(lambda _=False: self.mark_all_read())
-        nh.addWidget(clear_all)
+        self._clear_all = _link_btn("Clear all")
+        self._clear_all.clicked.connect(lambda _=False: self.mark_all_read())
+        nh.addWidget(self._clear_all)
         left.addLayout(nh)
 
         nscroll = QScrollArea()
@@ -1100,7 +1100,7 @@ class PhonePage(QWidget):
         self._notif_empty = QLabel("No new notifications.\nSMS, WhatsApp and Telegram previews show up here.")
         self._notif_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._notif_empty.setWordWrap(True)
-        self._notif_empty.setStyleSheet(f"color: {C.TEXT_DIM}; font-size: 11px; padding: 22px 8px;")
+        self._notif_empty.setStyleSheet(f"color: {C.TEXT_DIM}; font-size: 11px; padding: 26px 10px;")
         self._notif_lay.addWidget(self._notif_empty)
         self._notif_lay.addStretch(1)
         nscroll.setWidget(ninner)
@@ -1264,6 +1264,9 @@ class PhonePage(QWidget):
         self.connection.setText("● CONNECTED" if on else "● OFFLINE")
         self.connection.setStyleSheet(_dot_css(C.GREEN if on else C.RED))
         self.glyph.set_online(on)
+        self._notif_empty.setText(
+            "You're all caught up.\nNew SMS, WhatsApp and Telegram previews appear here." if on
+            else "Phone not connected.\nOpen the Jarvis App on your phone and pair it from Remote Control.")
         for b in (self.btn_answer, self.btn_reject, self.btn_hangup, *self._actions):
             b.setEnabled(on)
 
@@ -1420,6 +1423,7 @@ class PhonePage(QWidget):
             card.call.connect(lambda who: self.command.emit("call", who))
             self._cards[item["id"]] = card
             self._notif_lay.insertWidget(1, card)       # index 0 is the "empty" hint
+            fade_in(card, 240)
         self._sync_unread()
         if viewing:
             self._fill_thread(key)
@@ -1451,7 +1455,10 @@ class PhonePage(QWidget):
                 card.setParent(None)
                 card.deleteLater()
         self._notif_empty.setVisible(not self._cards)
+        self._clear_all.setVisible(bool(self._cards))
         self.notif_count.setText(f"({len(ids)})" if ids else "")
+        total_unread = len(ids)
+        self._tabs[0].setText(f"Messages  ({total_unread})" if total_unread else "Messages")
         self._render_conversations()
 
     def _render_conversations(self):
