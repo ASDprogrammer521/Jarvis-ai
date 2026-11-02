@@ -9,6 +9,7 @@ Install deps:  pip install fastapi "uvicorn[standard]" cryptography
 """
 
 import asyncio
+import logging
 import os
 import base64
 import hashlib
@@ -28,6 +29,24 @@ try:
     _DEPS_OK = True
 except ImportError:
     pass
+
+class _ShutdownNoiseFilter(logging.Filter):
+    """Jarvis stops by cancelling its asyncio tasks, which makes uvicorn's lifespan task print a
+    harmless 'CancelledError' traceback on exit. Hide only that message; real errors still show."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            text = record.getMessage()
+        except Exception:
+            return True
+        return not ("CancelledError" in text and "lifespan" in text)
+
+
+def _quiet_shutdown_noise() -> None:
+    log = logging.getLogger("uvicorn.error")
+    if not any(isinstance(f, _ShutdownNoiseFilter) for f in log.filters):
+        log.addFilter(_ShutdownNoiseFilter())
+
 
 _UPLOAD_OK = False
 try:
@@ -1212,6 +1231,7 @@ class DashboardServer:
             print('[Dashboard] HTTPS on. Certificate fingerprint (SHA-256): ' + cert_fingerprint())
         elif host not in ('127.0.0.1', 'localhost', '::1'):
             print('[Dashboard] WARNING: LAN HTTP is unencrypted. Use only a trusted LAN.')
+        _quiet_shutdown_noise()
         cfg = uvicorn.Config(self.app, host=host, port=PORT, log_level='warning', **options)
         self._server = uvicorn.Server(cfg)
         print('[Dashboard] ' + self.get_url())
