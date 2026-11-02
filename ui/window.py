@@ -121,6 +121,36 @@ class StageHost(QWidget):
             t.move(int((W - t.width()) / 2), 14)
 
 
+class VideoFullscreen(QWidget):
+    """Frameless black window covering the whole screen; shows only the HUD video."""
+    closed = pyqtSignal()
+
+    def __init__(self):
+        super().__init__(None, Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
+        self.setStyleSheet("background: #000;")
+        self.setWindowTitle("Jarvis video")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.lbl = QLabel()
+        self.lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl.setMinimumSize(1, 1)
+        self.lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        lay.addWidget(self.lbl)
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key.Key_Escape, Qt.Key.Key_F, Qt.Key.Key_F11, Qt.Key.Key_Q):
+            self.close()
+        else:
+            super().keyPressEvent(e)
+
+    def mouseDoubleClickEvent(self, e):
+        self.close()
+
+    def closeEvent(self, e):
+        super().closeEvent(e)
+        self.closed.emit()
+
+
 class MainWindow(QMainWindow):
     _log_sig = pyqtSignal(str)
     _state_sig = pyqtSignal(str)
@@ -181,6 +211,8 @@ class MainWindow(QMainWindow):
         self._media_lock = threading.Lock()
         self._media_pending = None
         self._media_queued = False
+        self._media_scene_paused = False
+        self._video_fs = None
         self._compact: CompactMic | None = None
         self._t0 = time.time()
         self._confirm_panel = None
@@ -474,7 +506,7 @@ class MainWindow(QMainWindow):
         self._media_title.setStyleSheet(f"color: {C.ACC}; font-weight: 700; letter-spacing: 2px; font-size: 10px;")
         h.addWidget(self._media_title)
         h.addStretch()
-        self._media_full_btn = IconButton("full", 26, flat=True, tip="Enlarge (Esc to shrink)")
+        self._media_full_btn = IconButton("full", 26, flat=True, tip="Full screen (Esc to exit)")
         self._media_full_btn.clicked.connect(self._toggle_media_full)
         h.addWidget(self._media_full_btn)
         x = IconButton("close", 26, flat=True)
@@ -737,6 +769,7 @@ class MainWindow(QMainWindow):
         self.modal.dismiss()
 
     def _pause_scene(self, on: bool):
+        on = bool(on) or getattr(self, "_media_scene_paused", False)
         self.backdrop.paused = on
         self.stage.paused = on
         if not on:
@@ -1322,9 +1355,15 @@ class MainWindow(QMainWindow):
             self._media_title.setText(title or "VIDEO")
             self._media.show()
             self.host.layout_floats()
-        self._media.raise_()
-        self._media_lbl.setPixmap(QPixmap.fromImage(img).scaled(
-            self._media_lbl.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.FastTransformation))
+        self._set_media_scene(True)
+        fs = self._video_fs
+        if fs is not None:
+            fs.lbl.setPixmap(QPixmap.fromImage(img).scaled(
+                fs.lbl.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.FastTransformation))
+        else:
+            self._media.raise_()
+            self._media_lbl.setPixmap(QPixmap.fromImage(img).scaled(
+                self._media_lbl.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.FastTransformation))
         self._media_timer.stop()  # video panel is closed by the player (empty frame) or the user, not by a timeout
 
     def _close_media(self):
@@ -1333,23 +1372,42 @@ class MainWindow(QMainWindow):
 
     def _hide_media(self):
         self._exit_media_full()
+        self._set_media_scene(False)
         self._media.hide()
 
     def _toggle_media_full(self):
-        if self.host.media_full:
+        if self._video_fs is not None:
             self._exit_media_full()
             return
-        self.host.media_full = True
-        self._media_full_btn.set_icon("compact")
-        self._media.raise_()
-        self.host.layout_floats()
+        fs = VideoFullscreen()
+        fs.closed.connect(self._on_video_fs_closed)
+        try:
+            screen = self.screen() or QApplication.primaryScreen()
+            if screen is not None:
+                fs.setGeometry(screen.geometry())
+        except Exception:
+            pass
+        self._video_fs = fs
+        fs.showFullScreen()
+        fs.activateWindow()
+        fs.setFocus()
 
     def _exit_media_full(self):
-        if not self.host.media_full:
+        fs = self._video_fs
+        if fs is not None:
+            fs.close()
+
+    def _on_video_fs_closed(self):
+        self._video_fs = None
+        self.activateWindow()
+
+    def _set_media_scene(self, on: bool):
+        """Freeze the animated HUD background while a video plays; resume afterwards."""
+        on = bool(on)
+        if on == self._media_scene_paused:
             return
-        self.host.media_full = False
-        self._media_full_btn.set_icon("full")
-        self.host.layout_floats()
+        self._media_scene_paused = on
+        self._pause_scene(self.modal.is_open() or on)
 
     def _close_media_user(self):
         self._cam_run = False

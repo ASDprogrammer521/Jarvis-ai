@@ -31,7 +31,7 @@ def _resolve_stream(source: str) -> tuple[str, str | None, str | None]:
     selectors=("bv*[height<=720]+ba/b[height<=720]/bv*+ba/b","bv*/b","best")
     last_exc: Exception | None=None; info=None
     for fmt in selectors:
-        opts={"quiet":True,"no_warnings":True,"noplaylist":True,"format":fmt}
+        opts={"quiet":True,"no_warnings":True,"noplaylist":True,"format":fmt,"format_sort":["res:720","fps","vcodec:h264"]}
         try:
             with yt_dlp.YoutubeDL(opts) as ydl: info=ydl.extract_info(source,download=False)
             break
@@ -70,7 +70,7 @@ def _pump_ffmpeg(stream: str,ua: str | None,ui,title: str,stop_event: threading.
     if stream.startswith("http"):
         cmd+=["-reconnect","1","-reconnect_streamed","1","-reconnect_delay_max","5"]
         if ua: cmd+=["-user_agent",ua]
-    cmd+=["-re","-i",stream,"-an","-sn","-vf","fps=24,scale='min(1280,iw)':-2","-q:v","4","-f","image2pipe","-vcodec","mjpeg","-"]
+    cmd+=["-re","-i",stream,"-an","-sn","-vf","scale='min(1600,iw)':-2","-q:v","4","-f","image2pipe","-vcodec","mjpeg","-"]
     proc=subprocess.Popen(cmd,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
     frames=0; buf=b""; started=False
     try:
@@ -134,7 +134,7 @@ def _play_worker(source: str,title: str,ui,stop_event: threading.Event):
         fps=capture.get(getattr(cv2,"CAP_PROP_FPS",5)) or 24.0
         if not (1.0<=fps<=120.0): fps=24.0
         _begin()
-        t0=time.monotonic(); idx=0; min_gap=1.0/30.0; last_shown=0.0
+        t0=time.monotonic(); idx=0; min_gap=1.0/60.0; last_shown=0.0
         while not stop_event.is_set():
             # Keep video on the wall clock so it stays in sync with the audio: skip frames when late.
             expected=int((time.monotonic()-t0)*fps)
