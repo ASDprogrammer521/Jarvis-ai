@@ -11,8 +11,8 @@ import time
 import webbrowser
 from pathlib import Path
 
-from PyQt6.QtCore import QCoreApplication, QEasingCurve, QPoint, QPropertyAnimation, QRect, QRectF, Qt, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QFont, QImage, QKeySequence, QPainter, QPen, QPixmap, QRadialGradient, QSurfaceFormat
+from PyQt6.QtCore import QCoreApplication, QEasingCurve, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, Qt, QTimer, QUrl, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor, QCursor, QDesktopServices, QFont, QImage, QKeySequence, QPainter, QPen, QPixmap, QPolygonF, QRadialGradient, QSurfaceFormat
 from PyQt6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
     QPushButton, QSizePolicy, QSlider, QStackedWidget, QStyle, QTextEdit, QVBoxLayout, QWidget,
@@ -158,6 +158,188 @@ class SeekSlider(QSlider):
             e.accept()
         else:
             super().mouseReleaseEvent(e)
+
+
+def _fmt_clock(sec: float) -> str:
+    sec = int(max(0, sec))
+    h, rem = divmod(sec, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def _video_icon_shapes(kind: str, cx: float, cy: float, s: float) -> list:
+    """Vector shapes (button pixels) of the YouTube-style player icons:
+    ("poly", [(x, y), ...]) or ("rect", x, y, w, h, radius). Drawn white by VideoIconButton."""
+    if kind == "play":
+        return [("poly", [(cx - .38 * s, cy - .52 * s), (cx - .38 * s, cy + .52 * s), (cx + .56 * s, cy)])]
+    if kind == "pause":
+        w, g = .30 * s, .22 * s
+        return [("rect", cx - g / 2 - w, cy - .5 * s, w, s, w * .3), ("rect", cx + g / 2, cy - .5 * s, w, s, w * .3)]
+    if kind == "stop":
+        return [("rect", cx - .45 * s, cy - .45 * s, .9 * s, .9 * s, .18 * s)]
+    tw, th = .52 * s, .5 * s  # "back" / "fwd": two triangles side by side
+    out = []
+    for x0 in (cx - tw, cx):
+        if kind == "fwd":
+            out.append(("poly", [(x0, cy - th), (x0, cy + th), (x0 + tw, cy)]))
+        else:
+            out.append(("poly", [(x0 + tw, cy - th), (x0 + tw, cy + th), (x0, cy)]))
+    return out
+
+
+class VideoIconButton(QPushButton):
+    """YouTube-style player button: dark rounded rectangle with a white play / pause / stop / rewind / forward icon
+    (rewind / forward also show a small label such as "5m"). Never takes keyboard focus."""
+
+    def __init__(self, kind: str, label: str = "", tip: str = "", width: int = 46):
+        super().__init__()
+        self.kind = kind
+        self.label = label
+        self.setFixedSize(width, 30)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # never steal Space / arrows from the video
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        if tip:
+            self.setToolTip(tip)
+
+    def set_kind(self, kind: str, tip: str = ""):
+        if kind != self.kind:
+            self.kind = kind
+            self.update()
+        if tip and tip != self.toolTip():
+            self.setToolTip(tip)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(self.rect()).adjusted(.5, .5, -.5, -.5)
+        if self.isDown():
+            bg = QColor(122, 122, 130)
+        elif self.underMouse():
+            bg = QColor(98, 98, 106)
+        else:
+            bg = QColor(66, 66, 72)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(bg)
+        p.drawRoundedRect(r, 9, 9)
+        white = QColor(255, 255, 255)
+        w, h = r.width(), r.height()
+        icx, cy = w / 2, h / 2
+        if self.label:
+            icx = w * (.30 if self.kind == "back" else .70)
+            f = QFont(self.font())
+            f.setPixelSize(11)
+            f.setBold(True)
+            p.setFont(f)
+            p.setPen(white)
+            tr = QRectF(w * .50, 0, w * .44, h) if self.kind == "back" else QRectF(w * .06, 0, w * .44, h)
+            p.drawText(tr, Qt.AlignmentFlag.AlignCenter, self.label)
+        p.setBrush(white)
+        p.setPen(QPen(white, 1.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        for sh in _video_icon_shapes(self.kind, icx, cy, 12.0):
+            if sh[0] == "poly":
+                p.drawPolygon(QPolygonF([QPointF(x, y) for x, y in sh[1]]))
+            else:
+                _, x, y, rw, rh, rad = sh
+                p.drawRoundedRect(QRectF(x, y, rw, rh), rad, rad)
+        p.end()
+
+
+class VideoBar(QWidget):
+    """Control strip for HUD video: seek bar, time, -5 min / pause / +5 min / stop, buffer status.
+    Used under the video in the media panel and, in full screen, inside the floating FsOverlay."""
+    ctl = pyqtSignal(str, object)     # ("pause", None) | ("seek", seconds)
+    seek_fraction = pyqtSignal(int)   # 0..1000 of the whole video
+    stop = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(64)
+        self.setStyleSheet("background: transparent;")
+        self._hold_until = 0.0
+        bl = QVBoxLayout(self)
+        bl.setContentsMargins(0, 2, 0, 0)
+        bl.setSpacing(4)
+        self.slider = SeekSlider()
+        self.slider.setStyleSheet(
+            f"QSlider::groove:horizontal {{ height: 4px; background: {rgba(C.TEXT_MED, .25)}; border-radius: 2px; }}"
+            f"QSlider::sub-page:horizontal {{ background: {C.PRI}; border-radius: 2px; }}"
+            f"QSlider::handle:horizontal {{ background: {C.PRI}; width: 12px; margin: -5px 0; border-radius: 6px; }}")
+        self.slider.seek_to.connect(self._on_seek)
+        bl.addWidget(self.slider)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self.time_lbl = QLabel("0:00 / --:--")
+        self.time_lbl.setStyleSheet("color: #eef1ff; font-size: 12px; font-weight: 600;")
+        row.addWidget(self.time_lbl)
+        row.addStretch()
+
+        self.back_btn = VideoIconButton("back", "5m", "Back 5 minutes (Shift+Left)", 62)
+        self.back_btn.clicked.connect(lambda: self.ctl.emit("seek", -300))
+        self.play_btn = VideoIconButton("pause", "", "Pause (Space)", 50)
+        self.play_btn.clicked.connect(lambda: self.ctl.emit("pause", None))
+        self.fwd_btn = VideoIconButton("fwd", "5m", "Forward 5 minutes (Shift+Right)", 62)
+        self.fwd_btn.clicked.connect(lambda: self.ctl.emit("seek", 300))
+        self.stop_btn = VideoIconButton("stop", "", "Stop", 42)
+        self.stop_btn.clicked.connect(lambda: self.stop.emit())
+        for b_ in (self.back_btn, self.play_btn, self.fwd_btn, self.stop_btn):
+            row.addWidget(b_)
+        row.addStretch()
+        self.status_lbl = QLabel("")
+        self.status_lbl.setStyleSheet(f"color: {C.ACC}; font-size: 10px; font-weight: 700;")
+        row.addWidget(self.status_lbl)
+        bl.addLayout(row)
+
+    def _on_seek(self, v: int):
+        self._hold_until = time.monotonic() + 1.5  # keep the bar where the user dropped it until mpv has sought
+        self.seek_fraction.emit(v)
+
+    def reset(self):
+        self.slider.setValue(0)
+        self.time_lbl.setText("0:00 / --:--")
+        self.status_lbl.setText("")
+        self.play_btn.set_kind("pause", "Pause (Space)")
+
+    def refresh(self, st: dict):
+        pos, dur = st["pos"], st["dur"]
+        sl = self.slider
+        if sl.dragging and dur > 0:
+            pos = dur * sl.value() / 1000.0
+        elif dur > 0 and time.monotonic() >= self._hold_until:
+            sl.setValue(int(max(0.0, min(1.0, pos / dur)) * 1000))
+        self.time_lbl.setText(f"{_fmt_clock(pos)} / {_fmt_clock(dur) if dur > 0 else '--:--'}")
+        if st["paused"] and not st["buffering"]:
+            self.play_btn.set_kind("play", "Play (Space)")
+        else:
+            self.play_btn.set_kind("pause", "Pause (Space)")
+        if st["buffering"]:
+            status = "BUFFERING…"
+        else:
+            parts = []
+            if st["cache"] >= 1:
+                parts.append(f"buffer {st['cache']:.0f}s")
+            if st["drops"] > 0:
+                parts.append(f"dropped {st['drops']}")
+            status = "  ·  ".join(parts)
+        self.status_lbl.setText(status)
+
+
+class FsOverlay(QWidget):
+    """Floating control bar over the full-screen mpv window. Shown while the mouse moves (or the video is
+    paused / buffering) and hidden a few seconds later; it never takes keyboard focus."""
+
+    def __init__(self, owner):
+        super().__init__(owner, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
+                         | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.WindowDoesNotAcceptFocus)
+        self.setObjectName("fsOverlay")
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setWindowOpacity(0.93)
+        self.setStyleSheet(f"#fsOverlay {{ background: #0b0f1c; border: 1px solid {rgba(C.PRI, .35)}; }}")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(18, 8, 18, 8)
+        self.bar = VideoBar()
+        lay.addWidget(self.bar)
 
 
 class MpvWindow(QWidget):
@@ -567,50 +749,11 @@ class MainWindow(QMainWindow):
         return c
 
     def _make_video_bar(self) -> QWidget:
-        """Control bar shown under the video while mpv plays: seek bar, time, -5 min / pause / +5 min / stop."""
-        bar = QWidget()
-        bar.setFixedHeight(64)
-        bar.setStyleSheet("background: transparent;")
-        bl = QVBoxLayout(bar)
-        bl.setContentsMargins(0, 2, 0, 0)
-        bl.setSpacing(4)
-        sl = SeekSlider()
-        sl.setStyleSheet(
-            f"QSlider::groove:horizontal {{ height: 4px; background: {rgba(C.TEXT_MED, .25)}; border-radius: 2px; }}"
-            f"QSlider::sub-page:horizontal {{ background: {C.PRI}; border-radius: 2px; }}"
-            f"QSlider::handle:horizontal {{ background: {C.PRI}; width: 12px; margin: -5px 0; border-radius: 6px; }}")
-        sl.seek_to.connect(self._mpv_seek_fraction)
-        self._mpv_slider = sl
-        bl.addWidget(sl)
-        row = QHBoxLayout()
-        row.setSpacing(6)
-        self._mpv_time = QLabel("0:00 / --:--")
-        self._mpv_time.setStyleSheet(f"color: {C.TEXT_MED}; font-size: 11px;")
-        row.addWidget(self._mpv_time)
-        row.addStretch()
-
-        def btn(text, slot):
-            b = QPushButton(text)
-            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # never steal Space / arrows from the video
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setFixedHeight(26)
-            b.setStyleSheet(
-                f"QPushButton {{ color: {C.TEXT_MED}; background: {rgba(C.PRI, .10)}; border: 1px solid {rgba(C.PRI, .35)};"
-                f" border-radius: 8px; padding: 0 12px; font-size: 11px; font-weight: 600; }}"
-                f"QPushButton:hover {{ background: {rgba(C.PRI, .28)}; color: white; }}")
-            b.clicked.connect(slot)
-            row.addWidget(b)
-            return b
-
-        btn("-5 min", lambda: self._video_ctl("seek", -300))
-        self._mpv_play_btn = btn("Pause", lambda: self._video_ctl("pause"))
-        btn("+5 min", lambda: self._video_ctl("seek", 300))
-        btn("Stop", self._close_media_user)
-        row.addStretch()
-        self._mpv_status = QLabel("")
-        self._mpv_status.setStyleSheet(f"color: {C.ACC}; font-size: 10px; font-weight: 700;")
-        row.addWidget(self._mpv_status)
-        bl.addLayout(row)
+        """Control bar shown under the video while mpv plays."""
+        bar = VideoBar()
+        bar.ctl.connect(self._video_ctl)
+        bar.seek_fraction.connect(self._mpv_seek_fraction)
+        bar.stop.connect(self._close_media_user)
         bar.hide()
         self._mpv_bar = bar
         return bar
@@ -1482,11 +1625,15 @@ class MainWindow(QMainWindow):
             vw.want_toggle.connect(self._toggle_media_full)
             vw.key_handler = self._video_key
             self._mpv_win = vw
-            self._mpv_slider.setValue(0)
-            self._mpv_time.setText("0:00 / --:--")
-            self._mpv_status.setText("")
-            self._mpv_play_btn.setText("Pause")
+            self._mpv_bar.reset()
             self._mpv_bar.show()
+            ov = FsOverlay(vw)  # full-screen control bar (owned by the video window, so it stays on top of it)
+            ov.bar.ctl.connect(self._video_ctl)
+            ov.bar.seek_fraction.connect(self._mpv_seek_fraction)
+            ov.bar.stop.connect(self._close_media_user)
+            self._fs_overlay = ov
+            self._fs_cursor = None
+            self._fs_until = 0.0
             self.host.media_extra = 76
             fw = QApplication.focusWidget()
             if isinstance(fw, (QLineEdit, QTextEdit)):
@@ -1527,6 +1674,12 @@ class MainWindow(QMainWindow):
         self._mpv_timer.stop()
         if getattr(self, "_mpv_bar", None) is not None:
             self._mpv_bar.hide()
+        ov, self._fs_overlay = getattr(self, "_fs_overlay", None), None
+        if ov is not None:
+            try:
+                ov.hide()
+            except Exception:
+                pass
         self.host.media_extra = 0
         vw, self._mpv_win = self._mpv_win, None
         if vw is not None:
@@ -1537,13 +1690,6 @@ class MainWindow(QMainWindow):
                 pass
 
     # ── HUD video controls ──
-    @staticmethod
-    def _fmt_time(sec: float) -> str:
-        sec = int(max(0, sec))
-        h, rem = divmod(sec, 3600)
-        m, s = divmod(rem, 60)
-        return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
-
     def _video_ctl(self, cmd: str, value=None):
         try:
             from actions.hud_video import video_control
@@ -1558,7 +1704,6 @@ class MainWindow(QMainWindow):
         except Exception:
             return
         if dur > 0:
-            self._mpv_hold_until = time.monotonic() + 1.5  # keep the bar where the user dropped it until mpv has sought
             self._video_ctl("seek_abs", dur * max(0, min(1000, v)) / 1000.0)
 
     def _video_key(self, e) -> bool:
@@ -1588,31 +1733,43 @@ class MainWindow(QMainWindow):
         self._update_mpv_bar()
 
     def _update_mpv_bar(self):
-        if self._mpv_win is None or not self._mpv_bar.isVisible():
+        if self._mpv_win is None:
             return
         try:
             from actions.hud_video import get_video_state
             st = get_video_state()
         except Exception:
             return
-        pos, dur = st["pos"], st["dur"]
-        sl = self._mpv_slider
-        if sl.dragging and dur > 0:
-            pos = dur * sl.value() / 1000.0
-        elif dur > 0 and time.monotonic() >= getattr(self, "_mpv_hold_until", 0.0):
-            sl.setValue(int(max(0.0, min(1.0, pos / dur)) * 1000))
-        self._mpv_time.setText(f"{self._fmt_time(pos)} / {self._fmt_time(dur) if dur > 0 else '--:--'}")
-        self._mpv_play_btn.setText("Play" if st["paused"] and not st["buffering"] else "Pause")
-        if st["buffering"]:
-            status = "BUFFERING…"
-        else:
-            parts = []
-            if st["cache"] >= 1:
-                parts.append(f"buffer {st['cache']:.0f}s")
-            if st["drops"] > 0:
-                parts.append(f"dropped {st['drops']}")
-            status = "  ·  ".join(parts)
-        self._mpv_status.setText(status)
+        if self._mpv_bar.isVisible():
+            self._mpv_bar.refresh(st)
+        ov = getattr(self, "_fs_overlay", None)
+        if ov is not None:
+            self._update_fs_overlay(ov, st)
+
+    def _update_fs_overlay(self, ov, st: dict):
+        """Full screen: show the control bar while the mouse moves (or paused/buffering), hide it after 3 s."""
+        vw = self._mpv_win
+        if vw is None or not vw.isFullScreen() or not vw.isVisible():
+            if ov.isVisible():
+                ov.hide()
+            return
+        now = time.monotonic()
+        pos = QCursor.pos()
+        if pos != self._fs_cursor or (ov.isVisible() and ov.geometry().contains(pos)):
+            self._fs_cursor = pos
+            self._fs_until = now + 3.0
+        if now < self._fs_until or st["paused"] or st["buffering"]:
+            g = vw.geometry()
+            w, h = max(480, min(g.width() - 80, 1100)), 84
+            rect = QRect(g.x() + (g.width() - w) // 2, g.y() + g.height() - h - 40, w, h)
+            if ov.geometry() != rect:
+                ov.setGeometry(rect)
+            if not ov.isVisible():
+                ov.show()
+                ov.raise_()
+            ov.bar.refresh(st)
+        elif ov.isVisible():
+            ov.hide()
 
     def _close_media(self):
         if not self._cam_run:
@@ -1637,6 +1794,7 @@ class MainWindow(QMainWindow):
                     vw.setGeometry(scr.geometry())
             except Exception:
                 pass
+            self._fs_until = time.monotonic() + 3.5
             vw.showFullScreen()
             vw.activateWindow()
             vw.setFocus()
