@@ -22,9 +22,9 @@ def _validate_source(source: str) -> str:
     if not path.is_file(): raise ValueError(f"Local video file was not found: {path}")
     return str(path.resolve())
 
-def _resolve_stream(source: str) -> tuple[str, str | None]:
-    """Return (video_url, audio_url). audio_url may equal video_url (muxed) or be None."""
-    if not _is_youtube(source): return source, source
+def _resolve_stream(source: str) -> tuple[str, str | None, str | None]:
+    """Return (video_url, audio_url, user_agent). audio_url may equal video_url (muxed) or be None."""
+    if not _is_youtube(source): return source, source, None
     try: import yt_dlp
     except ImportError as exc: raise RuntimeError("YouTube HUD playback needs optional yt-dlp: pip install yt-dlp") from exc
     # YouTube rarely offers muxed formats now, so ask for separate video + audio streams.
@@ -47,17 +47,50 @@ def _resolve_stream(source: str) -> tuple[str, str | None]:
         if muxed.get("acodec") not in (None,"none"): audio=video
     if not video: video=_url(info)
     if not video: raise RuntimeError("Could not resolve a playable YouTube stream.")
-    return video, audio
+    ua=next((f.get("http_headers",{}).get("User-Agent") for f in fmts if f.get("http_headers")),None) or (info.get("http_headers") or {}).get("User-Agent")
+    return video, audio, ua
 
-def _start_audio(url: str | None):
+def _start_audio(url: str | None,ua: str | None=None):
     """Play the audio track with ffplay (no window). Returns the process or None."""
     exe=shutil.which("ffplay")
     if not url or not exe: return None
     try:
         flags=getattr(subprocess,"CREATE_NO_WINDOW",0)
-        return subprocess.Popen([exe,"-nodisp","-vn","-autoexit","-loglevel","quiet",url],
+        cmd=[exe,"-nodisp","-vn","-autoexit","-loglevel","quiet"]+(["-user_agent",ua] if ua and url.startswith("http") else [])+[url]
+        return subprocess.Popen(cmd,
                                 stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,creationflags=flags)
     except Exception: return None
+
+def _pump_ffmpeg(stream: str,ua: str | None,ui,title: str,stop_event: threading.Event,on_start) -> bool:
+    """Decode with ffmpeg (handles reconnects/headers, real-time pace) and push JPEG frames to the HUD.
+    Returns False if ffmpeg is unavailable or produced nothing (caller falls back to OpenCV)."""
+    exe=shutil.which("ffmpeg")
+    if not exe: return False
+    cmd=[exe,"-loglevel","error","-nostdin"]
+    if stream.startswith("http"):
+        cmd+=["-reconnect","1","-reconnect_streamed","1","-reconnect_delay_max","5"]
+        if ua: cmd+=["-user_agent",ua]
+    cmd+=["-re","-i",stream,"-an","-sn","-vf","fps=30,scale='min(1280,iw)':-2","-q:v","4","-f","image2pipe","-vcodec","mjpeg","-"]
+    proc=subprocess.Popen(cmd,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
+    frames=0; buf=b""; started=False
+    try:
+        while not stop_event.is_set():
+            chunk=proc.stdout.read(65536)
+            if not chunk: break
+            buf+=chunk
+            while True:
+                a=buf.find(b"\xff\xd8")
+                if a<0: buf=b""; break
+                b=buf.find(b"\xff\xd9",a+2)
+                if b<0: buf=buf[a:]; break
+                if not started: started=True; on_start()
+                ui.show_media_frame(buf[a:b+2],title); frames+=1; buf=buf[b+2:]
+    finally:
+        try: proc.kill()
+        except Exception: pass
+        try: proc.stdout.close(); proc.wait(timeout=2)
+        except Exception: pass
+    return frames>0
 
 def stop_hud_video() -> str:
     with _ACTIVE_LOCK: event=_ACTIVE_STOP
@@ -78,8 +111,17 @@ def _log(ui,message: str):
 def _play_worker(source: str,title: str,ui,stop_event: threading.Event):
     capture=None; audio_proc=None
     try:
-        import cv2
-        stream,audio_url=_resolve_stream(source); capture=cv2.VideoCapture(); params=[]
+        stream,audio_url,ua=_resolve_stream(source)
+        def _begin():
+            nonlocal audio_proc
+            audio_proc=_start_audio(audio_url,ua)
+            note="" if audio_proc else " (no sound: install ffmpeg/ffplay for audio)"
+            _log(ui,f"MEDIA: HUD playback started — {title}{note}")
+        if _pump_ffmpeg(stream,ua,ui,title,stop_event,_begin):
+            _log(ui,f"MEDIA: HUD playback {'stopped' if stop_event.is_set() else 'ended'} — {title}"); return
+        if stop_event.is_set(): return
+        import cv2  # fallback when ffmpeg is missing or could not open the stream
+        capture=cv2.VideoCapture(); params=[]
         for prop_name,timeout in (("CAP_PROP_OPEN_TIMEOUT_MSEC",5000),("CAP_PROP_READ_TIMEOUT_MSEC",3000)):
             prop=getattr(cv2,prop_name,None)
             if prop is not None: params.extend([prop,timeout])
@@ -91,9 +133,7 @@ def _play_worker(source: str,title: str,ui,stop_event: threading.Event):
         if not capture.isOpened(): raise RuntimeError("OpenCV could not open the video; check URL, codec, and FFmpeg support.")
         fps=capture.get(getattr(cv2,"CAP_PROP_FPS",5)) or 24.0
         if not (1.0<=fps<=120.0): fps=24.0
-        audio_proc=_start_audio(audio_url)
-        note="" if audio_proc else " (no sound: install ffmpeg/ffplay for audio)"
-        _log(ui,f"MEDIA: HUD playback started — {title}{note}")
+        _begin()
         t0=time.monotonic(); idx=0; min_gap=1.0/30.0; last_shown=0.0
         while not stop_event.is_set():
             # Keep video on the wall clock so it stays in sync with the audio: skip frames when late.

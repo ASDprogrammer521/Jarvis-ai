@@ -1311,7 +1311,7 @@ class MainWindow(QMainWindow):
         self._media.raise_()
         self._media_lbl.setPixmap(QPixmap.fromImage(img).scaled(
             self._media_lbl.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        self._media_timer.start(4000)
+        self._media_timer.stop()  # video panel is closed by the player (empty frame) or the user, not by a timeout
 
     def _close_media(self):
         if not self._cam_run:
