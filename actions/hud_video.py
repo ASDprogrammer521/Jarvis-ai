@@ -46,6 +46,9 @@ def _apply_control(player,cmd: str,value):
     elif cmd=="seek": player.command("seek",str(float(value)),"relative")
     elif cmd=="seek_abs": player.command("seek",str(max(0.0,float(value))),"absolute")
     elif cmd=="volume": player.volume=max(0.0,min(130.0,float(player.volume or 100)+float(value)))
+    elif cmd=="volume_abs": player.volume=max(0.0,min(130.0,float(value)))
+    elif cmd=="mute": player.mute=not bool(player.mute)
+    elif cmd=="speed": player.speed=max(0.25,min(3.0,float(value)))
 
 def _poll_state(player):
     def g(name,default=None):
@@ -323,10 +326,48 @@ def _play_worker(source: str,title: str,ui,stop_event: threading.Event):
         with _ACTIVE_LOCK:
             if _ACTIVE_STOP is stop_event: _ACTIVE_STOP=None
 
+_VOICE_ACTIONS={"pause","resume","toggle","seek","forward","back","rewind","seek_to","volume_up","volume_down","set_volume","mute","unmute","fullscreen","exit_fullscreen","speed","status"}
+
+def _voice_control(action: str,params: dict,player) -> str:
+    """Spoken control of the HUD player: 'pause', 'skip 2 minutes', 'louder', 'full screen', 'how much is left?'."""
+    st=get_video_state()
+    if not st.get("active"): return "No HUD video is playing right now."
+    def num(key,default):
+        try: return float(params.get(key) if params.get(key) is not None else default)
+        except (TypeError,ValueError): return float(default)
+    if action=="status":
+        pos,dur=st.get("pos",0.0),st.get("dur",0.0)
+        left=f", {_fmt_time(max(0.0,dur-pos))} left" if dur else ""
+        return f"{'Paused' if st.get('paused') else 'Playing'} at {_fmt_time(pos)}" + (f" of {_fmt_time(dur)}" if dur else "") + left + "."
+    if action=="pause": video_control("pause") if not st.get("paused") else None; return "Paused."
+    if action in ("resume",): video_control("play"); return "Playing."
+    if action=="toggle": video_control("pause"); return "Resumed." if st.get("paused") else "Paused."
+    if action in ("seek","forward","back","rewind"):
+        secs=num("seconds",30 if action in ("forward","back","rewind") else 10)
+        if action in ("back","rewind"): secs=-abs(secs)
+        elif action=="forward": secs=abs(secs)
+        video_control("seek",secs); return f"Skipped {'forward' if secs>0 else 'back'} {abs(int(secs))} seconds."
+    if action=="seek_to":
+        video_control("seek_abs",num("seconds",0)); return f"Jumped to {_fmt_time(num('seconds',0))}."
+    if action in ("volume_up","volume_down"):
+        step=abs(num("amount",10)); video_control("volume",step if action=="volume_up" else -step)
+        return "Volume up." if action=="volume_up" else "Volume down."
+    if action=="set_volume":
+        v=max(0.0,min(100.0,num("amount",50))); video_control("volume_abs",v); return f"Volume set to {int(v)}%."
+    if action in ("mute","unmute"): video_control("mute"); return "Toggled mute."
+    if action=="speed":
+        v=num("amount",1.0); video_control("speed",v); return f"Playback speed {v:g}x."
+    if action in ("fullscreen","exit_fullscreen"):
+        ui=_ui_for(player)
+        if ui is None: return "The HUD isn't available."
+        ui.mpv_command("fs" if action=="fullscreen" else "esc"); return "Full screen toggled." if action=="fullscreen" else "Left full screen."
+    return "Unknown control."
+
 def play_hud_video(parameters: dict,response=None,player=None,session_memory=None) -> str:
     params=parameters or {}; action=str(params.get("action","play")).strip().lower()
     if action=="stop": return stop_hud_video()
-    if action!="play": return "Unknown action. Use action='play' or action='stop'."
+    if action in _VOICE_ACTIONS: return _voice_control(action,params,player)
+    if action!="play": return "Unknown action. Use action='play', 'stop', or a playback control (pause, resume, seek, seek_to, volume_up, volume_down, set_volume, mute, fullscreen, speed, status)."
     query=str(params.get("query") or "").strip()
     try: source=_validate_source(query or params.get("source",""))
     except Exception as exc: return str(exc)
@@ -353,6 +394,6 @@ def play_hud_video(parameters: dict,response=None,player=None,session_memory=Non
         return f"Could not start HUD video playback: {exc}"
     return "HUD video playback started in the background (mpv, with sound). Space pauses, left/right arrows seek 5 s (Shift = 5 min), up/down change volume, F or double-click toggles full screen; the HUD has a control bar under the video. Use action='stop' to stop it. The stream and delivery are not verified."
 
-TOOL={"name":"play_hud_video","description":"WATCH a video in Jarvis's HUD (mpv player with sound, seeking, 60 fps and full screen). Use this whenever the user asks to play/put on/watch a video: pass a YouTube link or local file in source, OR just describe it in query (e.g. 'good minecraft video', 'Parrot X2 new video') and Jarvis finds one on YouTube; set latest=true when they want the newest. Videos of any length work, including multi-hour ones (videos over 1 hour are played at up to 720p). The HUD shows a control bar under the video; Space pauses, arrows seek. Use action='stop' to stop playback.","parameters":{"type":"OBJECT","properties":{"action":{"type":"STRING","description":"play (default) or stop"},"source":{"type":"STRING","description":"Local file path or direct HTTP(S)/YouTube URL"},"query":{"type":"STRING","description":"What to watch, in plain words; Jarvis searches YouTube and plays the best match"},"latest":{"type":"BOOLEAN","description":"With query: pick the newest upload instead of the most relevant"},"title":{"type":"STRING","description":"Optional short HUD title"}},"required":[]},"handler":play_hud_video}
+TOOL={"name":"play_hud_video","description":"WATCH a video in Jarvis's HUD (mpv player with sound, seeking, 60 fps and full screen). Use this whenever the user asks to play/put on/watch a video: pass a YouTube link or local file in source, OR just describe it in query (e.g. 'good minecraft video', 'Parrot X2 new video') and Jarvis finds one on YouTube; set latest=true when they want the newest. Videos of any length work, including multi-hour ones (videos over 1 hour are played at up to 720p). The HUD shows a control bar under the video; Space pauses, arrows seek. Use action='stop' to stop playback. You can also CONTROL the video by voice with the same tool: action=pause | resume | seek (seconds, negative = back) | forward | back (seconds) | seek_to (absolute seconds) | volume_up | volume_down (amount) | set_volume (amount 0-100) | mute | speed (amount, e.g. 1.5) | fullscreen | exit_fullscreen | status (position / time left). Examples: 'pause' → pause; 'skip 2 minutes' → forward seconds=120; 'go back 30 seconds' → back seconds=30; 'louder' → volume_up; 'make it full screen' → fullscreen; 'how much is left?' → status; 'play from minute 10' → seek_to seconds=600.","parameters":{"type":"OBJECT","properties":{"action":{"type":"STRING","description":"play (default) | stop | pause | resume | seek | forward | back | seek_to | volume_up | volume_down | set_volume | mute | speed | fullscreen | exit_fullscreen | status"},"seconds":{"type":"NUMBER","description":"For seek/forward/back: seconds to skip; for seek_to: absolute position in seconds"},"amount":{"type":"NUMBER","description":"volume_up/down: step in %, set_volume: 0-100, speed: multiplier like 1.5"},"source":{"type":"STRING","description":"Local file path or direct HTTP(S)/YouTube URL"},"query":{"type":"STRING","description":"What to watch, in plain words; Jarvis searches YouTube and plays the best match"},"latest":{"type":"BOOLEAN","description":"With query: pick the newest upload instead of the most relevant"},"title":{"type":"STRING","description":"Optional short HUD title"}},"required":[]},"handler":play_hud_video}
 
 #by ASDcuber521

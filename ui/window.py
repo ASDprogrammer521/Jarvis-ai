@@ -699,6 +699,26 @@ class MainWindow(QMainWindow):
         self._toast_lbl = QLabel()
         tl.addWidget(self._toast_lbl)
         self._toast_w.hide()
+        self._alert_w = GlassCard(self.host, radius=26, tint=225, accent=C.RED)
+        al = QVBoxLayout(self._alert_w)
+        al.setContentsMargins(46, 26, 46, 26)
+        al.setSpacing(4)
+        self._alert_title = QLabel("⚠  UNKNOWN PERSON")
+        self._alert_title.setFont(font(24, QFont.Weight.Bold))
+        self._alert_title.setStyleSheet(f"color: {C.RED};")
+        self._alert_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._alert_sub = QLabel("An unrecognised face is in front of the camera")
+        self._alert_sub.setStyleSheet(f"color: {C.TEXT_MED};")
+        self._alert_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        al.addWidget(self._alert_title)
+        al.addWidget(self._alert_sub)
+        self._alert_w.hide()
+        self._alert_timer = QTimer(self)
+        self._alert_timer.setSingleShot(True)
+        self._alert_timer.timeout.connect(self._alert_done)
+        self._alert_blink = QTimer(self)
+        self._alert_blink.timeout.connect(self._alert_pulse)
+        self._alert_on = False
         self.host.floats = {"content": self._content, "media": self._media,
                             "clip": self._clip, "toast": self._toast_w}
         self._toast_timer = QTimer(self)
@@ -1394,14 +1414,40 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
         elif kind == "unknown":
-            self._toast("⚠ Unknown face at the camera")
             self.write_log("SYS: An unrecognised face is in front of the camera.")
+            self._show_unknown_alert()
         elif kind == "enrolled":
             self._toast(f"✅ Saved {name}'s face")
             self.write_log(f"SYS: Face saved for {name}.")
         elif kind == "enroll_failed":
             self._toast("Face not saved — try again")
             self.write_log(f"ERR: face — {name}")
+
+    def _show_unknown_alert(self):
+        """Red card in the middle of the HUD for ~4 s, then Jarvis says it out loud."""
+        w = self._alert_w
+        w.adjustSize()
+        w.move(int((self.host.width() - w.width()) / 2), int(self.host.height() * 0.36))
+        w.show()
+        w.raise_()
+        fade_in(w, 220)
+        self._alert_on = True
+        self._alert_blink.start(450)
+        self._alert_timer.start(4000)
+
+    def _alert_pulse(self):
+        self._alert_title.setStyleSheet(f"color: {C.RED if int(time.time() * 2) % 2 else C.TEXT};")
+
+    def _alert_done(self):
+        self._alert_blink.stop()
+        self._alert_w.hide()
+        self._alert_on = False
+        if self.on_text_command:
+            try:
+                self.on_text_command("[FaceID] An unknown person has been in front of the camera. "
+                                     "Warn the user out loud in one short sentence, calmly, like a security system.")
+            except Exception:
+                pass
 
     def enroll_face(self, name: str) -> str:
         name = (name or "").strip()

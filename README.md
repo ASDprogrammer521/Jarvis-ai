@@ -118,6 +118,8 @@ python main.py
 | **Info** | `web_search` · `knowledge_lookup` · `weather_report` · `flight_finder` · `utility_tools` calculator, units, live currency |
 | **Developer** | `code_helper` write / edit / run code · `dev_agent` multi-file projects |
 
+**Voice control of the HUD player.** While a video plays you can simply talk to it: *"pause"*, *"resume"*, *"skip 2 minutes"*, *"go back 30 seconds"*, *"play from minute 10"*, *"louder"*, *"set volume to 40"*, *"mute"*, *"speed 1.5"*, *"full screen"*, *"how much is left?"*, *"stop the video"*.
+
 Each tool is a drop-in file in `actions/`, discovered automatically.
 
 ---
@@ -219,7 +221,7 @@ Hold the gesture for a moment — quick wave-bys are ignored. Choose the **Respo
 | Option | What it does |
 | ------ | ------------ |
 | Greet by voice | Jarvis says hello by name when a saved person shows up (not again for 45 s) |
-| Alert on unknown faces | Shows a warning when someone who isn't saved stays in front of the camera |
+| Alert on unknown faces | A red **⚠ UNKNOWN PERSON** card appears in the middle of the HUD for ~4 s, then Jarvis warns you out loud |
 | Saved people | Remove one person, or delete all saved faces |
 
 Voice commands: *"remember my face as Akmal"* · *"who is in front of the camera?"* · *"whose faces do you know?"* · *"forget Akmal"*.
