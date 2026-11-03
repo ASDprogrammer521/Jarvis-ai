@@ -118,7 +118,19 @@ python main.py
 | **Info** | `web_search` · `knowledge_lookup` · `weather_report` · `flight_finder` · `utility_tools` calculator, units, live currency |
 | **Developer** | `code_helper` write / edit / run code · `dev_agent` multi-file projects |
 
-**Voice control of the HUD player.** While a video plays you can simply talk to it: *"pause"*, *"resume"*, *"skip 2 minutes"*, *"go back 30 seconds"*, *"play from minute 10"*, *"louder"*, *"set volume to 40"*, *"mute"*, *"speed 1.5"*, *"full screen"*, *"how much is left?"*, *"stop the video"*.
+**HUD video player — settings, 👍 👎 🔔 and "Up next".** Under every YouTube video in the HUD:
+
+| Control | What it does |
+| ------- | ------------ |
+| ⚙ **Settings** | **Quality** (Auto or any resolution the video has, switches without losing your place) · **Speed** 0.5×–2× · **Volume** · **Mute** · **Autoplay next video** · **Loop**. Your choices are remembered |
+| 👍 / 👎 | Like or dislike the video on your YouTube account (press again to undo) |
+| 🔔 **Subscribe** | Subscribe to the channel |
+| ⏭ **Next** | Play the next suggested video |
+| **UP NEXT** strip | Thumbnails of related videos — click one to play it right away, in the same window |
+
+Like / dislike / subscribe use the same Google sign-in as Gmail & Calendar (`config/google_credentials.json`), plus the **YouTube Data API v3** enabled in your Google Cloud project. The first click opens a browser once; the token is kept in `config/google_youtube_token.json`.
+
+**Voice control of the HUD player.** While a video plays you can simply talk to it: *"pause"*, *"resume"*, *"skip 2 minutes"*, *"go back 30 seconds"*, *"play from minute 10"*, *"louder"*, *"set volume to 40"*, *"mute"*, *"speed 1.5"*, *"full screen"*, *"how much is left?"*, *"quality 720"*, *"like this video"*, *"subscribe"*, *"next video"*, *"what's up next?"*, *"play the third one"*, *"autoplay on"*, *"loop on"*, *"stop the video"*.
 
 Each tool is a drop-in file in `actions/`, discovered automatically.
 
@@ -170,7 +182,7 @@ Show your hand to the webcam to pause music, change volume, mute the mic or take
 
 **One-time setup** (about 5 minutes, free):
 
-1. Open [Google Cloud Console](https://console.cloud.google.com/) → create a project → enable **Gmail API** and **Google Calendar API**.
+1. Open [Google Cloud Console](https://console.cloud.google.com/) → create a project → enable **Gmail API**, **Google Calendar API** and (for 👍 👎 🔔 in the video player) **YouTube Data API v3**.
 2. *APIs & Services → Credentials → Create credentials → OAuth client ID → **Desktop app*** → download the JSON.
 3. Save it as `config/google_credentials.json`.
 4. Say **"connect Google"** — a browser opens once; approve access. Done.

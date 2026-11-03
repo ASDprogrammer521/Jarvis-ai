@@ -23,6 +23,7 @@ from ui.fx import GL_ENABLED, Backdrop, GlassCard, GlowButton, ModalLayer, Stage
 from ui.metrics import _metrics
 from ui.panels import APP_VERSION, ConfirmPanel, RemotePanel, SettingsPanel, SetupPanel
 from ui.theme import C, DEFAULT_ACCENT, apply_accent, build_qss, patch_cfg, qcol, read_cfg, rgba
+from ui.video_extras import EXTRA_H, PlayerSettings, VideoExtras
 from ui.pages import DashboardPage, InputBar, LogoMark, NavItem, PhonePage, Sidebar
 from ui.widgets import ChatView, IconButton, StatePill, font
 
@@ -110,7 +111,10 @@ class StageHost(QWidget):
                 m.setGeometry(0, 0, W, H)
             else:
                 media_w = min(960, max(360, min(int(W * 0.66), W - 28)))
-                media_h = max(220, min(H - 24, int(media_w * 9 / 16) + 58 + getattr(self, "media_extra", 0)))
+                extra = getattr(self, "media_extra", 0)
+                if int(media_w * 9 / 16) + 58 + extra > H - 24:      # tall panel (suggestions row): shrink the video, keep 16:9
+                    media_w = max(360, min(media_w, int((H - 24 - 58 - extra) * 16 / 9)))
+                media_h = max(220, min(H - 24, int(media_w * 9 / 16) + 58 + extra))
                 m.setGeometry(max(12, W - media_w - 12), 12, media_w, media_h)
         k = self.floats.get("clip")
         if k is not None and k.isVisible():
@@ -395,6 +399,9 @@ class MainWindow(QMainWindow):
     _gesture_sig = pyqtSignal(str, str)
     _gesture_status_sig = pyqtSignal(str)
     _face_sig = pyqtSignal(str, str)
+    _media_info_sig = pyqtSignal(object)
+    _media_sugg_sig = pyqtSignal(object)
+    _vx_state_sig = pyqtSignal(str, bool)
 
     def __init__(self):
         super().__init__()
@@ -490,6 +497,9 @@ class MainWindow(QMainWindow):
         self._gesture_sig.connect(self._run_gesture_action)
         self._gesture_status_sig.connect(self._on_gesture_status)
         self._face_sig.connect(self._on_face_event)
+        self._media_info_sig.connect(self._on_media_info)
+        self._media_sugg_sig.connect(self._on_media_suggestions)
+        self._vx_state_sig.connect(lambda k, on: self._extras.set_state(k, on))
         self.gesture_status = "off"
         self.camera = None
         QTimer.singleShot(2500, self._camera_autostart)
@@ -775,6 +785,17 @@ class MainWindow(QMainWindow):
         self._media_lbl.mouseDoubleClickEvent = lambda e: self._toggle_media_full()
         l.addWidget(self._media_lbl, 1)
         l.addWidget(self._make_video_bar())
+        self._extras = VideoExtras()
+        self._extras.hide()
+        self._extras.like.connect(lambda: self._vx_rate("like"))
+        self._extras.dislike.connect(lambda: self._vx_rate("dislike"))
+        self._extras.subscribe.connect(self._vx_subscribe)
+        self._extras.next_clicked.connect(lambda: self._video_ctl("next"))
+        self._extras.pick.connect(lambda url, title: self._video_ctl("play_url", (url, title)))
+        self._extras.settings_clicked.connect(self._vx_open_settings)
+        self._vx_rating = "none"
+        self._vx_subscribed = False
+        self._vx_settings = None
         return c
 
     def _make_video_bar(self) -> QWidget:
@@ -1849,6 +1870,8 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         self.host.media_extra = 0
+        if getattr(self, "_extras", None) is not None:
+            self._extras.hide()
         vw, self._mpv_win = self._mpv_win, None
         if vw is not None:
             try:
@@ -1856,6 +1879,74 @@ class MainWindow(QMainWindow):
                 vw.deleteLater()
             except Exception:
                 pass
+
+    # ── HUD video: info, "up next", like / dislike / subscribe, settings ──
+    def media_info(self, meta: dict):
+        self._media_info_sig.emit(dict(meta or {}))
+
+    def media_suggestions(self, items: list):
+        self._media_sugg_sig.emit(list(items or []))
+
+    def _on_media_info(self, meta: dict):
+        if self._mpv_win is None:
+            return
+        if meta.get("title"):
+            self._media_title.setText(str(meta["title"])[:80].upper())
+        yt = bool(meta.get("youtube"))
+        self._vx_meta = meta
+        self._vx_rating, self._vx_subscribed = "none", False
+        if yt:
+            self._extras.set_info(meta)
+        self._extras.setVisible(yt)
+        self.host.media_extra = 76 + (EXTRA_H + 6 if yt else 0)
+        self.host.layout_floats()
+        self._sync_mpv_geometry()
+
+    def _on_media_suggestions(self, items: list):
+        if self._mpv_win is not None:
+            self._extras.set_suggestions(items)
+
+    def _vx_open_settings(self, pos):
+        try:
+            from actions.hud_video import get_prefs
+            if self._vx_settings is None:
+                self._vx_settings = PlayerSettings(self)
+                self._vx_settings.changed.connect(self._video_ctl)
+            self._vx_settings.open_at(pos, getattr(self, "_vx_meta", {}) or {}, get_prefs())
+        except Exception as e:
+            self.write_log(f"ERR: player settings — {e}")
+
+    def _vx_rate(self, kind: str):
+        want = "none" if self._vx_rating == kind else kind          # pressing again removes the rating
+
+        def work():
+            try:
+                from actions import youtube_actions as ya
+                from actions.hud_video import get_video_meta
+                msg = ya.rate(get_video_meta().get("id", ""), want)
+                if not msg.startswith("✗"):
+                    self._vx_rating = want
+                    self._vx_state_sig.emit(kind, want == kind)
+                self._toast_sig.emit(msg)
+            except Exception as e:
+                self._toast_sig.emit(f"✗ {e}")
+        self._toast_sig.emit("Talking to YouTube… (the first time a browser opens to sign in)")
+        threading.Thread(target=work, daemon=True).start()
+
+    def _vx_subscribe(self):
+        def work():
+            try:
+                from actions import youtube_actions as ya
+                from actions.hud_video import get_video_meta
+                m = get_video_meta()
+                msg = ya.subscribe(m.get("channel_id", ""), m.get("channel", ""))
+                if not msg.startswith("✗"):
+                    self._vx_state_sig.emit("sub", True)
+                self._toast_sig.emit(msg)
+            except Exception as e:
+                self._toast_sig.emit(f"✗ {e}")
+        self._toast_sig.emit("Talking to YouTube… (the first time a browser opens to sign in)")
+        threading.Thread(target=work, daemon=True).start()
 
     # ── HUD video controls ──
     def _video_ctl(self, cmd: str, value=None):
@@ -2212,6 +2303,12 @@ class JarvisUI:
 
     def show_media_frame(self, data: bytes, title: str = ""):
         self._win.show_media_frame(data, title)
+
+    def media_info(self, meta):
+        self._win.media_info(meta)
+
+    def media_suggestions(self, items):
+        self._win.media_suggestions(items)
 
     def start_mpv_window(self, title, result):
         self._win.start_mpv_window(title, result)

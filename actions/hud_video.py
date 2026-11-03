@@ -30,6 +30,91 @@ _STATE={"active":False,"pos":0.0,"dur":0.0,"paused":False,"buffering":False,"cac
 _CONTROL_KEYS=(("SPACE","pause",None),("LEFT","seek",-5),("RIGHT","seek",5),("Shift+LEFT","seek",-300),
                ("Shift+RIGHT","seek",300),("UP","volume",5),("DOWN","volume",-5))
 
+# ── player preferences (saved in config/api_keys.json as hud_*), current video info, "up next" list ──
+_PREFS={"quality":0,"speed":1.0,"autoplay":False,"loop":False}   # quality: max height in px, 0 = auto
+_META: dict={}
+_SUGGEST: list=[]
+_PLAYED: set=set()
+_META_LOCK=threading.Lock()
+
+def _load_prefs():
+    try:
+        from memory.config_manager import load_api_keys
+        c=load_api_keys()
+        _PREFS.update(quality=int(c.get("hud_quality",0) or 0),speed=float(c.get("hud_speed",1.0) or 1.0),
+                      autoplay=bool(c.get("hud_autoplay",False)),loop=bool(c.get("hud_loop",False)))
+    except Exception: pass
+
+def get_prefs() -> dict:
+    return dict(_PREFS)
+
+def set_pref(key: str,value):
+    if key not in _PREFS: return
+    _PREFS[key]=value
+    try:
+        from memory.config_manager import _patch_config
+        _patch_config(**{f"hud_{key}":value})
+    except Exception: pass
+
+def get_video_meta() -> dict:
+    """Info about the current YouTube video: id, title, channel, channel_id, heights (available resolutions)."""
+    with _META_LOCK: return dict(_META)
+
+def get_suggestions() -> list:
+    with _META_LOCK: return list(_SUGGEST)
+
+def _set_meta(info: dict,source: str):
+    heights=sorted({int(f["height"]) for f in (info.get("formats") or []) if f.get("height") and f.get("vcodec") not in (None,"none")})
+    with _META_LOCK:
+        _META.clear()
+        _META.update(id=info.get("id") or "",title=info.get("title") or "",channel=info.get("channel") or info.get("uploader") or "",
+                     channel_id=info.get("channel_id") or "",url=info.get("webpage_url") or source,heights=heights,
+                     youtube=True,quality=_PREFS["quality"])
+        if _META["id"]: _PLAYED.add(_META["id"])
+
+def _fetch_suggestions(meta: dict,ui):
+    """Related videos: a YouTube search on the current title (flat, fast) — shown under the video, click to play."""
+    items=[]
+    try:
+        import yt_dlp
+        q=re.sub(r"[\[\(].*?[\]\)]|#\w+","",meta.get("title") or "").strip() or (meta.get("channel") or "")
+        with yt_dlp.YoutubeDL({"quiet":True,"no_warnings":True,"extract_flat":True,"skip_download":True}) as ydl:
+            info=ydl.extract_info(f"ytsearch14:{q}",download=False)
+        for e in (info.get("entries") or []):
+            vid=e.get("id") or ""
+            if not vid or vid==meta.get("id") or e.get("live_status") in ("is_live","is_upcoming"): continue
+            dur=e.get("duration")
+            if dur is not None and dur<45: continue
+            items.append({"id":vid,"title":str(e.get("title") or "")[:90],"channel":str(e.get("channel") or e.get("uploader") or ""),
+                          "duration":dur,"url":f"https://www.youtube.com/watch?v={vid}",
+                          "thumb_url":f"https://i.ytimg.com/vi/{vid}/mqdefault.jpg"})
+            if len(items)>=10: break
+    except Exception as exc:
+        _log(ui,f"MEDIA: couldn't load suggestions ({exc})")
+    with _META_LOCK:
+        if _META.get("id")!=meta.get("id"): return          # the user already moved on to another video
+        _SUGGEST[:]=items
+    try:
+        import requests
+        for it in items:
+            try:
+                r=requests.get(it["thumb_url"],timeout=6)
+                if r.ok: it["thumb"]=r.content
+            except Exception: pass
+    except Exception: pass
+    try:
+        with _META_LOCK:
+            if _META.get("id")!=meta.get("id"): return
+        ui.media_suggestions(items)
+    except Exception: pass
+
+def _next_suggestion():
+    for it in get_suggestions():
+        if it["id"] not in _PLAYED: return it
+    return None
+
+_load_prefs()
+
 def get_video_state() -> dict:
     """Snapshot of the current playback state (position/duration in seconds)."""
     with _STATE_LOCK: return dict(_STATE)
@@ -48,7 +133,11 @@ def _apply_control(player,cmd: str,value):
     elif cmd=="volume": player.volume=max(0.0,min(130.0,float(player.volume or 100)+float(value)))
     elif cmd=="volume_abs": player.volume=max(0.0,min(130.0,float(value)))
     elif cmd=="mute": player.mute=not bool(player.mute)
-    elif cmd=="speed": player.speed=max(0.25,min(3.0,float(value)))
+    elif cmd=="speed":
+        v=max(0.25,min(3.0,float(value))); player.speed=v; set_pref("speed",v)
+    elif cmd=="loop":
+        on=bool(value); player.loop_file="inf" if on else "no"; set_pref("loop",on)
+    elif cmd=="autoplay": set_pref("autoplay",bool(value))
 
 def _poll_state(player):
     def g(name,default=None):
@@ -165,28 +254,32 @@ def _search_video(query: str,latest: bool=False) -> tuple[str,str]:
     if not url.startswith("http"): url=f"https://www.youtube.com/watch?v={pick.get('id') or url}"
     return url,str(pick.get("title") or query)
 
-def _resolve_stream(source: str) -> tuple[str, str | None, str | None]:
+def _resolve_stream(source: str,max_height: int | None=None) -> tuple[str, str | None, str | None]:
     """Return (video_url, audio_url, user_agent). audio_url is None when the source is a single file/stream."""
     if not _is_youtube(source): return source, None, None
     try: import yt_dlp
     except ImportError as exc: raise RuntimeError("YouTube HUD playback needs yt-dlp: pip install yt-dlp") from exc
     # YouTube serves video and audio separately; mpv plays them together (--audio-file).
-    selectors=("bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b","bv*/b","best")
+    cap=_PREFS["quality"] if max_height is None else int(max_height)
+    selectors=(f"bv*[height<={cap}]+ba/b[height<={cap}]/bv*+ba/b","bv*/b","best") if cap>0 else ("bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b","bv*/b","best")
     last_exc: Exception | None=None; info=None
     for fmt in selectors:
-        opts={"quiet":True,"no_warnings":True,"noplaylist":True,"format":fmt,"format_sort":["res:1080","fps","vcodec:h264"]}
+        opts={"quiet":True,"no_warnings":True,"noplaylist":True,"format":fmt,"format_sort":[f"res:{cap or 1080}","fps","vcodec:h264"]}
         try:
             with yt_dlp.YoutubeDL(opts) as ydl: info=ydl.extract_info(source,download=False)
             break
         except Exception as exc: last_exc=exc
     if info is None: raise RuntimeError(f"yt-dlp could not find a playable format. Update it with 'pip install -U yt-dlp'. ({last_exc})")
-    if (info.get("duration") or 0)>_LONG_VIDEO_SECS and (info.get("height") or 0)>_LONG_VIDEO_MAX_HEIGHT:
+    _full_info=info
+    if cap==0 and (info.get("duration") or 0)>_LONG_VIDEO_SECS and (info.get("height") or 0)>_LONG_VIDEO_MAX_HEIGHT:
         h=_LONG_VIDEO_MAX_HEIGHT  # long video: re-pick a lighter format; keep the first result if this fails
         opts={"quiet":True,"no_warnings":True,"noplaylist":True,"format":f"bv*[height<={h}]+ba/b[height<={h}]/bv*+ba/b",
               "format_sort":[f"res:{h}","fps:30","vcodec:h264"]}
         try:
             with yt_dlp.YoutubeDL(opts) as ydl: info=ydl.extract_info(source,download=False)
         except Exception: pass
+    try: _set_meta(_full_info if _full_info.get("formats") else info,source)
+    except Exception: pass
     fmts=info.get("requested_formats") or info.get("requested_downloads") or [info]
     def _url(f):
         u=f.get("url"); return u if isinstance(u,str) and u.startswith(("http://","https://")) else None
@@ -287,10 +380,45 @@ def _play_worker(source: str,title: str,ui,stop_event: threading.Event):
         else: player.loadfile(stream)
         _log(ui,f"MEDIA: HUD playback started — {title}")
         started=False; t0=time.monotonic(); last_poll=0.0
+        current={"source":source,"title":title}
+        try:
+            player.speed=_PREFS["speed"]; player.loop_file="inf" if _PREFS["loop"] else "no"
+        except Exception: pass
+        def _announce():  # tell the HUD what is playing (title, channel, qualities) and load "up next"
+            if _is_youtube(current["source"]): meta=get_video_meta()
+            else:
+                meta={"youtube":False}
+                with _META_LOCK: _META.clear(); _SUGGEST[:]=[]
+            meta["title"]=meta.get("title") or current["title"]; meta["prefs"]=get_prefs()
+            try: ui.media_info(meta)
+            except Exception: pass
+            if meta.get("youtube"): threading.Thread(target=_fetch_suggestions,args=(meta,ui),daemon=True).start()
+        def _switch(src,ttl,start=None):  # play another video in the same HUD window (next / suggestion / quality change)
+            nonlocal started,t0
+            stream_,audio_,_ua=_resolve_stream(src)
+            kw={}
+            if start and start>2: kw["start"]=str(int(start))
+            if audio_ and audio_!=stream_: kw["audio-file"]=f"%{len(audio_.encode())}%{audio_}"
+            player.loadfile(stream_,**kw)
+            current["source"]=src; current["title"]=ttl or current["title"]
+            started=False; t0=time.monotonic(); state["error"]=None
+            with _STATE_LOCK: _STATE.update(pos=float(start or 0),dur=0.0,paused=False,buffering=False)
+            _announce()
+        _announce()
         while not stop_event.is_set():
             try: cmd,value=_CMD_Q.get(timeout=0.1)
             except queue.Empty: cmd=value=None
-            if cmd is not None:
+            if cmd in ("quality","play_url","next"):
+                try:
+                    if cmd=="quality":
+                        set_pref("quality",int(value or 0)); _switch(current["source"],current["title"],start=get_video_state()["pos"])
+                    elif cmd=="play_url": _switch(value[0],value[1])
+                    else:
+                        nxt=_next_suggestion()
+                        if nxt: _switch(nxt["url"],nxt["title"])
+                        else: _log(ui,"MEDIA: no next video suggestion yet")
+                except Exception as exc: _log(ui,f"ERR: HUD video — {exc}")
+            elif cmd is not None:
                 try: _apply_control(player,cmd,value)
                 except Exception: pass  # e.g. seek before the stream is ready
             now=time.monotonic()
@@ -302,7 +430,12 @@ def _play_worker(source: str,title: str,ui,stop_event: threading.Event):
                 detail=" | ".join(mpv_errors)
                 raise RuntimeError(f"mpv could not play this video: {state['error']}"+(f" — {detail}" if detail else ""))
             if not idle: started=True
-            elif started: break
+            elif started:
+                nxt=_next_suggestion() if _PREFS["autoplay"] else None
+                if nxt:  # autoplay: the video ended, go on with the next suggestion
+                    try: _switch(nxt["url"],nxt["title"]); continue
+                    except Exception as exc: _log(ui,f"ERR: autoplay failed — {exc}")
+                break
             elif now-t0>60: raise RuntimeError("mpv could not open the video (timeout).")
             _poll_state(player)
         with _STATE_LOCK: end_pos,end_dur=_STATE["pos"],_STATE["dur"]
@@ -326,7 +459,7 @@ def _play_worker(source: str,title: str,ui,stop_event: threading.Event):
         with _ACTIVE_LOCK:
             if _ACTIVE_STOP is stop_event: _ACTIVE_STOP=None
 
-_VOICE_ACTIONS={"pause","resume","toggle","seek","forward","back","rewind","seek_to","volume_up","volume_down","set_volume","mute","unmute","fullscreen","exit_fullscreen","speed","status"}
+_VOICE_ACTIONS={"pause","resume","toggle","seek","forward","back","rewind","seek_to","volume_up","volume_down","set_volume","mute","unmute","fullscreen","exit_fullscreen","speed","status","like","dislike","unlike","subscribe","next","suggestions","play_suggestion","quality","autoplay","loop"}
 
 def _voice_control(action: str,params: dict,player) -> str:
     """Spoken control of the HUD player: 'pause', 'skip 2 minutes', 'louder', 'full screen', 'how much is left?'."""
@@ -335,6 +468,27 @@ def _voice_control(action: str,params: dict,player) -> str:
     def num(key,default):
         try: return float(params.get(key) if params.get(key) is not None else default)
         except (TypeError,ValueError): return float(default)
+    meta=get_video_meta()
+    if action in ("like","dislike","unlike","subscribe"):
+        if not meta.get("youtube"): return "This isn't a YouTube video, so I can't rate or subscribe."
+        from actions import youtube_actions as ya
+        if action=="subscribe": return ya.subscribe(meta.get("channel_id",""),meta.get("channel",""))
+        return ya.rate(meta.get("id",""),{"like":"like","dislike":"dislike","unlike":"none"}[action])
+    if action=="next":
+        nxt=_next_suggestion()
+        if not nxt: return "I don't have a next video ready yet."
+        video_control("next"); return f"Playing next: {nxt['title']}"
+    if action=="suggestions":
+        items=[x for x in get_suggestions()][:6]
+        return ("Up next:\n"+"\n".join(f"{i}. {x['title']}" for i,x in enumerate(items,1))) if items else "No suggestions loaded yet."
+    if action=="play_suggestion":
+        items=get_suggestions(); i=int(num("amount",1))-1
+        if not 0<=i<len(items): return "I don't have a suggestion with that number."
+        video_control("play_url",(items[i]["url"],items[i]["title"])); return f"Playing: {items[i]['title']}"
+    if action=="quality":
+        h=int(num("amount",0)); video_control("quality",h); return f"Switching quality to {h}p…" if h else "Quality set to auto."
+    if action in ("autoplay","loop"):
+        on=bool(params.get("enabled",True)); video_control(action,on); return f"{action.title()} {'on' if on else 'off'}."
     if action=="status":
         pos,dur=st.get("pos",0.0),st.get("dur",0.0)
         left=f", {_fmt_time(max(0.0,dur-pos))} left" if dur else ""
@@ -394,6 +548,6 @@ def play_hud_video(parameters: dict,response=None,player=None,session_memory=Non
         return f"Could not start HUD video playback: {exc}"
     return "HUD video playback started in the background (mpv, with sound). Space pauses, left/right arrows seek 5 s (Shift = 5 min), up/down change volume, F or double-click toggles full screen; the HUD has a control bar under the video. Use action='stop' to stop it. The stream and delivery are not verified."
 
-TOOL={"name":"play_hud_video","description":"WATCH a video in Jarvis's HUD (mpv player with sound, seeking, 60 fps and full screen). Use this whenever the user asks to play/put on/watch a video: pass a YouTube link or local file in source, OR just describe it in query (e.g. 'good minecraft video', 'Parrot X2 new video') and Jarvis finds one on YouTube; set latest=true when they want the newest. Videos of any length work, including multi-hour ones (videos over 1 hour are played at up to 720p). The HUD shows a control bar under the video; Space pauses, arrows seek. Use action='stop' to stop playback. You can also CONTROL the video by voice with the same tool: action=pause | resume | seek (seconds, negative = back) | forward | back (seconds) | seek_to (absolute seconds) | volume_up | volume_down (amount) | set_volume (amount 0-100) | mute | speed (amount, e.g. 1.5) | fullscreen | exit_fullscreen | status (position / time left). Examples: 'pause' → pause; 'skip 2 minutes' → forward seconds=120; 'go back 30 seconds' → back seconds=30; 'louder' → volume_up; 'make it full screen' → fullscreen; 'how much is left?' → status; 'play from minute 10' → seek_to seconds=600.","parameters":{"type":"OBJECT","properties":{"action":{"type":"STRING","description":"play (default) | stop | pause | resume | seek | forward | back | seek_to | volume_up | volume_down | set_volume | mute | speed | fullscreen | exit_fullscreen | status"},"seconds":{"type":"NUMBER","description":"For seek/forward/back: seconds to skip; for seek_to: absolute position in seconds"},"amount":{"type":"NUMBER","description":"volume_up/down: step in %, set_volume: 0-100, speed: multiplier like 1.5"},"source":{"type":"STRING","description":"Local file path or direct HTTP(S)/YouTube URL"},"query":{"type":"STRING","description":"What to watch, in plain words; Jarvis searches YouTube and plays the best match"},"latest":{"type":"BOOLEAN","description":"With query: pick the newest upload instead of the most relevant"},"title":{"type":"STRING","description":"Optional short HUD title"}},"required":[]},"handler":play_hud_video}
+TOOL={"name":"play_hud_video","description":"WATCH a video in Jarvis's HUD (mpv player with sound, seeking, 60 fps and full screen). Use this whenever the user asks to play/put on/watch a video: pass a YouTube link or local file in source, OR just describe it in query (e.g. 'good minecraft video', 'Parrot X2 new video') and Jarvis finds one on YouTube; set latest=true when they want the newest. Videos of any length work, including multi-hour ones (videos over 1 hour are played at up to 720p). The HUD shows a control bar under the video; Space pauses, arrows seek. Use action='stop' to stop playback. You can also CONTROL the video by voice with the same tool: action=pause | resume | seek (seconds, negative = back) | forward | back (seconds) | seek_to (absolute seconds) | volume_up | volume_down (amount) | set_volume (amount 0-100) | mute | speed (amount, e.g. 1.5) | fullscreen | exit_fullscreen | status (position / time left) | like | dislike | unlike | subscribe (needs the Google YouTube sign-in) | next | suggestions (list up-next videos) | play_suggestion (amount=number) | quality (amount=height like 720, 0=auto) | autoplay / loop (enabled=true/false). Examples: 'pause' → pause; 'skip 2 minutes' → forward seconds=120; 'go back 30 seconds' → back seconds=30; 'louder' → volume_up; 'make it full screen' → fullscreen; 'how much is left?' → status; 'play from minute 10' → seek_to seconds=600.","parameters":{"type":"OBJECT","properties":{"action":{"type":"STRING","description":"play (default) | stop | like | dislike | unlike | subscribe | next | suggestions | play_suggestion | quality | autoplay | loop | pause | resume | seek | forward | back | seek_to | volume_up | volume_down | set_volume | mute | speed | fullscreen | exit_fullscreen | status"},"seconds":{"type":"NUMBER","description":"For seek/forward/back: seconds to skip; for seek_to: absolute position in seconds"},"enabled":{"type":"BOOLEAN","description":"autoplay / loop: on or off"},"amount":{"type":"NUMBER","description":"volume_up/down: step in %, set_volume: 0-100, speed: multiplier like 1.5"},"source":{"type":"STRING","description":"Local file path or direct HTTP(S)/YouTube URL"},"query":{"type":"STRING","description":"What to watch, in plain words; Jarvis searches YouTube and plays the best match"},"latest":{"type":"BOOLEAN","description":"With query: pick the newest upload instead of the most relevant"},"title":{"type":"STRING","description":"Optional short HUD title"}},"required":[]},"handler":play_hud_video}
 
 #by ASDcuber521
