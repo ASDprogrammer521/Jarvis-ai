@@ -51,6 +51,14 @@ def _hdr(text: str, sub: str = "") -> QWidget:
     return w
 
 
+def _safe(timer, fn) -> None:
+    """Run a page's refresh; if its widgets were already deleted (page switched), just stop the timer."""
+    try:
+        fn()
+    except RuntimeError:
+        timer.stop()
+
+
 class PluginForm(QWidget):
     _done = pyqtSignal(str, bool, str)
 
@@ -479,8 +487,8 @@ class SettingsPanel(GlassCard):
         cam.currentIndexChanged.connect(cam_changed)
         lay.addWidget(setting_row("Camera", "Pick another one if the wrong camera opens", cam))
 
-        timer = QTimer(self)
-        timer.timeout.connect(refresh)
+        timer = QTimer(status)          # lives and dies with this page's widgets
+        timer.timeout.connect(lambda: _safe(timer, refresh))
         timer.start(500)
         refresh()
 
@@ -565,9 +573,9 @@ class SettingsPanel(GlassCard):
             status.setText(f"Camera: {st}" if face_id.is_enabled() else (status.text() if "Look" in status.text() else "Camera: off"))
             vis = getattr(cam, "visible", []) if cam is not None and face_id.is_enabled() else []
             seeing.setText("Seeing: " + ", ".join(vis).replace("unknown", "unknown face") if vis else "")
-        timer = QTimer(self)
-        timer.timeout.connect(refresh)
-        timer.timeout.connect(lambda: render() if len(face_id.names()) != people_box.count() and face_id.names() else None)
+        timer = QTimer(status)          # lives and dies with this page's widgets
+        timer.timeout.connect(lambda: _safe(timer, refresh))
+        timer.timeout.connect(lambda: _safe(timer, lambda: render() if len(face_id.names()) != people_box.count() and face_id.names() else None))
         timer.start(700)
         refresh()
 
