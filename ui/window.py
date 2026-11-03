@@ -392,6 +392,9 @@ class MainWindow(QMainWindow):
     _update_done_sig = pyqtSignal(object)
     _restart_sig = pyqtSignal()
     _quit_sig = pyqtSignal()
+    _gesture_sig = pyqtSignal(str, str)
+    _gesture_status_sig = pyqtSignal(str)
+    _face_sig = pyqtSignal(str, str)
 
     def __init__(self):
         super().__init__()
@@ -484,6 +487,12 @@ class MainWindow(QMainWindow):
         self._update_done_sig.connect(self._on_update_done)
         self._restart_sig.connect(self.restart_app)
         self._quit_sig.connect(QApplication.quit)
+        self._gesture_sig.connect(self._run_gesture_action)
+        self._gesture_status_sig.connect(self._on_gesture_status)
+        self._face_sig.connect(self._on_face_event)
+        self.gesture_status = "off"
+        self.camera = None
+        QTimer.singleShot(2500, self._camera_autostart)
 
         self._clock = QTimer(self)
         self._clock.timeout.connect(self._tick)
@@ -1336,6 +1345,119 @@ class MainWindow(QMainWindow):
             return
         self.modal.present(RemotePanel(info, self._remote_info), 440, 610)
 
+    # ── camera features: hand gestures + face recognition ────────────────────────
+    def _camera_hub(self):
+        if self.camera is None:
+            from core.camera_hub import CameraHub
+            self.camera = CameraHub(
+                on_gesture=lambda a, g: self._gesture_sig.emit(a, g),
+                on_face=lambda k, n: self._face_sig.emit(k, n),
+                on_status=lambda s: self._gesture_status_sig.emit(s))
+        return self.camera
+
+    def _camera_autostart(self):
+        try:
+            self._camera_hub().refresh()
+        except Exception as e:
+            self.write_log(f"ERR: camera — {e}")
+
+    def _camera_refresh(self):
+        threading.Thread(target=self._camera_hub().refresh, daemon=True).start()
+
+    def set_gestures_enabled(self, on: bool):
+        from core import gesture
+        gesture.set_enabled(on)
+        self._camera_refresh()
+        self.write_log("SYS: Gesture control on — the camera is in use." if on else "SYS: Gesture control off.")
+
+    def set_face_enabled(self, on: bool):
+        from core import face_id
+        face_id.set_enabled(on)
+        self._camera_refresh()
+        self.write_log("SYS: Face recognition on — the camera is in use. (First start downloads ~37 MB of models.)"
+                       if on else "SYS: Face recognition off.")
+
+    def _on_gesture_status(self, s: str):
+        self.gesture_status = s
+        if s.startswith(("error", "missing")):
+            self.write_log(f"ERR: camera — {s}")
+            self._toast(f"Camera: {s[:60]}")
+
+    def _on_face_event(self, kind: str, name: str):
+        from core import face_id
+        if kind == "known":
+            self._toast(f"👋 {name} is here")
+            self.write_log(f"SYS: Recognised {name}.")
+            if face_id.greet_enabled() and self.on_text_command:
+                try:
+                    self.on_text_command(f"[FaceID] {name} just appeared in front of the camera. Greet them by name in one short friendly sentence.")
+                except Exception:
+                    pass
+        elif kind == "unknown":
+            self._toast("⚠ Unknown face at the camera")
+            self.write_log("SYS: An unrecognised face is in front of the camera.")
+        elif kind == "enrolled":
+            self._toast(f"✅ Saved {name}'s face")
+            self.write_log(f"SYS: Face saved for {name}.")
+        elif kind == "enroll_failed":
+            self._toast("Face not saved — try again")
+            self.write_log(f"ERR: face — {name}")
+
+    def enroll_face(self, name: str) -> str:
+        name = (name or "").strip()
+        if not name:
+            return "Whose face is it? Type a name first."
+        self._camera_hub().enroll(name)
+        self._toast(f"Look at the camera, {name}…")
+        return f"Look straight at the camera for a few seconds to save {name}."
+
+    def face_command(self, action: str, name: str = "") -> str:
+        """Used by the voice tool (actions/face_id.py)."""
+        from core import face_id
+        hub = self._camera_hub()
+        if action == "enroll":
+            return self.enroll_face(name)
+        if action == "list":
+            n = face_id.names()
+            return ("Saved faces: " + ", ".join(n)) if n else "No faces saved yet."
+        if action == "forget":
+            return f"Forgot {name}." if face_id.forget(name) else f"I don't have a face saved for {name}."
+        if action == "who":
+            if not hub.running or not face_id.is_enabled():
+                return "Face recognition is off. Turn it on in Settings → Face ID."
+            if time.time() - hub.seen_at > 3 or not hub.visible:
+                return "I can't see anyone right now."
+            return "I can see: " + ", ".join(hub.visible).replace("unknown", "someone I don't know") + "."
+        return "Unknown face action."
+
+    def _run_gesture_action(self, action: str, gesture_id: str):
+        from core.gesture import ACTIONS, GESTURES
+        try:
+            if action == "toggle_mic":
+                self.toggle_mute()
+            elif action == "wake_toggle":
+                self.wake_manual()
+            elif action == "open_settings":
+                self.open_settings("general")
+            elif action == "fullscreen":
+                self.toggle_fullscreen()
+            elif action == "screenshot":
+                import pyautogui
+                from actions._common import output_dir, unique_path
+                path = unique_path(output_dir("Screenshots"), "gesture", ".png")
+                pyautogui.screenshot().save(str(path))
+                self._toast(f"📸 Saved {path.name}")
+                return
+            else:
+                import pyautogui
+                key = {"play_pause": "playpause", "next_track": "nexttrack", "prev_track": "prevtrack",
+                       "volume_up": "volumeup", "volume_down": "volumedown", "volume_mute": "volumemute"}.get(action)
+                if key:
+                    pyautogui.press(key)
+            self._toast(f"{GESTURES.get(gesture_id, ('', ''))[0]} → {ACTIONS.get(action, action)}")
+        except Exception as e:
+            self.write_log(f"ERR: gesture action {action} — {e}")
+
     def toggle_fullscreen(self):
         self.showNormal() if self.isFullScreen() else self.showFullScreen()
 
@@ -1941,6 +2063,8 @@ class MainWindow(QMainWindow):
             self._sync_mpv_geometry()
 
     def closeEvent(self, e):
+        if self.camera is not None:
+            self.camera.stop()
         self._close_media_user()
         self._mpv_close()
         if self._compact is not None:
@@ -1962,7 +2086,7 @@ class JarvisUI:
     _FORWARD = {
         "on_text_command", "on_remote_clicked", "on_interrupt", "on_voice_change", "on_audio_device_change",
         "get_plugins", "get_plugin_settings", "on_wake_toggle", "on_wake_manual", "on_wake_install",
-        "on_push_to_talk", "ptt_hold", "wake_get_state", "on_phone_command",
+        "on_push_to_talk", "ptt_hold", "wake_get_state", "on_phone_command", "face_command",
     }
 
     def __init__(self):

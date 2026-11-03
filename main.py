@@ -1062,6 +1062,8 @@ class JarvisLive:
             elif self._action_registry.has(name):
                 if name == "file_processor" and not args.get("file_path") and self.ui.current_file:
                     args["file_path"] = self.ui.current_file
+                if name == "finance_tracker" and not args.get("image_path") and self.ui.current_file:
+                    args["image_path"] = self.ui.current_file
                 _ctx = {"player": self.ui, "speak": self.speak,
                         "response": None, "session_memory": None}
                 r = await loop.run_in_executor(None, lambda: self._action_registry.run(name, args, _ctx))

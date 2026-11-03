@@ -162,7 +162,7 @@ class PluginForm(QWidget):
 
 class SettingsPanel(GlassCard):
     PAGES = (("general", "General", "gear"), ("appearance", "Appearance", "cube"),
-             ("voice", "Voice & AI", "mic"), ("plugins", "Plugins", "stats"),
+             ("voice", "Voice & AI", "mic"), ("gestures", "Gestures", "cube"), ("face", "Face ID", "cube"), ("plugins", "Plugins", "stats"),
              ("memory", "Memory", "chat"), ("about", "About", "home"))
 
     def __init__(self, win, parent=None):
@@ -406,6 +406,170 @@ class SettingsPanel(GlassCard):
             lay.addWidget(b, 0, Qt.AlignmentFlag.AlignLeft)
         except Exception as e:
             lay.addWidget(QLabel(f"Audio devices unavailable: {e}"))
+
+    def _page_gestures(self, lay):
+        from core import gesture
+        w = self.win
+        lay.addWidget(_hdr("Hand gestures", "Control Jarvis and your PC by showing a hand to the camera"))
+        on = Toggle(gesture.is_enabled())
+        lay.addWidget(setting_row("Enable gesture control",
+                                  "Uses your webcam while on. Everything is processed on this computer; nothing is recorded or sent.", on))
+        status = QLabel("")
+        status.setWordWrap(True)
+        status.setStyleSheet(f"color: {C.TEXT_DIM};")
+        live = QLabel("")
+        live.setStyleSheet(f"color: {C.PRI}; font-weight: 600;")
+        lay.addWidget(status)
+        lay.addWidget(live)
+
+        def refresh():
+            st = getattr(w, "gesture_status", "off")
+            status.setText(f"Camera: {st}" if gesture.is_enabled() else "Camera: off")
+            g = getattr(getattr(w, "camera", None), "current_gesture", None)
+            live.setText(f"Seeing: {gesture.GESTURES[g][0]}" if g in gesture.GESTURES else "")
+
+        def toggled(v):
+            w.set_gestures_enabled(v)
+            QTimer.singleShot(400, refresh)
+            for cb in boxes.values():
+                cb.setEnabled(v)
+        on.toggled.connect(toggled)
+
+        lay.addWidget(section_label("What each gesture does"))
+        hint = QLabel("Choose “Nothing” to disable a gesture.")
+        hint.setStyleSheet(f"color: {C.TEXT_DIM};")
+        lay.addWidget(hint)
+        spd = Segmented([(k, v) for k, v in gesture.SPEED_LABELS.items()], gesture.get_speed())
+        spd.changed.connect(gesture.set_speed)
+        lay.addWidget(setting_row("Response speed", "Fast reacts after ~0.3 s but may misfire; Careful waits ~0.7 s", spd))
+        boxes = {}
+        current = gesture.get_map()
+        for gid, (label, _default) in gesture.GESTURES.items():
+            cb = QComboBox()
+            cb.setFixedWidth(240)
+            for aid, alabel in gesture.ACTIONS.items():
+                cb.addItem(alabel, aid)
+            cb.setCurrentIndex(max(0, cb.findData(current[gid])))
+            cb.setEnabled(gesture.is_enabled())
+            cb.currentIndexChanged.connect(lambda _i, g=gid, c=cb: gesture.set_mapping(g, c.currentData()))
+            boxes[gid] = cb
+            lay.addWidget(setting_row(label, "", cb))
+            lay.addWidget(divider())
+        reset = GlowButton("Reset to defaults", "ghost")
+
+        def do_reset():
+            for gid, (_l, d) in gesture.GESTURES.items():
+                gesture.set_mapping(gid, d)
+                boxes[gid].setCurrentIndex(max(0, boxes[gid].findData(d)))
+        reset.clicked.connect(do_reset)
+        lay.addWidget(reset, 0, Qt.AlignmentFlag.AlignLeft)
+
+        lay.addWidget(section_label("Camera"))
+        cam = QComboBox()
+        cam.setFixedWidth(160)
+        for i in range(4):
+            cam.addItem(f"Camera {i}", i)
+        cam.setCurrentIndex(max(0, cam.findData(gesture.get_camera())))
+
+        def cam_changed(_i):
+            gesture.set_camera(cam.currentData())
+            if gesture.is_enabled():
+                w.set_gestures_enabled(False)
+                QTimer.singleShot(1200, lambda: w.set_gestures_enabled(True))
+        cam.currentIndexChanged.connect(cam_changed)
+        lay.addWidget(setting_row("Camera", "Pick another one if the wrong camera opens", cam))
+
+        timer = QTimer(self)
+        timer.timeout.connect(refresh)
+        timer.start(500)
+        refresh()
+
+    def _page_face(self, lay):
+        from core import face_id
+        w = self.win
+        lay.addWidget(_hdr("Face ID", "Let Jarvis recognise the people it sees through the camera"))
+        on = Toggle(face_id.is_enabled())
+        lay.addWidget(setting_row("Enable face recognition",
+                                  "Uses your webcam while on. Only numeric face fingerprints are stored on this PC — no photos, nothing uploaded. "
+                                  "The first start downloads ~37 MB of models.", on))
+        status = QLabel("")
+        status.setWordWrap(True)
+        status.setStyleSheet(f"color: {C.TEXT_DIM};")
+        lay.addWidget(status)
+        seeing = QLabel("")
+        seeing.setStyleSheet(f"color: {C.PRI}; font-weight: 600;")
+        lay.addWidget(seeing)
+
+        lay.addWidget(section_label("Behaviour"))
+        gr = Toggle(face_id.greet_enabled())
+        gr.toggled.connect(face_id.set_greet)
+        lay.addWidget(setting_row("Greet by voice", "Jarvis says hello when a saved person shows up", gr))
+        lay.addWidget(divider())
+        al = Toggle(face_id.alert_unknown())
+        al.toggled.connect(face_id.set_alert_unknown)
+        lay.addWidget(setting_row("Alert on unknown faces", "Show a warning when someone not saved is at the camera", al))
+
+        lay.addWidget(section_label("Saved people"))
+        people_box = QVBoxLayout()
+        holder = QWidget()
+        holder.setLayout(people_box)
+        lay.addWidget(holder)
+
+        def render():
+            while people_box.count():
+                it = people_box.takeAt(0)
+                if it.widget():
+                    it.widget().deleteLater()
+            n = face_id.names()
+            if not n:
+                e = QLabel("Nobody saved yet.")
+                e.setStyleSheet(f"color: {C.TEXT_DIM};")
+                people_box.addWidget(e)
+            for name in n:
+                rm = GlowButton("Remove", "ghost")
+                rm.clicked.connect(lambda _=False, nm=name: (face_id.forget(nm), render()))
+                people_box.addWidget(setting_row(f"👤 {name}", "", rm))
+
+        add_row = QHBoxLayout()
+        nm = QLineEdit()
+        nm.setPlaceholderText("Name, e.g. Akmal")
+        nm.setFixedWidth(220)
+        add = GlowButton("Add my face", "primary")
+
+        def do_add():
+            msg = w.enroll_face(nm.text())
+            status.setText(msg)
+            nm.clear()
+        add.clicked.connect(do_add)
+        add_row.addWidget(nm)
+        add_row.addWidget(add)
+        add_row.addStretch()
+        lay.addLayout(add_row)
+        tip = QLabel("Face the camera in good light for a few seconds. Add the same person twice (with and without glasses) for better accuracy.")
+        tip.setWordWrap(True)
+        tip.setStyleSheet(f"color: {C.TEXT_DIM}; margin-top: 6px;")
+        lay.addWidget(tip)
+        wipe = GlowButton("Delete all saved faces", "ghost")
+        wipe.clicked.connect(lambda: (face_id.forget_all(), render()))
+        lay.addWidget(wipe, 0, Qt.AlignmentFlag.AlignLeft)
+        render()
+
+        def toggled(v):
+            w.set_face_enabled(v)
+            QTimer.singleShot(500, refresh)
+        on.toggled.connect(toggled)
+
+        def refresh():
+            cam = getattr(w, "camera", None)
+            st = getattr(w, "gesture_status", "off")
+            status.setText(f"Camera: {st}" if face_id.is_enabled() else (status.text() if "Look" in status.text() else "Camera: off"))
+            vis = getattr(cam, "visible", []) if cam is not None and face_id.is_enabled() else []
+            seeing.setText("Seeing: " + ", ".join(vis).replace("unknown", "unknown face") if vis else "")
+        timer = QTimer(self)
+        timer.timeout.connect(refresh)
+        timer.timeout.connect(lambda: render() if len(face_id.names()) != people_box.count() and face_id.names() else None)
+        timer.start(700)
+        refresh()
 
     def _page_plugins(self, lay):
         w = self.win

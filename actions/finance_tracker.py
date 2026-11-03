@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import mimetypes
 import uuid
 from datetime import date, datetime
+from pathlib import Path
 
-from actions._common import DATA_DIR, cfg, json_load, json_save, log, open_path, output_dir, safe_name, unique_path
+from actions._common import DATA_DIR, ask_json, cfg, json_load, json_save, log, open_path, output_dir, safe_name, unique_path
 
 STORE = DATA_DIR / "finance.json"
 KEYWORDS = {
@@ -15,6 +17,31 @@ KEYWORDS = {
     "Fun": ("movie", "game", "cinema", "concert", "netflix", "spotify", "party", "bar", "trip"),
     "Education": ("course", "book", "school", "university", "tuition", "class"),
 }
+
+
+CATEGORIES = ("Food", "Transport", "Bills", "Shopping", "Health", "Fun", "Education", "Other")
+RECEIPT_SYSTEM = (
+    "You read photos of shop receipts, restaurant checks and bills (any language: Uzbek, Russian, English...). "
+    "Reply with ONE JSON object and nothing else: "
+    '{"is_receipt":bool,"total":number,"currency":str,"merchant":str,"category":str,"date":"YYYY-MM-DD"|null,"items":str}. '
+    "total = the FINAL amount paid (JAMI / ITOGO / TOTAL / к оплате), not a subtotal, tax line or change. "
+    "Write the number without spaces or thousand separators (e.g. 125000). "
+    "currency = ISO code (UZS for so'm/сум, USD, EUR, RUB...) or null if unclear. "
+    f"category must be one of: {', '.join(CATEGORIES)}. items = a few main purchased items, comma separated, max 80 chars. "
+    "If the picture is not a receipt or the total is unreadable, set is_receipt=false and total=0."
+)
+
+
+def read_receipt(image_path: str) -> dict | None:
+    """Ask Gemini to read a receipt photo. Returns the parsed dict or None."""
+    p = Path(str(image_path)).expanduser()
+    if not p.is_file():
+        return None
+    from google.genai import types
+    mime = mimetypes.guess_type(str(p))[0] or "image/jpeg"
+    contents = [types.Part.from_bytes(data=p.read_bytes(), mime_type=mime), "Read this receipt."]
+    res = ask_json(contents, RECEIPT_SYSTEM, default=None, timeout_ms=60_000)
+    return res if isinstance(res, dict) else None
 
 
 def _guess(note: str) -> str:
@@ -90,6 +117,52 @@ def finance_tracker(parameters: dict, player=None, speak=None) -> str:
                 elif b and spent > 0.85 * b:
                     msg += f" Careful: {round(spent / b * 100)}% of the {cat} budget is used."
             return msg
+        if action in ("scan_receipt", "receipt", "scan", "photo"):
+            img = str(p.get("image_path") or p.get("file_path") or "").strip()
+            if not img:
+                return "Sir, attach a photo of the receipt first (use the paperclip), then ask me again."
+            if not Path(img).expanduser().is_file():
+                return f"I can't find that image: {img}"
+            r = read_receipt(img)
+            if not r or not r.get("is_receipt", True):
+                return "I couldn't read a receipt in that picture, sir. Try a sharper, well-lit photo of the whole receipt."
+            try:
+                amount = float(str(r.get("total")).replace(" ", "").replace(",", "."))
+            except (TypeError, ValueError):
+                amount = 0.0
+            if amount <= 0:
+                return "I could see the receipt but not the total amount. Please tell me the amount and I'll record it."
+            note_cur = ""
+            rc = str(r.get("currency") or "").upper().strip()
+            if rc and not p.get("currency") and rc != cur:
+                if not data.get("currency") and not cfg().get("currency"):
+                    cur = rc
+                    data["currency"] = rc
+                else:
+                    note_cur = f" (receipt currency: {rc})"
+            merchant = str(r.get("merchant") or "").strip()
+            items = str(r.get("items") or "").strip()
+            note = " — ".join(x for x in (merchant, items) if x)[:120]
+            cat = str(r.get("category") or "").strip().title()
+            if cat not in CATEGORIES:
+                cat = _guess(note)
+            d = str(r.get("date") or "").strip()
+            try:
+                d = datetime.strptime(d, "%Y-%m-%d").date()
+                d = d.isoformat() if d <= date.today() else date.today().isoformat()
+            except ValueError:
+                d = date.today().isoformat()
+            data["entries"].append({"id": uuid.uuid4().hex[:8], "date": d, "type": "expense", "amount": amount,
+                                    "category": cat, "note": note, "source": "receipt"})
+            json_save(STORE, data)
+            msg = f"Receipt recorded: {_money(amount, cur)} · {cat}" + (f" · {merchant}" if merchant else "") + f" · {d}.{note_cur}"
+            spent = sum(e["amount"] for e in data["entries"] if e["type"] == "expense" and e["category"] == cat and e["date"].startswith(d[:7]))
+            b = data["budgets"].get(cat)
+            if b and spent > b:
+                msg += f" ⚠ {cat} is over its {_money(b, cur)} budget ({_money(spent, cur)} spent)."
+            msg += " If that's wrong, say 'remove the last entry'."
+            log(f"[Finance] {msg}", player)
+            return msg
         if action in ("summary", "report", "status", "month"):
             ents, text, total, inc = _summary(data, _month(p.get("month")), cur)
             if not ents:
@@ -137,7 +210,7 @@ def finance_tracker(parameters: dict, player=None, speak=None) -> str:
             return f"Exported {len(ents)} transactions to Excel with a category summary and chart: {path}"
     except (TypeError, ValueError) as e:
         return f"That didn't look right, sir: {e}"
-    return "Unknown action. Available: add, summary, list, budget, remove, export."
+    return "Unknown action. Available: add, scan_receipt, summary, list, budget, remove, export."
 
 
 TOOL = {
@@ -146,12 +219,13 @@ TOOL = {
         "Personal finance tracker. Records expenses and income (category guessed from the note), shows monthly "
         "summaries by category, sets monthly budgets per category with over-budget warnings, lists recent "
         "transactions, and exports a month to Excel with a chart. Use for 'I spent 50 on lunch', 'how much did I "
-        "spend this month', 'set a food budget'."
+        "spend this month', 'set a food budget'. When the user shows/attaches a photo of a receipt or bill "
+        "('chekni yoz', 'record this receipt'), call with action=scan_receipt: the image is read and the expense is saved."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "add | income | summary | list | budget | remove | export"},
+            "action": {"type": "STRING", "description": "add | income | scan_receipt | summary | list | budget | remove | export"},
             "amount": {"type": "NUMBER", "description": "Amount of money"},
             "category": {"type": "STRING", "description": "Food, Transport, Bills, Shopping, Health, Fun, Education, Other"},
             "note": {"type": "STRING", "description": "What it was for"},
@@ -159,6 +233,7 @@ TOOL = {
             "date": {"type": "STRING", "description": "today | yesterday | YYYY-MM-DD"},
             "month": {"type": "STRING", "description": "this month | last month | YYYY-MM"},
             "currency": {"type": "STRING", "description": "Currency code, e.g. USD, UZS"},
+            "image_path": {"type": "STRING", "description": "Receipt photo path for scan_receipt (defaults to the file attached in the UI)"},
             "count": {"type": "INTEGER", "description": "How many recent items to list"},
         },
     },

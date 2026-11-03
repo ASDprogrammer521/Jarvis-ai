@@ -94,6 +94,10 @@ python main.py
 | ⚡ **Fast Automation** | Apps, files, browser, system controls, clipboard, screenshots, messaging |
 | 🛡️ **Safe by design** | Shutdown / restart / messages need an on-screen confirm · `undo` reverses volume, brightness, files and more |
 | 📊 **Admin Dashboard** | Remote control from a browser or the phone via pairing key |
+| 🧾 **Receipt scanner** | Show a photo of a receipt — Gemini reads the total and category and logs the expense |
+| 📬 **Gmail & Calendar** | "What emails came today?", "Put a meeting on Friday at 15:00" |
+| ✋ **Hand gestures** | Control media, volume, mic and more with your hand — switch on and map each gesture in Settings |
+| 🙂 **Face ID** | Recognises people through the webcam — greets them by name; switch on/off in Settings → Face ID |
 | 🧠 **Memory** | Long-term facts you can view and delete |
 | 🔌 **Plugins + store** | Drop-in tools in `plugins/`; list / enable / disable / install from URL |
 | 👤 **Profiles** | `home` · `work` · `game` presets |
@@ -107,7 +111,7 @@ python main.py
 | ---- | ------------------ |
 | **Computer** | `computer_settings` volume, brightness, dark mode, Wi-Fi · `app_manager` close / **minimize / maximize / restore / focus / snap / tile / next monitor** for a named app, minimize everything, top RAM/CPU apps, startup list · `macros` **modes** (work, game, relax, clean, or your own) · `screen_process` "what does this error mean?" — it looks at your screen and explains · `power_tools` battery, uptime, lock, sleep · `network_tools` IP, Wi-Fi, speed · `storage_analyzer` biggest folders and file types · `file_tools` duplicates and cleanup · `clipboard_tools` · `screen_capture` screenshots and recordings · `appearance_tools` wallpaper |
 | **Phone** | `phone_control` — "call Akam" · "call +998 90 123 45 67" · "answer" / "reject" / "hang up" · "who called?" · "find my phone" · "send report.pdf to my phone" · "text 901234567: I'm late" · "lock my phone" |
-| **Productivity** | `notes_tasks` to-do list and notes · `reminder` · `focus_timer` Pomodoro · `habit_tracker` streaks · `finance_tracker` expenses and income · `study_cards` spaced-repetition flashcards · `text_assistant` translate, summarize, rewrite, fix grammar |
+| **Productivity** | `notes_tasks` to-do list and notes · `reminder` · `focus_timer` Pomodoro · `habit_tracker` streaks · `finance_tracker` expenses, income and **receipt photos** · `google_workspace` **Gmail and Calendar** · `study_cards` spaced-repetition flashcards · `text_assistant` translate, summarize, rewrite, fix grammar |
 | **Office** | PowerPoint decks · Word documents · Excel workbooks with formulas and charts · PDF merge / split / convert / OCR |
 | **Fitness & health** | `pushup_counter` webcam rep counting with form checks · `calorie_counter` meals by text or photo |
 | **Media & games** | `spotify_controller` · `youtube_video` summaries · `play_hud_video` video with sound in the HUD (mpv; by link or just by describing it, full screen with F) · `game_updater` Steam / Epic installs and updates |
@@ -115,6 +119,115 @@ python main.py
 | **Developer** | `code_helper` write / edit / run code · `dev_agent` multi-file projects |
 
 Each tool is a drop-in file in `actions/`, discovered automatically.
+
+---
+
+## 🆕 Receipts, Gmail & Calendar, Gestures, Face ID
+
+<table>
+<tr>
+<td width="33%" valign="top">
+
+### 🧾 Receipt → expense
+Attach a photo of a receipt or bill and say *"record this receipt"* / *"chekni yoz"*.
+Gemini reads the **total, shop, date, currency and category** and saves it to `finance_tracker`.
+
+</td>
+<td width="33%" valign="top">
+
+### 📬 Gmail & Calendar
+*"Bugun qanday xatlar keldi?"*
+*"Juma kuni soat 15:00 ga uchrashuv qo'y"*
+Read mail, check your agenda, add or cancel events.
+
+</td>
+<td width="33%" valign="top">
+
+### ✋ Hand gestures
+Show your hand to the webcam to pause music, change volume, mute the mic or take a screenshot.
+**Off by default** — you choose what each gesture does.
+
+</td>
+</tr>
+</table>
+
+### 🧾 Receipt scanner
+
+1. Click the **paperclip** (or drag & drop) and attach the receipt photo.
+2. Say or type: *"record this receipt"*.
+3. Jarvis answers with what it read, e.g. `Receipt recorded: 125,000 UZS · Food · Korzinka · 2026-11-01`.
+
+| Good to know | |
+| ------------ | --- |
+| Reads | Total paid (not subtotal or change), shop name, date, currency, category — in Uzbek, Russian, English and more |
+| Wrong result? | Say *"remove the last entry"* — or just tell Jarvis the right amount |
+| Budgets | The usual over-budget warnings still apply |
+| Unreadable photo | Jarvis says so and saves nothing — retake it flat and well lit |
+
+### 📬 Gmail & Google Calendar
+
+**One-time setup** (about 5 minutes, free):
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/) → create a project → enable **Gmail API** and **Google Calendar API**.
+2. *APIs & Services → Credentials → Create credentials → OAuth client ID → **Desktop app*** → download the JSON.
+3. Save it as `config/google_credentials.json`.
+4. Say **"connect Google"** — a browser opens once; approve access. Done.
+
+| Say | What happens |
+| --- | ------------ |
+| "Bugun qanday xatlar keldi?" / "What emails came today?" | Lists the last 24 h of mail, unread marked with ● |
+| "Show unread emails" | Unread inbox |
+| "Find the email from Amazon" | Gmail search (`from:`, `newer_than:` … all work) |
+| "Read the second email" | Shows the message text |
+| "Bugun rejalarim?" / "What's on tomorrow?" | Calendar agenda for a day or several days |
+| "Juma kuni soat 15:00 ga uchrashuv qo'y" | Adds a 1-hour event; warns if the slot overlaps another |
+| "Cancel Friday's meeting" | Removes the event |
+
+Days understood: `bugun`, `ertaga`, `juma`, `friday`, `06.11`, `2026-11-06` and more.
+
+> 🔒 **Mail is read-only** — Jarvis cannot send or delete emails. Calendar can read, add and delete events.
+> The sign-in token is stored in `config/google_token.json` (owner-only) and never leaves your PC.
+
+### ✋ Hand gestures
+
+Open **Settings → Gestures**, switch **Enable gesture control** on, and pick an action for each gesture.
+Hold the gesture for a moment — quick wave-bys are ignored. Choose the **Response speed** that suits you: ⚡ Fast (~0.3 s), Normal (~0.45 s) or 🎯 Careful (~0.7 s).
+
+| Gesture | Default action |
+| ------- | -------------- |
+| ✋ Open palm | Play / pause media |
+| ✊ Fist | Mute / unmute microphone |
+| 👍 Thumbs up | Volume up (repeats while held) |
+| 👎 Thumbs down | Volume down (repeats while held) |
+| ✌ Two fingers | Take a screenshot |
+| ☝ Index finger | Next track |
+| 🤟 Three fingers | Previous track |
+
+**Available actions:** play / pause · next / previous track · volume up / down / mute · mute microphone · sleep / wake assistant · screenshot · open Settings · fullscreen · or **Nothing** to disable a gesture.
+
+* **Off by default.** The camera is used only while the switch is on; switching it off releases it immediately.
+* **Private.** Frames are processed on your PC by MediaPipe — nothing is recorded or uploaded.
+* Detection is rotation-proof (it works with a tilted hand) and adapts to how far you are from the camera.
+* The first start downloads a small hand model (~8 MB) to `config/models/`. Needs `opencv-python` and `mediapipe` (already in `requirements.txt`).
+* Wrong camera? Pick another one in Settings → Gestures → Camera. **Reset to defaults** restores the table above.
+* Settings are saved in `config/api_keys.json` (`gesture_enabled`, `gesture_map`, `gesture_camera`).
+
+### 🙂 Face ID
+
+**Settings → Face ID** → switch **Enable face recognition** on, type a name and press **Add my face**; look at the camera for a few seconds.
+
+| Option | What it does |
+| ------ | ------------ |
+| Greet by voice | Jarvis says hello by name when a saved person shows up (not again for 45 s) |
+| Alert on unknown faces | Shows a warning when someone who isn't saved stays in front of the camera |
+| Saved people | Remove one person, or delete all saved faces |
+
+Voice commands: *"remember my face as Akmal"* · *"who is in front of the camera?"* · *"whose faces do you know?"* · *"forget Akmal"*.
+
+* **Off by default**, and the camera is released the moment you switch it off. Gestures and Face ID share one camera, so you can use both at once.
+* **Private.** Only 128-number face fingerprints are saved in `memory/faces.json` — no photos — and nothing leaves your PC.
+* The first start downloads two small models (~37 MB, OpenCV YuNet + SFace) to `config/models/`. Needs `opencv-python` 4.8+ (already in `requirements.txt`).
+* It is a convenience feature, **not a security lock** — a photo of a person can fool any webcam-based recogniser.
 
 ---
 
@@ -150,6 +263,8 @@ Setup notes:
 * **Profiles:** Settings → General → Profile (or "switch to work mode") changes the 3D model, push-to-talk / open mic and graphics quality: Home = Holo, Work = Crystal, Game = Globe + lightweight.
 * **HUD video (`play_hud_video`)** uses [mpv](https://mpv.io): `pip install python-mpv` (already in `requirements.txt`) plus the libmpv library. Windows: download libmpv from <https://sourceforge.net/projects/mpv-player-windows/files/libmpv/> and copy `libmpv-2.dll` (or `mpv-2.dll`) into the Jarvis folder next to `main.py`. Linux: `sudo apt install libmpv2`. macOS: `brew install mpv`. Say "play a good Minecraft video" or give a YouTube link. In the video: Space pause, ←/→ seek, ↑/↓ volume, F / F11 / double-click full screen, Esc leaves full screen.
 * **Push-up counter** needs `opencv-python` and `mediapipe`. On first use it downloads a small pose model (about 6 MB) to `config/models/`. Place the camera at your side so your whole body is visible.
+* **Gmail & Calendar** need a Google OAuth client — see [Receipts, Gmail & Calendar, Gestures, Face ID](#-receipts-gmail--calendar-gestures-face-id). `google-api-python-client` and `google-auth-oauthlib` are already in `requirements.txt`.
+* **Receipt scanner** uses your Gemini key — no extra setup.
 * **PDF OCR** needs the free [Tesseract](https://github.com/tesseract-ocr/tesseract) program installed. Converting Word/PowerPoint/Excel to PDF needs [LibreOffice](https://www.libreoffice.org) (or Microsoft Word with `docx2pdf` on Windows).
 * **Spotify** works out of the box with the desktop app (media keys, volume, search page). For one-step "play my chill playlist", add `spotify_client_id` and `spotify_client_secret` (free, from developer.spotify.com/dashboard) to `config/api_keys.json`, register `http://127.0.0.1:8888/callback` as the Redirect URI, then say "log in to Spotify" once.
 * Generated files are saved under `Documents/Jarvis/` (change with `"output_dir"` in `config/api_keys.json`). Workout and nutrition logs live in `memory/`.
@@ -303,7 +418,7 @@ Jarvis-ai/
 ├── requirements.txt        # the only requirements file
 ├── actions/                # built-in tools
 ├── plugins/                # drop-in plugins
-├── core/                   # avatar, audio, LLM, updater…
+├── core/                   # avatar, audio, LLM, updater, camera hub (gestures + Face ID)…
 ├── dashboard/              # remote server + web companion
 ├── android/JarvisApp/      # native Android companion (Kotlin) — dialer, calls, quick actions
 ├── scripts/build_exe.ps1   # local Windows packaging
@@ -319,6 +434,7 @@ Jarvis-ai/
 * **Encrypted link.** The dashboard serves HTTPS and the app connects over WSS. Jarvis creates a self-signed certificate in `config/certs/` automatically (and a new one if your PC's LAN address changes). The private key is never shipped with the project. The Android app pins its SHA-256 fingerprint the first time it pairs and refuses any other certificate afterwards — it never silently drops back to plain HTTP once a certificate is pinned.
 * **Pairing key.** A one-time key (valid ten minutes) turns into a session token; "revoke devices" ends all sessions.
 * **Confirmations.** Shutdown, restart and outgoing messages need your click on the PC. A shutdown asked for from the phone starts a 15-second countdown (`shutdown /a` cancels it).
+* **Google & camera.** Gmail access is read-only; the Google token lives in `config/google_token.json` (owner-only). Hand gestures and Face ID are off until you enable them, process the camera locally and store no photos.
 * **Files.** PC → phone transfers are single-file links that expire; keys, certificates and `api_keys.json` are never sent.
 
 ---
