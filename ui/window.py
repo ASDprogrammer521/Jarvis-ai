@@ -12,7 +12,7 @@ import webbrowser
 from pathlib import Path
 
 from PyQt6.QtCore import QCoreApplication, QEasingCurve, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, Qt, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QCursor, QDesktopServices, QFont, QImage, QKeySequence, QPainter, QPen, QPixmap, QPolygonF, QRadialGradient, QSurfaceFormat
+from PyQt6.QtGui import QBrush, QColor, QCursor, QDesktopServices, QFont, QImage, QKeySequence, QLinearGradient, QPainter, QPen, QPixmap, QPolygonF, QRadialGradient, QSurfaceFormat
 from PyQt6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
     QPushButton, QSizePolicy, QSlider, QStackedWidget, QStyle, QTextEdit, QVBoxLayout, QWidget,
@@ -23,7 +23,7 @@ from ui.fx import GL_ENABLED, Backdrop, GlassCard, GlowButton, ModalLayer, Stage
 from ui.metrics import _metrics
 from ui.panels import APP_VERSION, ConfirmPanel, RemotePanel, SettingsPanel, SetupPanel
 from ui.theme import C, DEFAULT_ACCENT, apply_accent, build_qss, patch_cfg, qcol, read_cfg, rgba
-from ui.video_extras import PlayerSettings, VideosOverlay, chip_css
+from ui.video_extras import PlayerButton, PlayButton, PlayerSettings, VideosOverlay
 from ui.pages import DashboardPage, InputBar, LogoMark, NavItem, PhonePage, Sidebar
 from ui.widgets import ChatView, IconButton, StatePill, font
 
@@ -126,19 +126,52 @@ class StageHost(QWidget):
 
 
 class SeekSlider(QSlider):
-    """Seek bar for the HUD video: a click or drag jumps straight to that position (a plain QSlider only pages)."""
+    """Seek bar for the HUD video: a click or drag jumps straight to that position (a plain QSlider only pages).
+    Painted by hand: a slim rounded track with a cyan→violet fill and a glowing knob that grows on hover."""
     seek_to = pyqtSignal(int)
+    PAD = 8
 
     def __init__(self):
         super().__init__(Qt.Orientation.Horizontal)
         self.setRange(0, 1000)
+        self.setFixedHeight(22)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.dragging = False
 
     def _val(self, x) -> int:
-        x = max(0, min(int(x), self.width()))
-        return QStyle.sliderValueFromPosition(self.minimum(), self.maximum(), x, max(1, self.width()))
+        span = max(1, self.width() - 2 * self.PAD)
+        x = max(0, min(int(x) - self.PAD, span))
+        return QStyle.sliderValueFromPosition(self.minimum(), self.maximum(), x, span)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        span = max(1, w - 2 * self.PAD)
+        hot = self.dragging or self.underMouse()
+        th = 7.0 if hot else 5.0
+        cy = h / 2
+        frac = (self.value() - self.minimum()) / max(1, self.maximum() - self.minimum())
+        x_knob = self.PAD + frac * span
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(255, 255, 255, 40))
+        p.drawRoundedRect(QRectF(self.PAD, cy - th / 2, span, th), th / 2, th / 2)
+        if frac > 0:
+            g = QLinearGradient(self.PAD, 0, self.PAD + span, 0)
+            g.setColorAt(0, QColor(C.PRI))
+            g.setColorAt(1, QColor(C.ACC))
+            p.setBrush(g)
+            p.drawRoundedRect(QRectF(self.PAD, cy - th / 2, max(th, x_knob - self.PAD), th), th / 2, th / 2)
+        r = 8.0 if hot else 6.0
+        halo = QColor(C.PRI)
+        halo.setAlpha(70 if hot else 0)
+        p.setBrush(halo)
+        p.drawEllipse(QPointF(x_knob, cy), r + 4, r + 4)
+        p.setBrush(QColor("#ffffff"))
+        p.drawEllipse(QPointF(x_knob, cy), r, r)
+        p.end()
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
@@ -250,76 +283,82 @@ class VideoIconButton(QPushButton):
 
 
 class VideoBar(QWidget):
-    """Control strip for HUD video: seek bar, time, -5 min / pause / +5 min / stop, buffer status.
-    Used under the video in the media panel and, in full screen, inside the floating FsOverlay."""
+    """The player's own control bar: seek bar on top; below it time · rewind / play / forward / stop · 👍 👎 🔔 ·
+    Videos · settings. Used under the video in the media panel and, in full screen, inside the floating FsOverlay."""
     ctl = pyqtSignal(str, object)     # ("pause", None) | ("seek", seconds)
     seek_fraction = pyqtSignal(int)   # 0..1000 of the whole video
     stop = pyqtSignal()
     action = pyqtSignal(str)          # like | dislike | sub | videos | settings
+    HEIGHT = 76
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(64)
+        self.setFixedHeight(self.HEIGHT)
         self.setStyleSheet("background: transparent;")
         self._hold_until = 0.0
         bl = QVBoxLayout(self)
-        bl.setContentsMargins(0, 2, 0, 0)
-        bl.setSpacing(4)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.setSpacing(2)
         self.slider = SeekSlider()
-        self.slider.setStyleSheet(
-            f"QSlider::groove:horizontal {{ height: 4px; background: {rgba(C.TEXT_MED, .25)}; border-radius: 2px; }}"
-            f"QSlider::sub-page:horizontal {{ background: {C.PRI}; border-radius: 2px; }}"
-            f"QSlider::handle:horizontal {{ background: {C.PRI}; width: 12px; margin: -5px 0; border-radius: 6px; }}")
         self.slider.seek_to.connect(self._on_seek)
         bl.addWidget(self.slider)
+
         row = QHBoxLayout()
-        row.setSpacing(8)
+        row.setContentsMargins(4, 0, 4, 0)
+        row.setSpacing(4)
         self.time_lbl = QLabel("0:00 / --:--")
-        self.time_lbl.setStyleSheet("color: #eef1ff; font-size: 12px; font-weight: 600;")
+        self.time_lbl.setMinimumWidth(96)
+        self.time_lbl.setStyleSheet(f"color: {C.TEXT}; font-size: 12px; font-weight: 600; background: transparent;")
         row.addWidget(self.time_lbl)
         row.addStretch()
 
-        self.back_btn = VideoIconButton("back", "5m", "Back 5 minutes (Shift+Left)", 62)
+        self.back_btn = PlayerButton("rewind", "Back 5 minutes (Shift+Left)", text="5m", size=32, icon_px=16)
         self.back_btn.clicked.connect(lambda: self.ctl.emit("seek", -300))
-        self.play_btn = VideoIconButton("pause", "", "Pause (Space)", 50)
+        self.play_btn = PlayButton(44)
+        self.play_btn.setToolTip("Pause (Space)")
         self.play_btn.clicked.connect(lambda: self.ctl.emit("pause", None))
-        self.fwd_btn = VideoIconButton("fwd", "5m", "Forward 5 minutes (Shift+Right)", 62)
+        self.fwd_btn = PlayerButton("forward", "Forward 5 minutes (Shift+Right)", text="5m", size=32, icon_px=16)
         self.fwd_btn.clicked.connect(lambda: self.ctl.emit("seek", 300))
-        self.stop_btn = VideoIconButton("stop", "", "Stop", 42)
+        self.stop_btn = PlayerButton("stop", "Stop and close the video", size=32, icon_px=14, color=C.RED)
         self.stop_btn.clicked.connect(lambda: self.stop.emit())
         for b_ in (self.back_btn, self.play_btn, self.fwd_btn, self.stop_btn):
             row.addWidget(b_)
         row.addStretch()
-        self._chips: dict[str, QPushButton] = {}
-        for key, text, tip in (("like", "👍", "Like on YouTube"), ("dislike", "👎", "Dislike on YouTube"),
-                               ("sub", "🔔", "Subscribe to the channel"), ("videos", "▦ Videos", "Suggested videos"),
-                               ("settings", "⚙", "Player settings: quality, speed, volume…")):
-            b = QPushButton(text)
-            b.setFixedHeight(28)
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setToolTip(tip)
-            b.setStyleSheet(chip_css())
+
+        self._chips: dict[str, PlayerButton] = {}
+        self._sep = QFrame()
+        self._sep.setFixedSize(1, 18)
+        self._sep.setStyleSheet("background: rgba(255,255,255,0.14);")
+        for key, icon, tip, text, col in (
+                ("like", "thumb_up", "Like on YouTube", "", C.PRI),
+                ("dislike", "thumb_down", "Dislike on YouTube", "", C.RED),
+                ("sub", "bell", "Subscribe to the channel", "", C.GREEN),
+                ("videos", "grid", "Suggested videos — pick the next one", "Videos", C.PRI),
+                ("settings", "settings", "Player settings: quality, speed, volume…", "", C.PRI)):
+            b = PlayerButton(icon, tip, text=text, size=32, icon_px=17, color=col)
             b.clicked.connect(lambda _=False, k=key: self.action.emit(k))
+            if key == "videos":
+                row.addWidget(self._sep, 0, Qt.AlignmentFlag.AlignVCenter)
             row.addWidget(b)
             self._chips[key] = b
         self.status_lbl = QLabel("")
-        self.status_lbl.setStyleSheet(f"color: {C.ACC}; font-size: 10px; font-weight: 700;")
+        self.status_lbl.setStyleSheet(f"color: {C.ACC}; font-size: 10px; font-weight: 700; background: transparent;")
         row.addWidget(self.status_lbl)
         bl.addLayout(row)
 
     def set_youtube(self, on: bool):
-        """👍 👎 🔔 and Videos only make sense for YouTube videos; ⚙ is always there."""
+        """👍 👎 🔔 and Videos only make sense for YouTube videos; settings is always there."""
         for k in ("like", "dislike", "sub", "videos"):
             self._chips[k].setVisible(bool(on))
+        self._sep.setVisible(bool(on))
 
     def set_state(self, kind: str, on: bool):
         b = self._chips.get(kind)
         if b is None:
             return
-        col = {"like": C.PRI, "dislike": C.RED, "sub": C.GREEN}.get(kind, C.PRI)
-        b.setStyleSheet(chip_css(on, col))
+        b.set_active(on)
         if kind == "sub":
-            b.setText("🔔 Subscribed" if on else "🔔")
+            b.set_text("Subscribed" if on else "")
         if kind == "like" and on:
             self.set_state("dislike", False)
         if kind == "dislike" and on:
@@ -372,13 +411,26 @@ class FsOverlay(QWidget):
                          | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.WindowDoesNotAcceptFocus)
         self.setObjectName("fsOverlay")
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setWindowOpacity(0.93)
-        self.setStyleSheet(f"#fsOverlay {{ background: #0b0f1c; border: 1px solid {rgba(C.PRI, .35)}; }}")
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setWindowOpacity(0.97)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(18, 8, 18, 8)
+        lay.setContentsMargins(24, 10, 24, 8)
         self.bar = VideoBar()
         lay.addWidget(self.bar)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        g = QLinearGradient(0, r.top(), 0, r.bottom())
+        g.setColorAt(0, QColor(16, 22, 42, 238))
+        g.setColorAt(1, QColor(7, 10, 20, 244))
+        p.setBrush(g)
+        edge = QColor(C.PRI)
+        edge.setAlpha(80)
+        p.setPen(QPen(edge, 1))
+        p.drawRoundedRect(r, 22, 22)
+        p.end()
 
 
 class MpvWindow(QWidget):
@@ -803,7 +855,7 @@ class MainWindow(QMainWindow):
         l.setContentsMargins(12, 10, 10, 12)
         h = QHBoxLayout()
         self._media_title = QLabel("CAMERA")
-        self._media_title.setStyleSheet(f"color: {C.ACC}; font-weight: 700; letter-spacing: 2px; font-size: 10px;")
+        self._media_title.setStyleSheet(f"color: {C.TEXT}; font-weight: 700; letter-spacing: 1px; font-size: 12px;")
         h.addWidget(self._media_title)
         h.addStretch()
         self._media_full_btn = IconButton("full", 26, flat=True, tip="Full screen (Esc to exit)")
@@ -1855,7 +1907,7 @@ class MainWindow(QMainWindow):
             self._fs_overlay = ov
             self._fs_cursor = None
             self._fs_until = 0.0
-            self.host.media_extra = 76
+            self.host.media_extra = 88
             fw = QApplication.focusWidget()
             if isinstance(fw, (QLineEdit, QTextEdit)):
                 fw.clearFocus()  # so Space / arrows reach the video instead of a text box
@@ -1934,7 +1986,7 @@ class MainWindow(QMainWindow):
         if self._mpv_win is None:
             return
         if meta.get("title"):
-            self._media_title.setText(str(meta["title"])[:80].upper())
+            self._media_title.setText(str(meta["title"])[:90])
         self._vx_meta = meta
         self._vx_rating = "none"
         self._vx_items = None                                   # new video → new suggestions are on their way
@@ -2117,7 +2169,7 @@ class MainWindow(QMainWindow):
             self._fs_until = now + 3.0
         if now < self._fs_until or st["paused"] or st["buffering"]:
             g = vw.geometry()
-            w, h = max(480, min(g.width() - 80, 1100)), 84
+            w, h = max(520, min(g.width() - 80, 1180)), 104
             rect = QRect(g.x() + (g.width() - w) // 2, g.y() + g.height() - h - 40, w, h)
             if ov.geometry() != rect:
                 ov.setGeometry(rect)
