@@ -23,7 +23,7 @@ from ui.fx import GL_ENABLED, Backdrop, GlassCard, GlowButton, ModalLayer, Stage
 from ui.metrics import _metrics
 from ui.panels import APP_VERSION, ConfirmPanel, RemotePanel, SettingsPanel, SetupPanel
 from ui.theme import C, DEFAULT_ACCENT, apply_accent, build_qss, patch_cfg, qcol, read_cfg, rgba
-from ui.video_extras import EXTRA_H, PlayerSettings, VideoExtras
+from ui.video_extras import PlayerSettings, VideosOverlay, chip_css
 from ui.pages import DashboardPage, InputBar, LogoMark, NavItem, PhonePage, Sidebar
 from ui.widgets import ChatView, IconButton, StatePill, font
 
@@ -255,6 +255,7 @@ class VideoBar(QWidget):
     ctl = pyqtSignal(str, object)     # ("pause", None) | ("seek", seconds)
     seek_fraction = pyqtSignal(int)   # 0..1000 of the whole video
     stop = pyqtSignal()
+    action = pyqtSignal(str)          # like | dislike | sub | videos | settings
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -289,10 +290,44 @@ class VideoBar(QWidget):
         for b_ in (self.back_btn, self.play_btn, self.fwd_btn, self.stop_btn):
             row.addWidget(b_)
         row.addStretch()
+        self._chips: dict[str, QPushButton] = {}
+        for key, text, tip in (("like", "👍", "Like on YouTube"), ("dislike", "👎", "Dislike on YouTube"),
+                               ("sub", "🔔", "Subscribe to the channel"), ("videos", "▦ Videos", "Suggested videos"),
+                               ("settings", "⚙", "Player settings: quality, speed, volume…")):
+            b = QPushButton(text)
+            b.setFixedHeight(28)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setToolTip(tip)
+            b.setStyleSheet(chip_css())
+            b.clicked.connect(lambda _=False, k=key: self.action.emit(k))
+            row.addWidget(b)
+            self._chips[key] = b
         self.status_lbl = QLabel("")
         self.status_lbl.setStyleSheet(f"color: {C.ACC}; font-size: 10px; font-weight: 700;")
         row.addWidget(self.status_lbl)
         bl.addLayout(row)
+
+    def set_youtube(self, on: bool):
+        """👍 👎 🔔 and Videos only make sense for YouTube videos; ⚙ is always there."""
+        for k in ("like", "dislike", "sub", "videos"):
+            self._chips[k].setVisible(bool(on))
+
+    def set_state(self, kind: str, on: bool):
+        b = self._chips.get(kind)
+        if b is None:
+            return
+        col = {"like": C.PRI, "dislike": C.RED, "sub": C.GREEN}.get(kind, C.PRI)
+        b.setStyleSheet(chip_css(on, col))
+        if kind == "sub":
+            b.setText("🔔 Subscribed" if on else "🔔")
+        if kind == "like" and on:
+            self.set_state("dislike", False)
+        if kind == "dislike" and on:
+            self.set_state("like", False)
+
+    def settings_anchor(self) -> QPoint:
+        b = self._chips["settings"]
+        return b.mapToGlobal(QPoint(b.width(), 0))
 
     def _on_seek(self, v: int):
         self._hold_until = time.monotonic() + 1.5  # keep the bar where the user dropped it until mpv has sought
@@ -499,7 +534,7 @@ class MainWindow(QMainWindow):
         self._face_sig.connect(self._on_face_event)
         self._media_info_sig.connect(self._on_media_info)
         self._media_sugg_sig.connect(self._on_media_suggestions)
-        self._vx_state_sig.connect(lambda k, on: self._extras.set_state(k, on))
+        self._vx_state_sig.connect(self._vx_apply_state)
         self.gesture_status = "off"
         self.camera = None
         QTimer.singleShot(2500, self._camera_autostart)
@@ -785,17 +820,12 @@ class MainWindow(QMainWindow):
         self._media_lbl.mouseDoubleClickEvent = lambda e: self._toggle_media_full()
         l.addWidget(self._media_lbl, 1)
         l.addWidget(self._make_video_bar())
-        self._extras = VideoExtras()
-        self._extras.hide()
-        self._extras.like.connect(lambda: self._vx_rate("like"))
-        self._extras.dislike.connect(lambda: self._vx_rate("dislike"))
-        self._extras.subscribe.connect(self._vx_subscribe)
-        self._extras.next_clicked.connect(lambda: self._video_ctl("next"))
-        self._extras.pick.connect(lambda url, title: self._video_ctl("play_url", (url, title)))
-        self._extras.settings_clicked.connect(self._vx_open_settings)
         self._vx_rating = "none"
         self._vx_subscribed = False
         self._vx_settings = None
+        self._vx_overlay = None
+        self._vx_items = None
+        self._vx_meta = {}
         return c
 
     def _make_video_bar(self) -> QWidget:
@@ -804,6 +834,7 @@ class MainWindow(QMainWindow):
         bar.ctl.connect(self._video_ctl)
         bar.seek_fraction.connect(self._mpv_seek_fraction)
         bar.stop.connect(self._close_media_user)
+        bar.action.connect(self._vx_action)
         bar.hide()
         self._mpv_bar = bar
         return bar
@@ -1820,6 +1851,7 @@ class MainWindow(QMainWindow):
             ov.bar.ctl.connect(self._video_ctl)
             ov.bar.seek_fraction.connect(self._mpv_seek_fraction)
             ov.bar.stop.connect(self._close_media_user)
+            ov.bar.action.connect(self._vx_action)
             self._fs_overlay = ov
             self._fs_cursor = None
             self._fs_until = 0.0
@@ -1870,8 +1902,8 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         self.host.media_extra = 0
-        if getattr(self, "_extras", None) is not None:
-            self._extras.hide()
+        self._vx_overlay = self._vx_settings = None      # owned by the video window — closed with it
+        self._vx_items = None
         vw, self._mpv_win = self._mpv_win, None
         if vw is not None:
             try:
@@ -1887,34 +1919,99 @@ class MainWindow(QMainWindow):
     def media_suggestions(self, items: list):
         self._media_sugg_sig.emit(list(items or []))
 
+    def _vx_bars(self):
+        bars = [self._mpv_bar]
+        ov = getattr(self, "_fs_overlay", None)
+        if ov is not None:
+            bars.append(ov.bar)
+        return bars
+
+    def _vx_apply_state(self, kind: str, on: bool):
+        for bar in self._vx_bars():
+            bar.set_state(kind, on)
+
     def _on_media_info(self, meta: dict):
         if self._mpv_win is None:
             return
         if meta.get("title"):
             self._media_title.setText(str(meta["title"])[:80].upper())
-        yt = bool(meta.get("youtube"))
         self._vx_meta = meta
-        self._vx_rating, self._vx_subscribed = "none", False
-        if yt:
-            self._extras.set_info(meta)
-        self._extras.setVisible(yt)
-        self.host.media_extra = 76 + (EXTRA_H + 6 if yt else 0)
-        self.host.layout_floats()
-        self._sync_mpv_geometry()
+        self._vx_rating = "none"
+        self._vx_items = None                                   # new video → new suggestions are on their way
+        for bar in self._vx_bars():
+            bar.set_youtube(bool(meta.get("youtube")))
+            for k in ("like", "dislike", "sub"):
+                bar.set_state(k, False)
+        if self._vx_overlay is not None:
+            self._vx_overlay.set_items(None)
+            if not meta.get("youtube"):
+                self._vx_overlay.hide()
 
     def _on_media_suggestions(self, items: list):
-        if self._mpv_win is not None:
-            self._extras.set_suggestions(items)
+        if self._mpv_win is None:
+            return
+        self._vx_items = items
+        if self._vx_overlay is not None:
+            self._vx_overlay.set_items(items)
 
-    def _vx_open_settings(self, pos):
+    def _vx_action(self, kind: str):
+        bar = self.sender()
+        if kind in ("like", "dislike"):
+            self._vx_rate(kind)
+        elif kind == "sub":
+            self._vx_subscribe()
+        elif kind == "videos":
+            self._vx_toggle_videos()
+        elif kind == "settings":
+            self._vx_open_settings(bar.settings_anchor() if hasattr(bar, "settings_anchor") else QCursor.pos())
+
+    def _vx_toggle_videos(self):
+        vw = self._mpv_win
+        if vw is None:
+            return
+        if self._vx_overlay is None:
+            self._vx_overlay = VideosOverlay(vw)
+            self._vx_overlay.pick.connect(lambda url, title: self._video_ctl("play_url", (url, title)))
+            self._vx_overlay.set_items(self._vx_items)
+        ov = self._vx_overlay
+        if ov.isVisible():
+            ov.hide()
+            return
+        ov.setGeometry(vw.geometry())
+        ov.show()
+        ov.raise_()
+
+    def _vx_sync_overlay(self):
+        ov, vw = self._vx_overlay, self._mpv_win
+        if ov is not None and vw is not None and ov.isVisible() and ov.geometry() != vw.geometry():
+            ov.setGeometry(vw.geometry())
+
+    def _vx_open_settings(self, anchor):
+        vw = self._mpv_win
+        if vw is None:
+            return
         try:
+            from actions import youtube_actions as ya
             from actions.hud_video import get_prefs
             if self._vx_settings is None:
-                self._vx_settings = PlayerSettings(self)
-                self._vx_settings.changed.connect(self._video_ctl)
-            self._vx_settings.open_at(pos, getattr(self, "_vx_meta", {}) or {}, get_prefs())
+                self._vx_settings = PlayerSettings(vw)
+                self._vx_settings.changed.connect(self._vx_setting)
+            self._vx_settings.open_at(anchor, self._vx_meta or {}, get_prefs(), ya.is_connected())
         except Exception as e:
             self.write_log(f"ERR: player settings — {e}")
+
+    def _vx_setting(self, cmd: str, value=None):
+        if cmd == "yt_connect":
+            self._vx_connect_youtube()
+        else:
+            self._video_ctl(cmd, value)
+
+    def _vx_connect_youtube(self):
+        def work():
+            from actions import youtube_actions as ya
+            self._toast_sig.emit("A browser window opened — sign in to Google there…")
+            self._toast_sig.emit(ya.connect())
+        threading.Thread(target=work, daemon=True).start()
 
     def _vx_rate(self, kind: str):
         want = "none" if self._vx_rating == kind else kind          # pressing again removes the rating
@@ -1930,7 +2027,7 @@ class MainWindow(QMainWindow):
                 self._toast_sig.emit(msg)
             except Exception as e:
                 self._toast_sig.emit(f"✗ {e}")
-        self._toast_sig.emit("Talking to YouTube… (the first time a browser opens to sign in)")
+        self._toast_sig.emit("Talking to YouTube… (the first time a browser opens so you can sign in)")
         threading.Thread(target=work, daemon=True).start()
 
     def _vx_subscribe(self):
@@ -1939,13 +2036,13 @@ class MainWindow(QMainWindow):
                 from actions import youtube_actions as ya
                 from actions.hud_video import get_video_meta
                 m = get_video_meta()
-                msg = ya.subscribe(m.get("channel_id", ""), m.get("channel", ""))
+                msg = ya.subscribe(m.get("id", ""), m.get("channel", ""))
                 if not msg.startswith("✗"):
                     self._vx_state_sig.emit("sub", True)
                 self._toast_sig.emit(msg)
             except Exception as e:
                 self._toast_sig.emit(f"✗ {e}")
-        self._toast_sig.emit("Talking to YouTube… (the first time a browser opens to sign in)")
+        self._toast_sig.emit("Talking to YouTube… (the first time a browser opens so you can sign in)")
         threading.Thread(target=work, daemon=True).start()
 
     # ── HUD video controls ──
@@ -1989,6 +2086,7 @@ class MainWindow(QMainWindow):
 
     def _mpv_tick(self):
         self._sync_mpv_geometry()
+        self._vx_sync_overlay()
         self._update_mpv_bar()
 
     def _update_mpv_bar(self):

@@ -118,19 +118,18 @@ python main.py
 | **Info** | `web_search` · `knowledge_lookup` · `weather_report` · `flight_finder` · `utility_tools` calculator, units, live currency |
 | **Developer** | `code_helper` write / edit / run code · `dev_agent` multi-file projects |
 
-**HUD video player — settings, 👍 👎 🔔 and "Up next".** Under every YouTube video in the HUD:
+**HUD video player — settings, 👍 👎 🔔 and "Videos".** Everything lives in the player's own control bar (also in full screen):
 
-| Control | What it does |
-| ------- | ------------ |
-| ⚙ **Settings** | **Quality** (Auto or any resolution the video has, switches without losing your place) · **Speed** 0.5×–2× · **Volume** · **Mute** · **Autoplay next video** · **Loop**. Your choices are remembered |
+| Button | What it does |
+| ------ | ------------ |
+| ⚙ | **Quality** (Auto or any resolution the video has — switches without losing your place) · **Speed** 0.5×–2× · **Volume** · **Mute** · **Autoplay next video** · **Loop**. Your choices are remembered |
+| ▦ **Videos** | Opens a grid of related videos **with thumbnails over the video**. Click one to play it right away, ✕ to go back |
 | 👍 / 👎 | Like or dislike the video on your YouTube account (press again to undo) |
-| 🔔 **Subscribe** | Subscribe to the channel |
-| ⏭ **Next** | Play the next suggested video |
-| **UP NEXT** strip | Thumbnails of related videos — click one to play it right away, in the same window |
+| 🔔 | Subscribe to the channel |
 
-Like / dislike / subscribe use the same Google sign-in as Gmail & Calendar (`config/google_credentials.json`), plus the **YouTube Data API v3** enabled in your Google Cloud project. The first click opens a browser once; the token is kept in `config/google_youtube_token.json`.
+**Connecting YouTube — through a browser, no API keys.** The first time you press 👍 / 👎 / 🔔 (or ⚙ → *Connect YouTube*, or say *"connect YouTube"*), a normal Chrome / Edge window opens on Google's sign-in page. Sign in yourself — Jarvis never sees your password; only that browser profile (`~/.jarvis_profiles/youtube`) keeps the session. After that, likes and subscriptions run in a hidden window in a few seconds. Needs `playwright` (already in `requirements.txt`) and Chrome or Edge (or `playwright install chromium`).
 
-**Voice control of the HUD player.** While a video plays you can simply talk to it: *"pause"*, *"resume"*, *"skip 2 minutes"*, *"go back 30 seconds"*, *"play from minute 10"*, *"louder"*, *"set volume to 40"*, *"mute"*, *"speed 1.5"*, *"full screen"*, *"how much is left?"*, *"quality 720"*, *"like this video"*, *"subscribe"*, *"next video"*, *"what's up next?"*, *"play the third one"*, *"autoplay on"*, *"loop on"*, *"stop the video"*.
+**Voice control of the HUD player.** While a video plays you can simply talk to it: *"pause"*, *"resume"*, *"skip 2 minutes"*, *"go back 30 seconds"*, *"play from minute 10"*, *"louder"*, *"set volume to 40"*, *"mute"*, *"speed 1.5"*, *"full screen"*, *"how much is left?"*, *"quality 720"*, *"like this video"*, *"subscribe"*, *"connect YouTube"*, *"next video"*, *"what's up next?"*, *"play the third one"*, *"autoplay on"*, *"loop on"*, *"stop the video"*.
 
 Each tool is a drop-in file in `actions/`, discovered automatically.
 
@@ -182,7 +181,7 @@ Show your hand to the webcam to pause music, change volume, mute the mic or take
 
 **One-time setup** (about 5 minutes, free):
 
-1. Open [Google Cloud Console](https://console.cloud.google.com/) → create a project → enable **Gmail API**, **Google Calendar API** and (for 👍 👎 🔔 in the video player) **YouTube Data API v3**.
+1. Open [Google Cloud Console](https://console.cloud.google.com/) → create a project → enable **Gmail API** and **Google Calendar API**.
 2. *APIs & Services → Credentials → Create credentials → OAuth client ID → **Desktop app*** → download the JSON.
 3. Save it as `config/google_credentials.json`.
 4. Say **"connect Google"** — a browser opens once; approve access. Done.
