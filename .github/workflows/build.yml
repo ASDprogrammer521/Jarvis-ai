@@ -1,8 +1,14 @@
-name: Build Python to EXE
+name: Build and Release Windows EXE
 
 on:
   push:
     branches: [main, master]
+    paths:
+      - "version.txt"
+      - "*.py"
+      - "*.spec"
+      - "requirements.txt"
+      - ".github/workflows/build-exe.yml"
   workflow_dispatch:
 
 permissions:
@@ -16,6 +22,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Read Version
+        id: get_version
+        run: |
+          $version = Get-Content version.txt -Raw
+          $version = $version.Trim()
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -36,11 +49,10 @@ jobs:
             pyinstaller --onefile --windowed --name Jarvis main.py
           }
 
-      - name: Upload EXE artifact
-        uses: actions/upload-artifact@v4
+      - name: Create GitHub Release and Upload EXE
+        uses: softprops/action-gh-release@v2
         with:
-          name: jarvis-windows-exe
-          path: |
-            dist/*.exe
-            dist/Jarvis/**
-          if-no-files-found: warn
+          tag_name: ${{ steps.get_version.outputs.VERSION }}
+          name: Release ${{ steps.get_version.outputs.VERSION }}
+          files: dist/*.exe
+          generate_release_notes: true
