@@ -6,7 +6,6 @@ on:
     paths:
       - "android/JarvisApp/**"
       - ".github/workflows/build-apk.yml"
-      - "app-debug.apk"
   workflow_dispatch:
 
 permissions:
@@ -29,18 +28,18 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: latest
 
       - name: Build APK
         working-directory: android/JarvisApp
         run: |
           chmod +x gradlew || true
-          ./gradlew assembleDebug --stacktrace || echo "Gradle build may require local setup"
+          ./gradlew assembleDebug --stacktrace
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: jarvis-app-debug
-          path: |
-            android/JarvisApp/app/build/outputs/apk/debug/*.apk
-            app-debug.apk
+          path: android/JarvisApp/app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
