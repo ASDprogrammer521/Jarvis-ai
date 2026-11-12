@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, master]
     paths:
-      - "version.txt"
+      - "VERSION"
       - "android/JarvisApp/**"
       - ".github/workflows/build-apk.yml"
   workflow_dispatch:
@@ -24,7 +24,7 @@ jobs:
       - name: Read Version
         id: get_version
         run: |
-          VERSION=$(cat version.txt | tr -d '[:space:]')
+          VERSION=$(cat VERSION | tr -d '[:space:]')
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Set up JDK 17
@@ -61,7 +61,7 @@ jobs:
       - name: Create GitHub Release and Upload APK
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.get_version.outputs.VERSION }}
-          name: Release ${{ steps.get_version.outputs.VERSION }}
+          tag_name: v${{ steps.get_version.outputs.VERSION }}
+          name: Release v${{ steps.get_version.outputs.VERSION }}
           files: android/JarvisApp/app/build/outputs/apk/debug/*.apk
           generate_release_notes: true
