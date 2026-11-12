@@ -8,7 +8,7 @@ on:
       - "*.py"
       - "*.spec"
       - "requirements.txt"
-      - ".github/workflows/build-exe.yml"
+      - ".github/workflows/build.yml"
   workflow_dispatch:
 
 permissions:
