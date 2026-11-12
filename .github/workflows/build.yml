@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, master]
     paths:
-      - "version.txt"
+      - "VERSION"
       - "*.py"
       - "*.spec"
       - "requirements.txt"
@@ -26,7 +26,7 @@ jobs:
       - name: Read Version
         id: get_version
         run: |
-          $version = Get-Content version.txt -Raw
+          $version = Get-Content VERSION -Raw
           $version = $version.Trim()
           echo "VERSION=$version" >> $env:GITHUB_OUTPUT
 
@@ -52,7 +52,7 @@ jobs:
       - name: Create GitHub Release and Upload EXE
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.get_version.outputs.VERSION }}
-          name: Release ${{ steps.get_version.outputs.VERSION }}
+          tag_name: v${{ steps.get_version.outputs.VERSION }}
+          name: Release v${{ steps.get_version.outputs.VERSION }}
           files: dist/*.exe
           generate_release_notes: true
