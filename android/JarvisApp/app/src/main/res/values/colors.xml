@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#070A12</color>
+    <color name="bg">#070A12</color>
+    <color name="bar">#0A0F1B</color>
+    <color name="surface">#0E1422</color>
+    <color name="surface_hi">#151E33</color>
+    <color name="stroke">#1F2A44</color>
+    <color name="text">#EAF1FF</color>
+    <color name="text_dim">#A9B8D4</color>
+    <color name="muted">#7F8FAE</color>
+    <color name="accent">#6C7BFF</color>
+    <color name="green">#2EE59D</color>
+    <color name="green_dark">#15A86F</color>
+    <color name="red">#FF5C7A</color>
+    <color name="red_dark">#D83A58</color>
+    <color name="amber">#FFB428</color>
+    <color name="ripple">#33FFFFFF</color>
+</resources>
+<!-- by ASDcuber521 -->

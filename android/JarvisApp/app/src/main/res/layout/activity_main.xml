@@ -1,0 +1,380 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/bg">
+
+    <!-- Header -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="20dp"
+        android:background="@color/bar">
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="J A R V I S"
+                android:textColor="@color/text"
+                android:textSize="17sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.16" />
+            <TextView
+                android:id="@+id/subtitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Phone link"
+                android:textColor="@color/muted"
+                android:textSize="11sp" />
+        </LinearLayout>
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="● OFFLINE"
+            android:textColor="@color/red"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:background="@drawable/bg_status_pill"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="7dp" />
+    </LinearLayout>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:clipToPadding="false"
+        android:padding="14dp">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- Connect (shown while offline) -->
+            <LinearLayout
+                android:id="@+id/connectCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:padding="18dp">
+                <TextView style="@style/Label" android:text="CONNECT TO PC" />
+                <EditText
+                    android:id="@+id/hostInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="50dp"
+                    android:layout_marginTop="12dp"
+                    android:hint="PC IP (e.g. 192.168.1.20)"
+                    android:inputType="textUri"
+                    android:paddingHorizontal="16dp"
+                    android:background="@drawable/bg_input"
+                    android:textColor="@color/text"
+                    android:textColorHint="@color/muted"
+                    android:textSize="14sp"
+                    android:singleLine="true" />
+                <EditText
+                    android:id="@+id/keyInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="50dp"
+                    android:layout_marginTop="10dp"
+                    android:hint="Pairing key from Jarvis"
+                    android:inputType="textCapCharacters"
+                    android:paddingHorizontal="16dp"
+                    android:background="@drawable/bg_input"
+                    android:textColor="@color/text"
+                    android:textColorHint="@color/muted"
+                    android:textSize="14sp"
+                    android:singleLine="true" />
+                <TextView
+                    android:id="@+id/connectBtn"
+                    android:layout_width="match_parent"
+                    android:layout_height="50dp"
+                    android:layout_marginTop="14dp"
+                    android:gravity="center"
+                    android:text="CONNECT"
+                    android:textColor="#FFFFFF"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.1"
+                    android:background="@drawable/bg_btn_primary"
+                    android:clickable="true"
+                    android:focusable="true" />
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="Same Wi-Fi required. Get a fresh key from Jarvis → Remote Control."
+                    android:textColor="@color/muted"
+                    android:textSize="11sp" />
+                <TextView
+                    android:id="@+id/adminBtn"
+                    android:layout_width="match_parent"
+                    android:layout_height="42dp"
+                    android:layout_marginTop="10dp"
+                    android:gravity="center"
+                    android:text="Enable lock permission"
+                    android:textColor="@color/text_dim"
+                    android:textSize="12sp"
+                    android:background="@drawable/bg_btn_ghost"
+                    android:clickable="true"
+                    android:focusable="true" />
+                <TextView
+                    android:id="@+id/forgetBtn"
+                    android:layout_width="match_parent"
+                    android:layout_height="36dp"
+                    android:layout_marginTop="6dp"
+                    android:gravity="center"
+                    android:text="Forget PC certificate"
+                    android:textColor="@color/muted"
+                    android:textSize="11sp"
+                    android:clickable="true"
+                    android:focusable="true" />
+            </LinearLayout>
+
+            <!-- Connected bar (shown while online) -->
+            <LinearLayout
+                android:id="@+id/connectedBar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/bg_card"
+                android:padding="14dp"
+                android:visibility="gone">
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+                    <TextView style="@style/Label" android:text="LINKED PC" />
+                    <TextView
+                        android:id="@+id/linkedHost"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textColor="@color/text"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+                    <TextView
+                        android:id="@+id/linkSecurity"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:textColor="@color/muted"
+                        android:textSize="11sp" />
+                </LinearLayout>
+                <TextView
+                    android:id="@+id/disconnectBtn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:gravity="center"
+                    android:paddingHorizontal="18dp"
+                    android:text="Disconnect"
+                    android:textColor="@color/red"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:background="@drawable/bg_btn_ghost"
+                    android:clickable="true"
+                    android:focusable="true" />
+            </LinearLayout>
+
+            <!-- Phone / calls -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:padding="16dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+                    <TextView style="@style/Label" android:layout_width="0dp" android:layout_weight="1" android:text="PHONE" />
+                    <TextView
+                        android:id="@+id/qCallState"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="↻ Refresh"
+                        android:textColor="@color/accent"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:padding="4dp"
+                        android:clickable="true"
+                        android:focusable="true" />
+                </LinearLayout>
+                <TextView
+                    android:id="@+id/callState"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="No active call"
+                    android:textColor="@color/text_dim"
+                    android:textSize="14sp" />
+                <LinearLayout
+                    android:id="@+id/qDial"
+                    android:layout_width="match_parent"
+                    android:layout_height="56dp"
+                    android:layout_marginTop="14dp"
+                    android:orientation="horizontal"
+                    android:gravity="center"
+                    android:background="@drawable/bg_btn_green"
+                    android:clickable="true"
+                    android:focusable="true">
+                    <ImageView
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:src="@drawable/ic_call"
+                        android:contentDescription="@null" />
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="10dp"
+                        android:text="Make a call"
+                        android:textColor="#FFFFFF"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:layout_marginHorizontal="-4dp"
+                    android:orientation="horizontal">
+                    <TextView android:id="@+id/qAnswer" style="@style/CallBtn" android:text="Answer" android:textColor="@color/green" android:background="@drawable/bg_btn_answer" />
+                    <TextView android:id="@+id/qReject" style="@style/CallBtn" android:text="Reject" android:textColor="@color/red" android:background="@drawable/bg_btn_reject" />
+                    <TextView android:id="@+id/qHangup" style="@style/CallBtn" android:text="Hang up" android:textColor="@color/red" android:background="@drawable/bg_btn_reject" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Quick actions -->
+            <TextView style="@style/Label" android:layout_marginTop="18dp" android:layout_marginStart="6dp" android:text="QUICK ACTIONS" />
+            <GridLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:columnCount="3">
+            <TextView android:id="@+id/qYoutube" style="@style/Tile" android:text="▶  YouTube" android:textColor="@color/text" />
+            <TextView android:id="@+id/qLock" style="@style/Tile" android:text="🔒  Lock" android:textColor="@color/text" />
+            <TextView android:id="@+id/qHome" style="@style/Tile" android:text="🏠  Home" android:textColor="@color/text" />
+            <TextView android:id="@+id/qNotif" style="@style/Tile" android:text="🔔  Notifs" android:textColor="@color/text" />
+            <TextView android:id="@+id/qLoc" style="@style/Tile" android:text="📍  Location" android:textColor="@color/text" />
+            <TextView android:id="@+id/qCam" style="@style/Tile" android:text="📷  Camera" android:textColor="@color/text" />
+            <TextView android:id="@+id/qMic" style="@style/Tile" android:text="🎙  Voice" android:textColor="@color/text" />
+            <TextView android:id="@+id/qTorch" style="@style/Tile" android:text="🔦  Torch" android:textColor="@color/text" />
+            <TextView android:id="@+id/qShot" style="@style/Tile" android:text="🖼  Screenshot" android:textColor="@color/text" />
+            <TextView android:id="@+id/qFind" style="@style/Tile" android:text="📣  Find phone" android:textColor="@color/text" />
+            <TextView android:id="@+id/qContacts" style="@style/Tile" android:text="👥  Contacts" android:textColor="@color/text" />
+            <TextView android:id="@+id/qFiles" style="@style/Tile" android:text="📁  Send file" android:textColor="@color/text" />
+            </GridLayout>
+
+            <!-- PC control -->
+            <TextView style="@style/Label" android:layout_marginTop="14dp" android:layout_marginStart="6dp" android:text="CONTROL THE PC" />
+            <GridLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:columnCount="3">
+                <TextView android:id="@+id/qPcLock" style="@style/Tile" android:text="🖥  Lock" />
+                <TextView android:id="@+id/qPcMute" style="@style/Tile" android:text="🔇  Mute" />
+                <TextView android:id="@+id/qPcOff" style="@style/Tile" android:text="⏻  Shut down" android:textColor="@color/red" />
+                <TextView android:id="@+id/qPcVolDown" style="@style/Tile" android:text="🔉  Vol −" />
+                <TextView android:id="@+id/qPcVolUp" style="@style/Tile" android:text="🔊  Vol +" />
+                <TextView android:id="@+id/qPcPlay" style="@style/Tile" android:text="⏯  Play" />
+                <TextView android:id="@+id/qPcPrev" style="@style/Tile" android:text="⏮  Prev" />
+                <TextView android:id="@+id/qPcNext" style="@style/Tile" android:text="⏭  Next" />
+                <TextView android:id="@+id/qPcApp" style="@style/Tile" android:text="🪟  App…" />
+            </GridLayout>
+
+            <!-- Log -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:padding="16dp"
+                android:minHeight="180dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+                    <TextView style="@style/Label" android:layout_width="0dp" android:layout_weight="1" android:text="ACTIVITY" />
+                    <TextView
+                        android:id="@+id/clearLog"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Clear"
+                        android:textColor="@color/muted"
+                        android:textSize="12sp"
+                        android:padding="4dp"
+                        android:clickable="true"
+                        android:focusable="true" />
+                </LinearLayout>
+                <TextView
+                    android:id="@+id/logView"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:textColor="@color/text_dim"
+                    android:textSize="13sp"
+                    android:lineSpacingExtra="4dp"
+                    android:textIsSelectable="true" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- Chat bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="12dp"
+        android:background="@color/bar">
+        <ImageButton
+            android:id="@+id/attachBtn"
+            android:layout_width="46dp"
+            android:layout_height="46dp"
+            android:src="@android:drawable/ic_menu_add"
+            android:background="@drawable/bg_btn_ghost"
+            android:contentDescription="Attach file"
+            android:scaleType="centerInside"
+            android:padding="12dp" />
+        <EditText
+            android:id="@+id/chatInput"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:layout_weight="1"
+            android:layout_marginHorizontal="8dp"
+            android:hint="Ask Jarvis anything…"
+            android:inputType="textCapSentences|textMultiLine"
+            android:maxLines="3"
+            android:paddingHorizontal="16dp"
+            android:background="@drawable/bg_input"
+            android:textColor="@color/text"
+            android:textColorHint="@color/muted"
+            android:textSize="14sp" />
+        <ImageButton
+            android:id="@+id/sendBtn"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:src="@android:drawable/ic_menu_send"
+            android:background="@drawable/bg_btn_send"
+            android:contentDescription="Send"
+            android:scaleType="centerInside"
+            android:padding="13dp" />
+    </LinearLayout>
+</LinearLayout>
+<!--by ASDcuber521-->
