@@ -65,7 +65,16 @@ jobs:
       - name: Create GitHub Release and Upload APK
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.get_version.outputs.VERSION }}
-          name: Release v${{ steps.get_version.outputs.VERSION }}
+          tag_name: v${{ steps.get_version.outputs.VERSION }}-android
+          name: 🤖 Android v${{ steps.get_version.outputs.VERSION }}
+          body: |
+            ## 📱 Jarvis AI - Android Release
+            > **Version:** `${{ steps.get_version.outputs.VERSION }}`
+            > **Platform:** Android Mobile
+            
+            ### ✨ What's New & Cool:
+            * ⚡ Automated build pipeline successfully compiled.
+            * 🛡️ Optimized performance and stability enhancements.
+            
+            *Download the `.apk` file below and install it on your device.*
           files: android/JarvisApp/app/build/outputs/apk/debug/*.apk
-          generate_release_notes: true
