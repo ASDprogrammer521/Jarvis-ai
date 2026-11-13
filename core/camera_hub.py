@@ -12,6 +12,7 @@ import time
 
 from core import face_id, gesture, hand_cursor
 
+HAND_GAP_GESTURES = 1 / 15    # one-shot gestures only need ~15 fps; the hand mouse and Hand Space still use every frame
 FACE_EVERY = 0.4          # seconds between face checks (gestures are checked on every frame)
 KNOWN_COOLDOWN = 45.0     # don't greet the same person again within this many seconds
 UNKNOWN_COOLDOWN = 60.0
@@ -116,6 +117,7 @@ class CameraHub:
         last_known: dict[str, float] = {}
         last_unknown = 0.0
         unknown_streak = 0
+        last_hand = 0.0
         try:
             self._set("starting…")
             import cv2
@@ -124,6 +126,17 @@ class CameraHub:
             while not self._stop.is_set():
                 if not self._wanted():
                     break
+                # Skip frames nobody needs: grab() drops a frame without decoding it, so the hand / face models stay idle
+                t_now = time.time()
+                hands_on = self._g or self._c or self.space
+                hand_gap = 0.0 if (self._c or self.space) else HAND_GAP_GESTURES
+                hand_due = hands_on and t_now - last_hand >= hand_gap
+                face_due = (self._f or self._enroll is not None) and t_now - last_face >= FACE_EVERY
+                cleanup = (not hands_on and (hands is not None or cursor is not None)) or (not self._f and engine is not None and self._enroll is None)
+                if not (hand_due or face_due or cleanup):
+                    cap.grab()
+                    time.sleep(0.008)
+                    continue
                 ok, frame = cap.read()
                 if not ok:
                     time.sleep(0.03)
@@ -132,6 +145,7 @@ class CameraHub:
 
                 # ── hands: Hand Space (two hands) > cursor mode (hand = mouse) > one-shot gestures ──
                 if self._g or self._c or self.space:
+                    last_hand = now
                     need = 2 if self.space else 1
                     if hands is not None and getattr(hands, "num_hands", 1) != need:
                         hands.close()

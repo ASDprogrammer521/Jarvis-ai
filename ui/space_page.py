@@ -18,11 +18,11 @@ from ui.widgets import draw_icon, font
 
 GESTURES = (
     ("pinch", "Pinch", "Touch thumb and index finger on a card to grab it and carry it."),
-    ("tap", "Tap", "A quick pinch opens a card to read it. Pinch again to close it."),
+    ("tap", "Tap", "A quick pinch goes into a folder or drive, enlarges a picture, opens a note. Pinch again to close it."),
     ("throw", "Throw", "Let go while your hand moves — the card flies, spins and bounces off the edges."),
     ("claw", "Claw", "Bend your fingers like a claw: every card is pulled to your palm. Open the hand to release."),
-    ("two", "Two hands", "Pinch the 3D model with both hands to rotate and zoom it."),
-    ("fist", "Explode", "Make a fist over the model and open it: the model flies apart and reassembles."),
+    ("two", "Two hands", "Pinch an open picture with both hands to zoom it; one hand drags it around."),
+    ("fist", "Back", "Hold a fist for a second: closes the open card, or goes up one folder."),
 )
 _ICON = {"pinch": "hand", "tap": "bolt", "throw": "send", "claw": "hand", "two": "cube", "fist": "stats"}
 
@@ -120,7 +120,7 @@ class SpacePage(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(8)
-        root.addWidget(PageHeader("Hand Space", "Glass cards and a 3D hologram you move with your bare hands — webcam only, all local"))
+        root.addWidget(PageHeader("Hand Space", "Browse your drives, folders and pictures with your bare hands — webcam only, all local"))
 
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 8, 8)
@@ -276,7 +276,7 @@ class SpacePage(QWidget):
     def _reload(self):
         from core import hand_space
         folder = self._folder()
-        self.folder_lbl.setText(f"Cards from: {folder}" if folder else "Cards from: built-in examples — choose a notes / pictures folder")
+        self.folder_lbl.setText(f"Pinned next to your drives: {folder}" if folder else "Starts on your drives (C: first). Pin a folder to show it next to them.")
         while self.grid.count():
             it = self.grid.takeAt(0)
             if it.widget():
@@ -303,7 +303,7 @@ class SpacePage(QWidget):
             self.grid.setColumnStretch(k, 1)
 
     def _pick_folder(self):
-        path = QFileDialog.getExistingDirectory(self, "Folder with notes (.md / .txt) and pictures", self._folder())
+        path = QFileDialog.getExistingDirectory(self, "Folder to pin next to your drives in Hand Space", self._folder())
         if path:
             patch_cfg(hand_space_folder=path)
             self._reload()

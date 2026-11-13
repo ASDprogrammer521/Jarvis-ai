@@ -1172,7 +1172,7 @@ class MainWindow(QMainWindow):
         self.modal.dismiss()
 
     def _pause_scene(self, on: bool):
-        on = bool(on) or getattr(self, "_media_scene_paused", False)
+        on = bool(on) or getattr(self, "_media_scene_paused", False) or getattr(self, "_space_scene_paused", False)
         self.backdrop.paused = on
         self.stage.paused = on
         if not on:
@@ -1554,25 +1554,53 @@ class MainWindow(QMainWindow):
             self._hand_overlay = HandCursorOverlay()
         self._hand_overlay.set_hand(pts, pinch)
 
-    # ── Hand Space: holographic cards + 3D model driven by both hands ────────────────
+    # ── Hand Space: a hand-controlled file workspace (drives → folders → pictures / notes) ──────
+    def _freeze_animations(self, on: bool):
+        """While Hand Space is open the Jarvis scene behind it is invisible, so all its animation timers are stopped
+        (backdrop, orb, logo, teasers…) and restarted afterwards. Functional timers (video, clock, alerts) keep running."""
+        from PyQt6.QtCore import QTimer
+        if on:
+            keep = {id(getattr(self, "_mpv_timer", None))}
+            frozen = []
+            for t in self.findChildren(QTimer):
+                if id(t) in keep or t.isSingleShot() or not t.isActive() or t.interval() > 130:
+                    continue
+                t.stop()
+                frozen.append(t)
+            self._frozen_timers = frozen
+            self._space_scene_paused = True
+            self._pause_scene(True)
+        else:
+            self._space_scene_paused = False
+            for t in getattr(self, "_frozen_timers", []):
+                try:
+                    t.start()
+                except RuntimeError:
+                    pass
+            self._frozen_timers = []
+            self._pause_scene(False)
+
     def _open_hand_space(self):
-        from core import hand_space
         ov = self._modules.get("hand_space")
         if ov is None:
             from ui.hand_space import HandSpaceOverlay
             ov = HandSpaceOverlay()
             ov.closed.connect(self._on_space_closed)
             self._modules["hand_space"] = ov
-        folder = read_cfg().get("hand_space_folder")
+        pinned = read_cfg().get("hand_space_folder") or None
         if self._hand_overlay is not None:
             self._hand_overlay.hide()
         hub = self._camera_hub()
         hub.space = True                       # the camera loop switches to two-hand tracking for the overlay
         hub.refresh()
-        ov.show_overlay(hand_space.load_cards(folder))
-        self.write_log("SYS: Hand Space open — pinch to grab, claw to pull, two hands to rotate the model. Esc to leave.")
+        if not getattr(self, "_space_scene_paused", False):
+            self._freeze_animations(True)      # Jarvis' animations stop while Hand Space is open
+        ov.show_overlay(pinned)
+        self.write_log("SYS: Hand Space open — your drives are floating: pinch-tap a folder to go in, a picture to enlarge it, hold a fist to go back. Esc to leave.")
 
     def _on_space_closed(self):
+        if getattr(self, "_space_scene_paused", False):
+            self._freeze_animations(False)
         if self.camera is not None and self.camera.space:
             self.camera.space = False
             self.camera.refresh()

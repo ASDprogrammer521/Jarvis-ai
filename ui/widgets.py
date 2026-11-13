@@ -425,7 +425,7 @@ class ChatView(QScrollArea):
         self._count = 0
 
     def add(self, kind: str, who: str, text: str):
-        if self._count > 300:
+        if self._count > 150:
             it = self._lay.takeAt(0)
             if it.widget():
                 it.widget().deleteLater()

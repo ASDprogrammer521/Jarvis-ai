@@ -10,7 +10,7 @@ def hand_control(parameters: dict, player=None) -> str:
         if player is None or not hasattr(player, "module_command"):
             return "The interface isn't ready."
         player.module_command("hand_space", "show")
-        return "Hand Space is open — pinch a card to grab it, claw to pull them to you, two hands to spin the model."
+        return "Hand Space is open — your drives are floating: pinch-tap a folder to go in, a picture to enlarge it, hold a fist to go back."
     if action in ("close_space", "space_off"):
         if player is not None and hasattr(player, "module_command"):
             player.module_command("hand_space", "hide")
@@ -44,12 +44,12 @@ TOOL = {
     "description": (
         "Turns the webcam hand-tracking mouse on or off: the hand moves the real cursor, pinch clicks, a peace sign "
         "scrolls, a held fist stops it. Use for 'enable hand control', 'let me control the screen with my hand', "
-        "'turn off hand tracking', 'make hand control more sensitive'. Also opens “Hand Space”, the Iron-Man style floating cards / 3D model you move with both hands (‘open hand space’). Not for the one-shot gesture shortcuts in Settings."
+        "'turn off hand tracking', 'make hand control more sensitive'. Also opens “Hand Space”, the Iron-Man style floating file browser (drives, folders, pictures) you move with your hands (‘open hand space’). Not for the one-shot gesture shortcuts in Settings."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "on | off | toggle | status | sensitivity | space (open Hand Space: floating glass cards + 3D model) | close_space"},
+            "action": {"type": "STRING", "description": "on | off | toggle | status | sensitivity | space (open Hand Space: floating file browser) | close_space"},
             "level": {"type": "STRING", "description": "low | normal | high (for sensitivity)"},
         },
         "required": ["action"],

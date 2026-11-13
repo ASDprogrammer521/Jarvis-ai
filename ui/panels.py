@@ -461,9 +461,9 @@ class SettingsPanel(GlassCard):
         lay.addWidget(setting_row("Cursor reach", "High = small hand movements cover the whole screen", sens))
         sp_b = GlowButton("Hand Space page", "primary")
         sp_b.clicked.connect(lambda: (w.close_modal(), QTimer.singleShot(350, lambda: w.module_command("hand_space_page", "show"))))
-        lay.addWidget(setting_row("Hand Space — glass cards you move with both hands",
-                                  "Pinch a card to grab it · quick pinch = open · let go while moving = throw · claw = pull every card to your palm · "
-                                  "two hands rotate / zoom the 3D model · fist then open = explode it · Esc or ✕ to leave. Say “open hand space”.", sp_b))
+        lay.addWidget(setting_row("Hand Space — browse your drives and folders with your hands",
+                                  "Starts on your drives (C: first) · pinch-tap a folder to go in, a picture to enlarge it · let go while moving = throw · "
+                                  "claw = pull every card to your palm · two hands zoom a picture · hold a fist = back · Esc or ✕ to leave. Say “open hand space”.", sp_b))
         lay.addWidget(divider())
 
         lay.addWidget(section_label("What each gesture does"))

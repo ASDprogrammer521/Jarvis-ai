@@ -769,7 +769,7 @@ class Stage3D(QWidget):
         if self.lite:
             want = 40 if active else 80
         else:
-            want = 33 if active else 50
+            want = 33 if active else 62
         if not focused or self.paused or not self.isVisible():
             want = 200
         if self._tm.interval() != want:

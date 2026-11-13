@@ -15,7 +15,7 @@ tzdata
 pyautogui
 pyperclip
 pygetwindow
-pillow>=10,<13
+pillow>=13.0.0,<14                         # 13.0.0 fixes the Dependabot Pillow advisories (needs Python 3.11+)
 mss>=9,<11
 send2trash
 playwright>=1.40,<2                  # browser automation (setup.py also fetches the browsers)

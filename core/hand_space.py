@@ -1,39 +1,79 @@
-"""Hand Space — an Iron-Man-style holographic workspace you control with bare hands (camera + MediaPipe).
+"""Hand Space — a floating, hand-controlled file workspace (camera + MediaPipe).
 
-Glass cards (your notes and pictures from a folder) float in the air together with a 3D holographic model:
+It starts on "This PC": your drives (C: first) float as glass cards. Open a drive or a folder and its contents float
+in the air — sub-folders, pictures, notes and every other file — so you can walk through the whole disk with bare hands.
 
     pinch a card .......... grab it · move your hand to carry it
-    quick pinch (tap) ..... open the card to read it · tap again to close
+    quick pinch (tap) ..... folder / drive: go in · picture: open it BIG · note / file: open it
+    tap the open card ..... close it (or tap the dark background)
     let go while moving ... throw it — it flies, spins and bounces off the screen edges
-    claw (bent fingers) ... every card is pulled towards your palm and orbits it; open the hand to release them
-    pinch the model ....... spin it, it keeps turning with inertia
-    both hands pinching ... rotate and zoom the model
-    fist, then open ....... over the model: it explodes and reassembles
-    pinch the ✕ ........... leave Hand Space
+    claw (bent fingers) ... every card is pulled towards your palm; open the hand to release them
+    fist, hold 1 s ........ back: close the open card, or go up one folder
+    two hands pinching .... zoom the open picture · one hand drags to pan / scroll
+    buttons ............... Home · Up · Explorer · Sort · Arrange · pages · prev / next · + / − · Open · Close · ✕
+
+Keyboard / mouse also work: Esc, Backspace, ← →, PageUp/PageDown, wheel, right-click = back.
 
 This module is pure logic (no Qt) so it can be tested without a camera; ui/hand_space.py draws it.
 """
 from __future__ import annotations
 
 import math
+import os
 import random
 import re
+import shutil
+import subprocess
+import sys
 import time
 from collections import deque
 from pathlib import Path
 
-CARD_W, CARD_H = 230, 150
-OPEN_W, OPEN_H = 640, 440
+CARD_W, CARD_H = 220, 150
+GAP = 26
+TOP_MARGIN, BOTTOM_MARGIN, SIDE_MARGIN = 150, 130, 90      # the card grid lives between the top bar and the bottom bar
+BTN_W, BTN_H, BTN_GAP = 76, 52, 12
 PINCH_ON, PINCH_OFF, CONFIRM = 0.32, 0.50, 2
 GAIN = 1.25                      # camera → screen: the central 80 % of the picture reaches every screen edge
 MAX_THROW = 4200.0
 TAP_SECONDS, TAP_PIXELS = 0.38, 42
-MAX_CARDS = 40
-TEXT_EXT = {".md", ".markdown", ".txt"}
-IMG_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+FIST_SECONDS = 1.0
+MAX_ENTRIES = 3000
+TEXT_BYTES, TEXT_CHARS = 48000, 24000
+
+TEXT_EXT = {".md", ".markdown", ".txt", ".log", ".json", ".csv", ".ini", ".cfg", ".conf", ".yaml", ".yml", ".toml",
+            ".xml", ".html", ".htm", ".css", ".js", ".ts", ".py", ".java", ".c", ".cpp", ".h", ".cs", ".sql", ".sh",
+            ".bat", ".cmd", ".ps1", ".tex", ".srt"}
+PLAIN_EXT = {".md", ".markdown", ".txt", ".log", ".tex", ".srt"}      # shown in the normal font; the rest is code (mono)
+IMG_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".ico"}
+# never launched from a gesture: a stray pinch must not start a program
+NO_LAUNCH = {".exe", ".bat", ".cmd", ".com", ".msi", ".scr", ".ps1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh",
+             ".lnk", ".reg", ".dll", ".jar", ".hta", ".cpl", ".pif", ".msc", ".sh", ".py", ".pyw", ".appx", ".msix"}
+SORTS = ("name", "date", "size", "type")
+SORT_LABEL = {"name": "Name", "date": "Date", "size": "Size", "type": "Type"}
 
 
-# ── cards from a folder ──────────────────────────────────────────────────────────────
+# ── formatting ───────────────────────────────────────────────────────────────────────
+def human_size(n: float) -> str:
+    n = float(n)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return f"{n:.0f} {unit}" if unit == "B" or n >= 100 else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"
+
+
+def fmt_date(ts: float) -> str:
+    try:
+        return time.strftime("%Y-%m-%d", time.localtime(ts))
+    except (OSError, ValueError, OverflowError):
+        return ""
+
+
+def _nat(s: str) -> list:
+    return [int(t) if i % 2 else t for i, t in enumerate(re.split(r"(\d+)", s.lower()))]
+
+
 def _clean_md(text: str) -> str:
     text = re.sub(r"^---\n.*?\n---\n", "", text, flags=re.S)            # front matter
     text = re.sub(r"!\[\[.*?\]\]|!\[.*?\]\(.*?\)", "", text)             # embedded images
@@ -44,41 +84,163 @@ def _clean_md(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
-def load_cards(folder: str | Path | None, limit: int = MAX_CARDS) -> list[dict]:
-    """Newest notes and pictures first. Hidden folders (.obsidian, .git…) are skipped."""
-    if not folder or not Path(folder).is_dir():
-        return demo_cards()
-    root = Path(folder)
-    files = []
-    for p in root.rglob("*"):
-        if p.is_file() and p.suffix.lower() in TEXT_EXT | IMG_EXT and not any(part.startswith(".") for part in p.relative_to(root).parts):
+# ── the file system as cards ─────────────────────────────────────────────────────────
+def _drive_letters() -> list[str]:
+    if sys.platform != "win32":
+        return []
+    try:
+        import ctypes
+        k = ctypes.windll.kernel32
+        k.SetErrorMode(1)                                   # no "insert a disk" pop-ups for empty card readers
+        mask = k.GetLogicalDrives()
+        out = []
+        for i in range(26):
+            if mask & (1 << i):
+                root = f"{chr(65 + i)}:\\"
+                if k.GetDriveTypeW(root) in (2, 3):          # removable + fixed only: a dead network drive would freeze us
+                    out.append(root)
+        out.sort(key=lambda r: (r[0] != "C", r))
+        return out
+    except Exception:
+        return []
+
+
+def _volume_label(root: str) -> str:
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(261)
+        ok = ctypes.windll.kernel32.GetVolumeInformationW(root, buf, 261, None, None, None, None, 0)
+        return buf.value if ok else ""
+    except Exception:
+        return ""
+
+
+def _drive_entry(root: str, title: str) -> dict:
+    sub, used = "Not ready", 0.0
+    try:
+        u = shutil.disk_usage(root)
+        used = u.used / u.total if u.total else 0.0
+        sub = f"{human_size(u.free)} free of {human_size(u.total)}"
+    except OSError:
+        pass
+    return {"kind": "drive", "title": title, "sub": sub, "used": used, "path": root, "image": None, "text": "",
+            "_dir": True, "_mt": 0.0, "_sz": 0, "_ext": ""}
+
+
+def list_roots(pinned: str | None = None) -> list[dict]:
+    """'This PC': every drive (C: first) and, if you pinned one on the Hand Space page, that folder."""
+    items = []
+    for root in _drive_letters():
+        items.append(_drive_entry(root, f"{_volume_label(root) or 'Local Disk'} ({root[0]}:)"))
+    if not items:                                           # not Windows (or no drives found): show something useful
+        items.append(_drive_entry(os.path.abspath(os.sep), "Root"))
+        home = str(Path.home())
+        items.append({"kind": "folder", "title": "Home", "sub": "Your folder", "path": home, "image": None, "text": "",
+                      "_dir": True, "_mt": 0.0, "_sz": 0, "_ext": ""})
+    if pinned and Path(pinned).is_dir():
+        items.append({"kind": "folder", "title": Path(pinned).name or str(pinned), "sub": "Pinned folder", "path": str(pinned),
+                      "image": None, "text": "", "pinned": True, "_dir": True, "_mt": 0.0, "_sz": 0, "_ext": ""})
+    return items
+
+
+def _sort_key(sort: str):
+    if sort == "date":
+        return lambda e: (not e["_dir"], -e["_mt"], _nat(e["title"]))
+    if sort == "size":
+        return lambda e: (not e["_dir"], 0 if e["_dir"] else -e["_sz"], _nat(e["title"]))
+    if sort == "type":
+        return lambda e: (not e["_dir"], e["_ext"], _nat(e["title"]))
+    return lambda e: (not e["_dir"], _nat(e["title"]))
+
+
+def sort_entries(entries: list[dict], sort: str) -> None:
+    entries.sort(key=_sort_key(sort))
+
+
+def list_dir(path: str | Path, sort: str = "name") -> list[dict]:
+    """Everything visible inside a folder. Raises OSError (PermissionError…) if it can't be read."""
+    out: list[dict] = []
+    with os.scandir(path) as it:
+        for de in it:
+            if len(out) >= MAX_ENTRIES:
+                break
+            name = de.name
+            if name.startswith("."):
+                continue
             try:
-                files.append((p.stat().st_mtime, p))
+                st = de.stat(follow_symlinks=False)
+                if getattr(st, "st_file_attributes", 0) & 0x6:          # hidden / system (Windows): $Recycle.Bin, pagefile…
+                    continue
+                is_dir = de.is_dir()
             except OSError:
-                pass
-    cards = []
-    for _, p in sorted(files, reverse=True)[:limit]:
-        if p.suffix.lower() in IMG_EXT:
-            cards.append({"title": p.stem[:40], "text": "", "image": str(p), "path": str(p)})
-            continue
-        try:
-            raw = p.read_text(encoding="utf-8", errors="replace")[:20000]
-        except OSError:
-            continue
-        m = re.search(r"^#\s+(.+)$", raw, flags=re.M)
-        cards.append({"title": (m.group(1) if m else p.stem).strip()[:60], "text": _clean_md(raw)[:1600], "image": None, "path": str(p)})
-    return cards or demo_cards()
+                continue
+            ext = "" if is_dir else os.path.splitext(name)[1].lower()
+            e = {"title": name, "path": de.path, "_dir": is_dir, "_mt": st.st_mtime, "_sz": 0 if is_dir else st.st_size,
+                 "_ext": ext, "image": None, "text": ""}
+            if is_dir:
+                e.update(kind="folder", sub=fmt_date(st.st_mtime))
+            else:
+                size = human_size(st.st_size)
+                label = (ext[1:] or "file").upper()
+                if ext in IMG_EXT:
+                    e.update(kind="image", image=de.path, sub=f"{label} · {size}")
+                elif ext in TEXT_EXT:
+                    e.update(kind="text", sub=f"{label} · {size}", mono=ext not in PLAIN_EXT)
+                else:
+                    e.update(kind="file", sub=f"{label} · {size}")
+            e["date"] = fmt_date(st.st_mtime)
+            out.append(e)
+    sort_entries(out, sort)
+    return out
 
 
-def demo_cards() -> list[dict]:
-    return [
-        {"title": "Pinch me", "text": "Touch thumb and index finger on a card to grab it, then move your hand.", "image": None},
-        {"title": "Tap to open", "text": "A quick pinch opens a card so you can read it. Pinch again to close it.", "image": None},
-        {"title": "Throw", "text": "Let go while your hand is moving and the card flies, spins and bounces.", "image": None},
-        {"title": "Claw", "text": "Bend your fingers like a claw: every card is pulled to your palm. Open your hand to release them.", "image": None},
-        {"title": "3D model", "text": "Pinch the hologram to spin it, use two hands to rotate and zoom. Make a fist and open it over the model to explode it.", "image": None},
-        {"title": "Your notes", "text": "Open the Hand Space page in the side menu and choose a folder (a Markdown folder or Obsidian vault works) — or write a new card there.", "image": None},
-    ]
+def fill_text(e: dict) -> None:
+    """Read the start of a note so its card can show a preview (only done for the cards on screen)."""
+    if e.get("kind") != "text" or e.get("_filled"):
+        return
+    e["_filled"] = True
+    try:
+        with open(e["path"], "rb") as f:
+            raw = f.read(TEXT_BYTES)
+    except OSError:
+        e["kind"] = "file"
+        return
+    if b"\x00" in raw[:2048]:
+        e["kind"] = "file"
+        return
+    txt = raw.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\t", "    ")
+    if e["_ext"] in (".md", ".markdown"):
+        txt = _clean_md(txt)
+    e["full"] = txt[:TEXT_CHARS]
+    e["text"] = "\n".join(txt.strip().splitlines()[:8])[:420]
+
+
+def load_cards(folder: str | Path | None, limit: int = 40) -> list[dict]:
+    """Compatibility helper (used by the Hand Space page preview): the cards of a folder, or the drives."""
+    try:
+        items = list_dir(folder) if folder and Path(folder).is_dir() else list_roots()
+    except OSError:
+        items = list_roots()
+    for e in items[:limit]:
+        fill_text(e)
+        if not e.get("text"):
+            e["text"] = e.get("sub", "") if not e.get("image") else ""
+    return items[:limit]
+
+
+def can_launch(e: dict) -> bool:
+    return e.get("kind") in ("image", "text", "file") and e.get("_ext", "") not in NO_LAUNCH
+
+
+def open_external(path: str) -> bool:
+    try:
+        if hasattr(os, "startfile"):
+            os.startfile(path)                                    # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except Exception:
+        return False
 
 
 # ── physics objects ──────────────────────────────────────────────────────────────────
@@ -87,62 +249,34 @@ class Card:
         self.idx, self.data = idx, data
         self.x, self.y = x, y
         self.vx = self.vy = 0.0
-        self.angle = random.uniform(-0.08, 0.08)
+        self.angle = random.uniform(-0.03, 0.03)
         self.spin = 0.0
         self.k = 0.0                 # 0 = small card … 1 = fully opened
         self.open = False
         self.held = False
         self.phase = random.uniform(0, 6.28)
         self.lift = 0.0              # 0..1, grows while held (shadow / scale)
+        self.hov = 0.0               # 0..1, glows while a hand is over it
+        self.a = 0.0                 # 0..1, "appear" animation after a folder change
+        self.born = 0.0
+        self.ow, self.oh = 560.0, 380.0       # size when opened (depends on the picture's shape / the screen)
+        self.zoom, self.vcx, self.vcy = 1.0, 0.5, 0.5        # opened picture: zoom and the centre of the view
+        self.scroll = 0.0                    # opened note: how far it is scrolled (px)
+        self.ret = (x, y)                    # where it sits in the grid, so it flies back after closing
+        self.home = (x, y)
+        self.homing = False
         self._target = None          # claw orbit target
 
     @property
     def w(self) -> float:
-        return CARD_W + (OPEN_W - CARD_W) * self.k
+        return CARD_W + (self.ow - CARD_W) * self.k
 
     @property
     def h(self) -> float:
-        return CARD_H + (OPEN_H - CARD_H) * self.k
+        return CARD_H + (self.oh - CARD_H) * self.k
 
-    def hit(self, px: float, py: float, pad: float = 30.0) -> bool:
+    def hit(self, px: float, py: float, pad: float = 14.0) -> bool:
         return abs(px - self.x) <= self.w / 2 + pad and abs(py - self.y) <= self.h / 2 + pad
-
-
-class Model:
-    """A holographic wireframe orb. `explode` runs 0 → 1 → 0."""
-
-    def __init__(self, cx: float, cy: float, r: float):
-        self.cx, self.cy, self.r = cx, cy, r
-        self.yaw, self.pitch = 0.4, 0.3
-        self.vyaw, self.vpitch = 0.0, 0.0
-        self.scale = 1.0
-        self.explode = 0.0
-        self._boom_t = 0.0
-        self.held = False
-
-    @property
-    def radius(self) -> float:
-        return self.r * self.scale
-
-    def boom(self, now: float):
-        if self.explode < 0.05:
-            self._boom_t = now
-
-    def step(self, dt: float, now: float):
-        self.yaw += (self.vyaw + (0 if self.held else 0.28)) * dt
-        self.pitch += self.vpitch * dt
-        self.vyaw *= math.exp(-1.6 * dt)
-        self.vpitch *= math.exp(-1.6 * dt)
-        self.pitch = max(-1.3, min(1.3, self.pitch))
-        age = now - self._boom_t
-        if self._boom_t and age < 0.45:
-            self.explode = min(1.0, self.explode + 4.0 * dt)
-        elif self._boom_t and age < 2.3:
-            self.explode = min(1.0, self.explode)
-        else:
-            self.explode = max(0.0, self.explode - 1.1 * dt)
-            if self.explode == 0.0:
-                self._boom_t = 0.0
 
 
 def _d(a, b) -> float:
@@ -157,15 +291,17 @@ class Hand:
         self.pinching = False
         self._pn = self._rn = 0
         self.pos = (0.0, 0.0)            # smoothed pinch point
+        self.last = (0.0, 0.0)           # pinch point one frame ago (for dragging / panning)
         self.palm = (0.0, 0.0)
         self.claw = self.fist = self.open = False
-        self.held = None                 # Card | "model" | None
+        self.held = None                 # Card | "zoom" | None
         self.grab_off = (0.0, 0.0)
         self.down_t = 0.0
         self.down_pos = (0.0, 0.0)
         self.hist: deque = deque(maxlen=10)
         self.fist_since = 0.0
-        self.fist_until = 0.0            # remembers a recent fist so "fist → open" can be detected
+        self.fist_prog = 0.0             # 0..1 while a fist is held: at 1 → "back"
+        self.fist_fired = False
         self.speed = 0.0
         self._edge = (False, False)       # (pinch started, pinch ended) this frame
 
@@ -196,12 +332,11 @@ class Hand:
             self._rn = self._rn + 1 if ratio > PINCH_OFF else 0
             if self._rn >= CONFIRM:
                 self.pinching, self._pn = False, 0
-        if self.fist:
+        if self.fist and not self.pinching:
             self.fist_since = self.fist_since or now
-            if now - self.fist_since > 0.25:
-                self.fist_until = now + 0.7
+            self.fist_prog = min(1.0, (now - self.fist_since) / FIST_SECONDS)
         else:
-            self.fist_since = 0.0
+            self.fist_since, self.fist_prog, self.fist_fired = 0.0, 0.0, False
         # velocity comes from the palm, not the pinch point: opening the pinch moves the point between the fingertips,
         # which would add a fake kick to every throw
         self.hist.append((now, self.palm[0], self.palm[1]))
@@ -228,34 +363,332 @@ class Space:
     def __init__(self, w: int, h: int):
         self.w, self.h = w, h
         self.cards: list[Card] = []
-        self.model = Model(w * 0.5, h * 0.52, min(w, h) * 0.17)
+        self.entries: list[dict] = []
+        self.path: Path | None = None            # None = "This PC" (the drives)
+        self.pinned: str | None = None
+        self.sort = "name"
+        self.page, self.pages, self.per_page = 0, 1, 20
+        self.summary = ""
+        self.buttons: list[dict] = []
+        self.hover_btn: str | None = None
+        self.hover_card: Card | None = None
+        self.mouse_hover: tuple[float, float] | None = None
         self.hands: list[Hand] = [Hand(), Hand()]
         self.visible = [False, False]
         self.close_requested = False
         self.now = time.time()
+        self.flash: dict[str, float] = {}         # button id → time it was pressed (for the click animation)
+        self._toast = ("", 0.0)
         self._two: dict | None = None
         self._claw_n = 0
+        self._last_press = 0.0
+        self._last_wheel = 0.0
 
-    # ── cards ────────────────────────────────────────────────────────────────────
-    def set_cards(self, items: list[dict]):
-        self.cards.clear()
-        n = len(items)
-        cx, cy = self.w / 2, self.h / 2
-        rx, ry = self.w * 0.36, self.h * 0.34
-        for i, d in enumerate(items):
-            a = 2 * math.pi * i / max(1, n) + random.uniform(-0.15, 0.15)
-            ring = 1.0 if i % 2 == 0 else 0.62                                  # two rings so many cards stay reachable
-            self.cards.append(Card(i, d, cx + math.cos(a) * rx * ring, cy + math.sin(a) * ry * ring))
+    # ── small helpers ────────────────────────────────────────────────────────────
+    def say(self, text: str, secs: float = 2.4):
+        self._toast = (text, time.time() + secs)
 
-    def resize(self, w: int, h: int):
-        sx, sy = w / self.w, h / self.h
-        for c in self.cards:
-            c.x, c.y = c.x * sx, c.y * sy
-        self.w, self.h = w, h
-        self.model.cx, self.model.cy, self.model.r = w * 0.5, h * 0.52, min(w, h) * 0.17
+    @property
+    def toast(self) -> str:
+        return self._toast[0] if time.time() < self._toast[1] else ""
+
+    @property
+    def crumb(self) -> str:
+        if self.path is None:
+            return "This PC"
+        parts = [p for p in Path(self.path).parts if p not in ("\\", "/")]
+        return "This PC  ›  " + "  ›  ".join(p.rstrip("\\/") for p in parts)
+
+    @property
+    def empty(self) -> bool:
+        return not self.entries
 
     def _opened(self) -> Card | None:
         return next((c for c in self.cards if c.open), None)
+
+    @property
+    def opened(self) -> Card | None:
+        return self._opened()
+
+    def _open_center(self) -> tuple[float, float]:
+        return self.w / 2, 100 + (self.h - 130 - 100) / 2
+
+    def _open_dims(self, c: Card) -> tuple[float, float]:
+        kind = c.data.get("kind")
+        aw, ah = self.w * 0.90, self.h - 240
+        if kind == "image":
+            asp = c.data.get("aspect") or 1.6
+            w = aw
+            h = w / asp
+            if h > ah:
+                h = ah
+                w = h * asp
+            return max(w, CARD_W), max(h, CARD_H)
+        if kind == "text":
+            return min(self.w * 0.62, 1000.0), ah
+        return min(self.w * 0.42, 640.0), min(ah, 380.0)
+
+    # ── navigation ───────────────────────────────────────────────────────────────
+    def start(self, pinned: str | None = None):
+        """Open Hand Space on 'This PC': the drives, C: first."""
+        self.pinned = pinned if pinned and Path(pinned).is_dir() else None
+        self.sort = "name"
+        self.go_root()
+
+    def go_root(self):
+        self.path = None
+        self.entries = list_roots(self.pinned)
+        self.page = 0
+        self._build_page()
+
+    def open_path(self, p: str | Path) -> bool:
+        p = Path(p)
+        try:
+            entries = list_dir(p, self.sort)
+        except PermissionError:
+            self.say("Access denied — Windows keeps this folder private")
+            return False
+        except OSError:
+            self.say("Can't open this folder")
+            return False
+        self.path, self.entries, self.page = p, entries, 0
+        self._build_page()
+        if not entries:
+            self.say("This folder is empty")
+        return True
+
+    def go_up(self):
+        if self.path is None:
+            self.say("Already at the top")
+            return
+        parent = self.path.parent
+        if parent == self.path or str(parent) in ("", "."):
+            self.go_root()
+        elif not self.open_path(parent):
+            self.go_root()
+
+    def back(self):
+        """Fist / Backspace / right-click: close the open card, otherwise go up a folder."""
+        op = self._opened()
+        if op is not None:
+            self._set_open(op, False)
+        else:
+            self.go_up()
+
+    def set_sort(self, sort: str):
+        self.sort = sort
+        if self.path is not None:
+            sort_entries(self.entries, sort)
+            self.page = 0
+            self._build_page()
+
+    def change_page(self, step: int):
+        if self.path is None and len(self.entries) <= self.per_page:
+            return
+        n = max(0, min(self.pages - 1, self.page + step))
+        if n != self.page:
+            self.page = n
+            self._build_page()
+
+    # ── layout ───────────────────────────────────────────────────────────────────
+    def _grid(self) -> tuple[int, int]:
+        usable_w = self.w - 2 * SIDE_MARGIN
+        usable_h = self.h - TOP_MARGIN - BOTTOM_MARGIN
+        cols = max(1, int((usable_w + GAP) // (CARD_W + GAP)))
+        rows = max(1, int((usable_h + GAP) // (CARD_H + GAP)))
+        return cols, rows
+
+    def _slot(self, i: int, n: int, cols: int) -> tuple[float, float]:
+        r, c = divmod(i, cols)
+        ncols, nrows = min(cols, n), math.ceil(n / cols)
+        gw = ncols * CARD_W + (ncols - 1) * GAP
+        gh = nrows * CARD_H + (nrows - 1) * GAP
+        usable_h = self.h - TOP_MARGIN - BOTTOM_MARGIN
+        x0 = (self.w - gw) / 2 + CARD_W / 2
+        y0 = TOP_MARGIN + max(0.0, (usable_h - gh) / 2) + CARD_H / 2
+        return x0 + c * (CARD_W + GAP), y0 + r * (CARD_H + GAP)
+
+    def _build_page(self):
+        cols, rows = self._grid()
+        self.per_page = cols * rows
+        self.pages = max(1, math.ceil(len(self.entries) / self.per_page))
+        self.page = max(0, min(self.page, self.pages - 1))
+        chunk = self.entries[self.page * self.per_page:(self.page + 1) * self.per_page]
+        now = time.time()
+        self.cards = []
+        for i, e in enumerate(chunk):
+            fill_text(e)
+            x, y = self._slot(i, len(chunk), cols)
+            c = Card(i, e, x, y)
+            c.born = now + min(0.03 * i, 0.45)
+            self.cards.append(c)
+        for h in self.hands:
+            h.held = None
+        self._two = None
+        self._claw_n = 0
+        nd = sum(1 for e in self.entries if e["kind"] in ("folder", "drive"))
+        if self.path is None:
+            self.summary = f"{nd} drive{'s' if nd != 1 else ''}" if nd == len(self.entries) else f"{len(self.entries)} places"
+        else:
+            nf = len(self.entries) - nd
+            self.summary = f"{nd} folder{'s' if nd != 1 else ''} · {nf} file{'s' if nf != 1 else ''}"
+        self._layout_buttons()
+
+    def arrange(self):
+        """Put the cards back on the tidy grid."""
+        cols, _ = self._grid()
+        for i, c in enumerate(self.cards):
+            if not c.open:
+                c.home, c.homing = self._slot(i, len(self.cards), cols), True
+        self.say("Cards arranged")
+
+    def resize(self, w: int, h: int):
+        sx, sy = w / self.w, h / self.h
+        self.w, self.h = w, h
+        cols, rows = self._grid()
+        if cols * rows != self.per_page:
+            self._build_page()
+            return
+        for c in self.cards:
+            c.x, c.y, c.vx, c.vy = c.x * sx, c.y * sy, 0.0, 0.0
+            c.home, c.ret = (c.home[0] * sx, c.home[1] * sy), (c.ret[0] * sx, c.ret[1] * sy)
+        self._layout_buttons()
+
+    # ── open / close a card ──────────────────────────────────────────────────────
+    def _set_open(self, c: Card, on: bool):
+        if on:
+            for o in self.cards:
+                if o is not c and o.open:
+                    self._set_open(o, False)
+            c.ret = (c.x, c.y)
+            c.open, c.zoom, c.vcx, c.vcy, c.scroll = True, 1.0, 0.5, 0.5, 0.0
+            c.homing = False
+        else:
+            c.open = False
+            c.home, c.homing = c.ret, True
+            c.zoom, c.vcx, c.vcy = 1.0, 0.5, 0.5
+        self._two = None
+        self._layout_buttons()
+
+    def _activate(self, c: Card):
+        kind = c.data.get("kind")
+        if kind in ("drive", "folder"):
+            self.open_path(c.data["path"])
+        else:
+            self._set_open(c, True)
+
+    def _neighbor(self, step: int):
+        c = self._opened()
+        if c is None:
+            return
+        kind = c.data["kind"]
+        idxs = [i for i, e in enumerate(self.entries) if e["kind"] == kind]
+        cur = next((i for i, e in enumerate(self.entries) if e is c.data), None)
+        if cur is None or len(idxs) < 2:
+            return
+        ti = idxs[(idxs.index(cur) + step) % len(idxs)]
+        page = ti // self.per_page
+        if page != self.page:
+            self.page = page
+            self._build_page()
+        else:
+            c.open, c.k = False, 0.0
+            c.x, c.y = c.ret
+        new = next((x for x in self.cards if x.data is self.entries[ti]), None)
+        if new is not None:
+            self._set_open(new, True)
+            new.x, new.y = self._open_center()          # swap in place: no trip across the screen
+            new.k, new.a = 0.8, 0.5
+
+    def _zoom_by(self, c: Card, f: float):
+        c.zoom = max(1.0, min(8.0, c.zoom * f))
+        self._clamp_view(c)
+
+    @staticmethod
+    def _clamp_view(c: Card):
+        if c.zoom <= 1.001:
+            c.vcx = c.vcy = 0.5
+            return
+        lo, hi = 0.5 / c.zoom, 1 - 0.5 / c.zoom
+        c.vcx, c.vcy = max(lo, min(hi, c.vcx)), max(lo, min(hi, c.vcy))
+
+    # ── buttons ──────────────────────────────────────────────────────────────────
+    def _layout_buttons(self):
+        W, H = self.w, self.h
+        bw, bh, g = BTN_W, BTN_H, BTN_GAP
+        op = self._opened()
+        out: list[dict] = []
+
+        def add(bid, x, y, w=bw, h=bh, on=True, label=""):
+            out.append({"id": bid, "x": x, "y": y, "w": w, "h": h, "on": on, "label": label})
+
+        y = 34
+        away = self.path is not None
+        add("home", 40, y, on=away)
+        add("up", 40 + bw + g, y, on=away)
+        add("explorer", 40 + 2 * (bw + g), y, on=away)
+        add("close", W - 40 - 56, y - 2, 56, 56)
+        add("sort", W - 96 - g - 130, y, 130, bh, label=SORT_LABEL[self.sort])
+        add("arrange", W - 96 - g - 130 - g - bw, y, on=bool(self.cards) and op is None)
+        yb = H - 112
+        if op is None:
+            if self.pages > 1:
+                add("pg_prev", W / 2 - bw - 78, yb, on=self.page > 0)
+                add("pg_next", W / 2 + 78, yb, on=self.page < self.pages - 1)
+        else:
+            kind = op.data["kind"]
+            same = sum(1 for e in self.entries if e["kind"] == kind)
+            total = 6 * bw + 5 * g
+            x0 = (W - total) / 2
+            specs = [("v_prev", same > 1), ("v_minus", kind in ("image", "text")), ("v_plus", kind in ("image", "text")),
+                     ("v_open", can_launch(op.data)), ("v_close", True), ("v_next", same > 1)]
+            for i, (bid, on) in enumerate(specs):
+                add(bid, x0 + i * (bw + g), yb, on=on)
+        self.buttons = out
+
+    def _btn_at(self, x: float, y: float, pad: float = 10.0) -> dict | None:
+        for b in self.buttons:
+            if b["x"] - pad <= x <= b["x"] + b["w"] + pad and b["y"] - pad <= y <= b["y"] + b["h"] + pad:
+                return b
+        return None
+
+    def _press(self, bid: str, now: float):
+        self.flash[bid] = now
+        op = self._opened()
+        if bid == "close":
+            self.close_requested = True
+        elif bid == "home":
+            self.go_root()
+        elif bid == "up":
+            self.go_up()
+        elif bid == "explorer":
+            if self.path is not None and not open_external(str(self.path)):
+                self.say("Could not open Explorer")
+        elif bid == "sort":
+            self.set_sort(SORTS[(SORTS.index(self.sort) + 1) % len(SORTS)])
+        elif bid == "arrange":
+            self.arrange()
+        elif bid == "pg_prev":
+            self.change_page(-1)
+        elif bid == "pg_next":
+            self.change_page(1)
+        elif op is None:
+            return
+        elif bid == "v_close":
+            self._set_open(op, False)
+        elif bid == "v_prev":
+            self._neighbor(-1)
+        elif bid == "v_next":
+            self._neighbor(1)
+        elif bid == "v_open":
+            if can_launch(op.data):
+                self.say("Opened in the default app" if open_external(op.data["path"]) else "Could not open it")
+        elif bid in ("v_plus", "v_minus"):
+            sign = 1 if bid == "v_plus" else -1
+            if op.data["kind"] == "image":
+                self._zoom_by(op, 1.4 if sign > 0 else 1 / 1.4)
+            elif op.data["kind"] == "text":
+                op.scroll = max(0.0, op.scroll + (-sign) * 180.0)        # + = up, − = down, like a scroll bar's arrows
 
     # ── input ────────────────────────────────────────────────────────────────────
     def to_screen(self, p) -> tuple[float, float]:
@@ -299,6 +732,26 @@ class Space:
         self.visible[0] = True
         self._interact(now, mouse=True)
 
+    def hover_at(self, x: float, y: float):
+        self.mouse_hover = (x, y)
+
+    def wheel(self, dy: float, x: float = 0.0, y: float = 0.0):
+        op = self._opened()
+        if op is None:
+            if time.time() - self._last_wheel > 0.25:
+                self._last_wheel = time.time()
+                self.change_page(1 if dy < 0 else -1)
+        elif op.data["kind"] == "image":
+            self._zoom_by(op, 1.18 if dy > 0 else 1 / 1.18)
+        elif op.data["kind"] == "text":
+            op.scroll = max(0.0, op.scroll - dy * 0.8)
+
+    def key_arrow(self, step: int):
+        if self._opened() is not None:
+            self._neighbor(step)
+        else:
+            self.change_page(step)
+
     # ── interaction ──────────────────────────────────────────────────────────────
     def _lost(self, hand: Hand, now: float):
         if hand.held is not None:
@@ -306,43 +759,50 @@ class Space:
         hand.pinching = False
         hand.pts = None
         hand.claw = hand.fist = hand.open = False
+        hand.fist_since, hand.fist_prog, hand.fist_fired = 0.0, 0.0, False
         hand.hist.clear()
         hand.palm = (0.0, 0.0)
 
+    def _card_at(self, x: float, y: float, pad: float = 14.0) -> Card | None:
+        op = self._opened()
+        pool = [op] if op is not None else self.cards
+        best, bd = None, 1e18
+        for c in pool:
+            if c.hit(x, y, pad):
+                d = ((x - c.x) / max(1.0, c.w)) ** 2 + ((y - c.y) / max(1.0, c.h)) ** 2          # nearest centre wins in the gaps
+                if d < bd:
+                    best, bd = c, d
+        return best
+
     def _grab(self, hand: Hand, now: float):
         x, y = hand.pos
-        if _d((x, y), (self.w - 60, 60)) < 46:
-            self.close_requested = True
+        b = self._btn_at(x, y)
+        if b is not None:
+            if b["on"] and now - self._last_press > 0.3:
+                self._last_press = now
+                self._press(b["id"], now)
             return
         op = self._opened()
-        for c in reversed(self.cards):                      # top-most first
-            if c.hit(x, y) and (op is None or c is op):
-                hand.held, hand.grab_off = c, (c.x - x, c.y - y)
-                hand.down_t, hand.down_pos = now, hand.palm
-                c.held = not c.open
-                return
-        if op is None and _d((x, y), (self.model.cx, self.model.cy)) < self.model.radius * 1.35:
-            hand.held, hand.down_t, hand.down_pos = "model", now, hand.palm
-            self.model.held = True
-            self.model.vyaw = self.model.vpitch = 0.0
+        c = self._card_at(x, y, 14.0 if op is None else 0.0)
+        if c is not None:
+            hand.held, hand.grab_off = c, (c.x - x, c.y - y)
+            hand.down_t, hand.down_pos, hand.last = now, hand.palm, hand.pos
+            c.held = not c.open
+        elif op is not None:                                  # a pinch on the dark background closes the open card
+            self._set_open(op, False)
 
     def _release(self, hand: Hand, now: float):
         h = hand.held
         hand.held = None
-        if h == "model":
-            self.model.held = False
-            return
         if not isinstance(h, Card):
             return
         h.held = False
         moved = _d(hand.palm, hand.down_pos)
-        if now - hand.down_t < TAP_SECONDS and moved < TAP_PIXELS:           # a tap: open / close the card
-            h.open = not h.open
+        if now - hand.down_t < TAP_SECONDS and moved < TAP_PIXELS:           # a tap: go in / open / close
             if h.open:
-                for o in self.cards:
-                    if o is not h:
-                        o.open = False
-            h.vx = h.vy = 0.0
+                self._set_open(h, False)
+            else:
+                self._activate(h)
             return
         if h.open:
             return
@@ -351,28 +811,28 @@ class Space:
         h.spin = max(-9.0, min(9.0, vx * 0.0021))
 
     def _interact(self, now: float, mouse: bool = False):
-        m = self.model
+        self._layout_buttons()
         act = [(i, h) for i, h in enumerate(self.hands) if self.visible[i]]
-        # two hands pinching the empty space: rotate + zoom the model
-        both = len(act) == 2 and all(h.pinching and h.held in (None, "model") for _, h in act)
+        op = self._opened()
+        # two hands pinching while a picture is open: zoom it
+        both = (op is not None and op.data["kind"] == "image" and len(act) == 2 and all(h.pinching for _, h in act))
         if both:
             a, b = act[0][1].pos, act[1][1].pos
-            ang, dist = math.atan2(b[1] - a[1], b[0] - a[0]), max(40.0, _d(a, b))
+            dist = max(40.0, _d(a, b))
             if self._two is None:
-                self._two = {"ang": ang, "dist": dist, "yaw": m.yaw, "pitch": m.pitch, "scale": m.scale, "my": (a[1] + b[1]) / 2}
+                self._two = {"dist": dist, "zoom": op.zoom}
                 for _, h in act:
-                    if h.held == "model":
-                        h.held = None
-                m.held = True
-            t = self._two
-            d_ang = (ang - t["ang"] + math.pi) % (2 * math.pi) - math.pi
-            m.yaw = t["yaw"] + d_ang * 2.0
-            m.pitch = max(-1.3, min(1.3, t["pitch"] + ((a[1] + b[1]) / 2 - t["my"]) * 0.004))
-            m.scale = max(0.5, min(2.2, t["scale"] * dist / t["dist"]))
+                    h.held = "zoom"
+                    if isinstance(h.held, Card):
+                        h.held.held = False
+            op.zoom = max(1.0, min(8.0, self._two["zoom"] * dist / self._two["dist"]))
+            self._clamp_view(op)
             return
         if self._two is not None:
             self._two = None
-            m.held = False
+            for _, h in act:
+                if h.held == "zoom":
+                    h.held = None
 
         for i, h in act:
             rise, fall = h._edge
@@ -380,29 +840,32 @@ class Space:
                 self._grab(h, now)
             if fall and h.held is not None:
                 self._release(h, now)
-            if h.pinching and h.held is not None:
-                if isinstance(h.held, Card):
-                    c = h.held
-                    c.vx = c.vy = 0.0
-                    if not c.open:
-                        tx, ty = h.pos[0] + h.grab_off[0], h.pos[1] + h.grab_off[1]
-                        c.x += (tx - c.x) * 0.45
-                        c.y += (ty - c.y) * 0.45
-                elif h.held == "model" and len(h.hist) >= 2:
-                    (t0, x0, y0), (t1, x1, y1) = h.hist[-2], h.hist[-1]
-                    dt = max(1e-3, t1 - t0)
-                    m.yaw += (x1 - x0) * 0.011
-                    m.pitch += (y1 - y0) * 0.011
-                    m.vyaw, m.vpitch = (x1 - x0) / dt * 0.011, (y1 - y0) / dt * 0.011
-            # fist, then open the hand over the model → explode
-            if h.open and h.fist_until > now and _d(h.palm, (m.cx, m.cy)) < m.radius * 1.9 and not mouse:
-                m.boom(now)
-                h.fist_until = 0.0
+            if h.pinching and isinstance(h.held, Card):
+                c = h.held
+                c.vx = c.vy = 0.0
+                if not c.open:
+                    tx, ty = h.pos[0] + h.grab_off[0], h.pos[1] + h.grab_off[1]
+                    c.x += (tx - c.x) * 0.45
+                    c.y += (ty - c.y) * 0.45
+                else:                                          # drag the open picture / scroll the open note
+                    dx, dy = h.pos[0] - h.last[0], h.pos[1] - h.last[1]
+                    if c.data["kind"] == "image" and c.zoom > 1.001:
+                        c.vcx -= dx / (c.w * c.zoom)
+                        c.vcy -= dy / (c.h * c.zoom)
+                        self._clamp_view(c)
+                    elif c.data["kind"] == "text":
+                        c.scroll = max(0.0, c.scroll - dy)
+                h.last = h.pos
+            # fist held for a second: back
+            if h.fist_prog >= 1.0 and not h.fist_fired and h.held is None and not mouse:
+                h.fist_fired = True
+                self.back()
+                return
 
         # claw: pull every free card into an orbit around the palm
         claw = next((h for _, h in act if h.claw and not h.pinching), None)
         self._claw_n = 0
-        if claw is not None:
+        if claw is not None and self._opened() is None:
             free = [c for c in self.cards if not c.held and not c.open]
             for j, c in enumerate(free):
                 a = 2 * math.pi * j / max(1, len(free)) + now * 0.6
@@ -413,31 +876,50 @@ class Space:
             for c in self.cards:
                 c._target = None
         # open-palm swipe pushes nearby cards
-        for _, h in act:
-            if h.open and h.speed > 900 and not mouse:
-                for c in self.cards:
-                    if not c.held and not c.open and _d(h.palm, (c.x, c.y)) < 170:
-                        d = max(1.0, _d(h.palm, (c.x, c.y)))
-                        c.vx += (c.x - h.palm[0]) / d * min(h.speed, 2200) * 0.5
-                        c.vy += (c.y - h.palm[1]) / d * min(h.speed, 2200) * 0.5
+        if self._opened() is None:
+            for _, h in act:
+                if h.open and h.speed > 900 and not mouse:
+                    for c in self.cards:
+                        if not c.held and _d(h.palm, (c.x, c.y)) < 170:
+                            d = max(1.0, _d(h.palm, (c.x, c.y)))
+                            c.vx += (c.x - h.palm[0]) / d * min(h.speed, 2200) * 0.5
+                            c.vy += (c.y - h.palm[1]) / d * min(h.speed, 2200) * 0.5
+                            c.homing = False
 
     # ── physics ──────────────────────────────────────────────────────────────────
+    def _update_hover(self):
+        pts = [h.pos for i, h in enumerate(self.hands) if self.visible[i]]
+        if not pts and self.mouse_hover is not None:
+            pts = [self.mouse_hover]
+        self.hover_btn, self.hover_card = None, None
+        for x, y in pts:
+            b = self._btn_at(x, y)
+            if b is not None:
+                self.hover_btn = b["id"]
+                continue
+            self.hover_card = self._card_at(x, y, 6.0) or self.hover_card
+
     def step(self, dt: float, now: float | None = None):
         now = time.time() if now is None else now
         dt = min(dt, 0.05)
-        self.model.step(dt, now)
+        self._layout_buttons()
+        self._update_hover()
+        ocx, ocy = self._open_center()
         for c in self.cards:
-            tgt_k = 1.0 if c.open else 0.0
-            c.k += (tgt_k - c.k) * min(1.0, 9 * dt)
+            c.ow, c.oh = self._open_dims(c)
+            c.k += ((1.0 if c.open else 0.0) - c.k) * min(1.0, 9 * dt)
             c.lift += ((1.0 if c.held else 0.0) - c.lift) * min(1.0, 12 * dt)
+            c.hov += ((1.0 if c is self.hover_card and not c.open else 0.0) - c.hov) * min(1.0, 14 * dt)
+            if now >= c.born:
+                c.a += (1.0 - c.a) * min(1.0, 8 * dt)
             if c.open:                                           # glide to the middle of the screen
-                c.x += (self.w / 2 - c.x) * min(1.0, 8 * dt)
-                c.y += (self.h / 2 - c.y) * min(1.0, 8 * dt)
+                c.x += (ocx - c.x) * min(1.0, 8 * dt)
+                c.y += (ocy - c.y) * min(1.0, 8 * dt)
                 c.angle *= math.exp(-9 * dt)
                 c.vx = c.vy = c.spin = 0.0
                 continue
             if c.held:
-                c.angle += (max(-0.35, min(0.35, c.vx * 0.0)) - c.angle) * min(1.0, 8 * dt)
+                c.angle += (0.0 - c.angle) * min(1.0, 8 * dt)
                 continue
             tgt = c._target
             if tgt is not None:                                  # claw orbit: critically-damped spring
@@ -446,24 +928,33 @@ class Space:
                 damp = math.exp(-9 * dt)
                 c.vx *= damp
                 c.vy *= damp
+            elif c.homing:                                       # fly back to the grid slot
+                c.vx += (c.home[0] - c.x) * 42 * dt
+                c.vy += (c.home[1] - c.y) * 42 * dt
+                damp = math.exp(-10 * dt)
+                c.vx *= damp
+                c.vy *= damp
+                if _d((c.x, c.y), c.home) < 1.5 and math.hypot(c.vx, c.vy) < 20:
+                    c.x, c.y, c.vx, c.vy, c.homing = c.home[0], c.home[1], 0.0, 0.0, False
             else:
                 damp = math.exp(-1.25 * dt)
                 c.vx *= damp
                 c.vy *= damp
                 c.phase += dt
                 if math.hypot(c.vx, c.vy) < 40:                  # idle: gentle floating
-                    c.y += math.sin(c.phase * 1.3) * 6 * dt
+                    c.y += math.sin(c.phase * 1.3) * 5 * dt
             c.x += c.vx * dt
             c.y += c.vy * dt
             hw, hh = c.w / 2, c.h / 2
+            top, bot = 96 + hh, self.h - 40 - hh
             if c.x < hw:
                 c.x, c.vx = hw, abs(c.vx) * 0.72
             elif c.x > self.w - hw:
                 c.x, c.vx = self.w - hw, -abs(c.vx) * 0.72
-            if c.y < hh:
-                c.y, c.vy = hh, abs(c.vy) * 0.72
-            elif c.y > self.h - hh:
-                c.y, c.vy = self.h - hh, -abs(c.vy) * 0.72
+            if c.y < top:
+                c.y, c.vy = top, abs(c.vy) * 0.72
+            elif c.y > bot:
+                c.y, c.vy = bot, -abs(c.vy) * 0.72
             c.angle += c.spin * dt
             c.spin *= math.exp(-2.2 * dt)
             if abs(c.spin) < 0.4:                                # settle upright (nearest turn)
@@ -472,8 +963,14 @@ class Space:
 
     @property
     def hint(self) -> str:
-        if self._opened():
-            return "Pinch the card to close it"
+        op = self._opened()
+        if op is not None:
+            kind = op.data["kind"]
+            if kind == "image":
+                return "Tap or Close = back · drag = move the picture · two hands = zoom · fist (hold) = back"
+            if kind == "text":
+                return "Drag up / down to scroll · tap or Close = back · fist (hold) = back"
+            return "Tap or Close = back"
         if self._claw_n:
             return "Claw: open your hand to release the cards"
-        return "Pinch = grab · tap = open · throw · claw = pull · two hands = rotate the model · fist → open on the model = explode"
+        return "Pinch = grab · tap a folder to go in · tap a picture to enlarge · claw = pull cards · fist (hold) = up one folder"
