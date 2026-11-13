@@ -2,6 +2,10 @@
 
 Logic and physics live in core/hand_space.py; this file only draws them. The mouse works too (handy without a camera).
 Pictures are decoded in background threads, so browsing a big photo folder never stalls the screen.
+
+GPU: when OpenGL is on (Settings → hw_accel, default) the whole overlay is drawn by the GPU through an OpenGL canvas;
+3D models (.obj / .stl) are shaded by their own shader and videos are decoded by the GPU (mpv hwdec) and rendered
+into a texture (ui/hs_gpu.py). Set "hand_space_gpu": false in the config to fall back to the CPU painter.
 """
 from __future__ import annotations
 
@@ -12,13 +16,20 @@ from concurrent.futures import Future, ThreadPoolExecutor
 
 from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QGuiApplication, QImage, QLinearGradient, QPainter, QPainterPath,
-                         QPen, QPixmap, QRadialGradient, QTextOption)
+                         QPen, QPixmap, QPolygonF, QRadialGradient, QSurfaceFormat, QTextOption)
 from PyQt6.QtWidgets import QWidget
 
 from core.hand_space import Card, Space, human_size
+from ui import hs_gpu
+from ui.fx import GL_ENABLED, samples_for
 from ui.hand_overlay import BONES
 from ui.overlay_utils import force_topmost
-from ui.theme import C
+from ui.theme import C, read_cfg
+
+try:
+    from PyQt6.QtOpenGLWidgets import QOpenGLWidget as _GLW
+except Exception:                                     # pragma: no cover - PyQt build without OpenGL widgets
+    _GLW = None
 
 THUMB_SIDE, LARGE_SIDE = 480, 3200
 _AL = Qt.AlignmentFlag
@@ -50,6 +61,25 @@ def _decode(path: str, side: int):
         return qi, qi.width(), qi.height(), (qi.width(), qi.height())
 
 
+if _GLW is not None:
+    class _Canvas(_GLW):
+        """Full-size OpenGL surface: every QPainter call of the overlay runs on the GPU, and 3D / video draw into it natively."""
+
+        def __init__(self, owner):
+            super().__init__(owner)
+            self._owner = owner
+            fmt = QSurfaceFormat()
+            fmt.setAlphaBufferSize(8)
+            fmt.setDepthBufferSize(24)
+            fmt.setStencilBufferSize(8)
+            fmt.setSamples(samples_for(str(read_cfg().get("quality") or "auto")))
+            self.setFormat(fmt)
+            self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)     # the overlay keeps the mouse / keyboard
+
+        def paintGL(self):
+            self._owner._paint_gl(self)
+
+
 class HandSpaceOverlay(QWidget):
     closed = pyqtSignal()
 
@@ -67,6 +97,27 @@ class HandSpaceOverlay(QWidget):
         self._bg: QPixmap | None = None
         self._idle = 0
         self._last = time.time()
+        # GPU: 3D models, video, OpenGL canvas
+        self._mesh = hs_gpu.GlMesh()
+        self._video = hs_gpu.GlVideo()
+        self._mpool = ThreadPoolExecutor(max_workers=1)
+        self._mjobs: dict[str, Future] = {}
+        self._mdata: dict[str, tuple] = {}
+        self._mfail: dict[str, str] = {}
+        self._tris: dict[str, int] = {}
+        self._vfail: dict[str, str] = {}
+        self._gl_tried = False
+        self._live = 0
+        self._anim = False
+        self._cm = QColor(C.PRI).getRgb()[:3]
+        self._ca = QColor(C.ACC).getRgb()[:3]
+        self._cv = None
+        if _GLW is not None and GL_ENABLED and read_cfg().get("hand_space_gpu", True):
+            try:
+                self._cv = _Canvas(self)
+                self._cv.setGeometry(self.rect())
+            except Exception:
+                self._cv = None
         self._t = QTimer(self)
         self._t.timeout.connect(self._frame)
 
@@ -84,6 +135,51 @@ class HandSpaceOverlay(QWidget):
         self.setFocus()
         self._last = time.time()
         self._t.start(20)
+        if self._cv is not None:
+            self._cv.setGeometry(self.rect())
+            QTimer.singleShot(700, self._check_gl)
+
+    def _check_gl(self):
+        """If the OpenGL canvas could not start on this machine, drop it and paint on the CPU as before."""
+        cv = self._cv
+        if cv is not None and self.isVisible() and not cv.isValid():
+            self._cv = None
+            cv.hide()
+            cv.deleteLater()
+            self._bg = None
+            QWidget.update(self)
+
+    def update(self, *a):                      # noqa: A003 - repaint the GL canvas when there is one
+        cv = self._cv
+        if cv is not None:
+            cv.update()
+        else:
+            super().update(*a)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if self._cv is not None:
+            self._cv.setGeometry(self.rect())
+
+    def _gpu_release(self):
+        """Free the video player and the 3D buffers (needs the canvas' context)."""
+        cv = self._cv
+        for f in self._mjobs.values():
+            f.cancel()
+        self._mjobs.clear()
+        self._mdata.clear()
+        self._mfail.clear()
+        self._vfail.clear()
+        if cv is None:
+            self._video.stop()
+            return
+        try:
+            cv.makeCurrent()
+            self._video.stop()
+            self._mesh.drop_all()
+            cv.doneCurrent()
+        except Exception:
+            pass
 
     def hide(self):                           # noqa: A003
         self._t.stop()
@@ -91,6 +187,7 @@ class HandSpaceOverlay(QWidget):
 
     def hideEvent(self, e):
         self._t.stop()
+        self._gpu_release()
         for f in self._jobs.values():
             f.cancel()
         self._jobs.clear()
@@ -112,12 +209,67 @@ class HandSpaceOverlay(QWidget):
         self.space.step(now - self._last, now)
         self._last = now
         self._poll_images()
+        self._poll_models()
         sp = self.space
-        busy = (any(sp.visible) or sp.opened is not None or sp.toast or self._jobs
+        op = sp.opened
+        if op is not None and op.cmds:                       # buttons / drags aimed at the video player
+            cmds, op.cmds = op.cmds, []
+            if op.data.get("kind") == "video":
+                self._video.apply(cmds)
+        if self._video.active and (op is None or op.data.get("kind") != "video" or not op.open):
+            self._gpu_stop_video()
+        anim, self._anim = self._anim, False
+        busy = (any(sp.visible) or op is not None or sp.toast or self._jobs or self._mjobs or anim
                 or any(c.a < 0.99 or c.homing or c.k > 0.01 or abs(c.vx) + abs(c.vy) > 2.0 for c in sp.cards))
         self._idle += 0 if busy else 1
         if busy or self._idle % 3 == 0:            # nothing is moving: repaint at a third of the rate (cards only float gently)
             self.update()
+
+    def _gpu_stop_video(self):
+        cv = self._cv
+        if cv is None:
+            self._video.stop()
+            return
+        try:
+            cv.makeCurrent()
+            self._video.stop()
+            cv.doneCurrent()
+        except Exception:
+            pass
+
+    # ── 3D models (background parse → GPU upload) ───────────────────────────────────
+    def _poll_models(self):
+        for path, fut in list(self._mjobs.items()):
+            if not fut.done():
+                continue
+            del self._mjobs[path]
+            try:
+                self._mdata[path] = fut.result()
+            except Exception as e:
+                self._mfail[path] = str(e) or "unreadable"
+
+    def _upload_models(self):
+        """Runs inside paintGL (the context is current): one upload per frame so a big model never freezes the screen."""
+        for path in list(self._mdata):
+            data, tris = self._mdata.pop(path)
+            if self._mesh.ok and self._mesh.upload(path, data):
+                self._tris[path] = tris
+            else:
+                self._mfail[path] = self._mesh.err or "GPU upload failed"
+            break
+
+    def _mesh_state(self, c: Card, opened: bool) -> str:
+        path = c.data["path"]
+        if self._mesh.has(path):
+            return "ready"
+        if path in self._mfail:
+            return "failed"
+        if path in self._mjobs or path in self._mdata:
+            return "loading"
+        if (opened or c.data.get("_sz", 0) <= hs_gpu.SMALL_MODEL_BYTES) and len(self._mjobs) < 2:
+            self._mjobs[path] = self._mpool.submit(hs_gpu.load_mesh, path)
+            return "loading"
+        return "idle"
 
     # ── pictures (background decode) ────────────────────────────────────────────────
     def _want(self, path: str, side: int, cache: OrderedDict, limit: int):
@@ -182,6 +334,8 @@ class HandSpaceOverlay(QWidget):
             sp._press("v_plus", time.time())
         elif k == Qt.Key.Key_Minus:
             sp._press("v_minus", time.time())
+        elif k == Qt.Key.Key_Space:
+            sp._press("v_play", time.time())
         else:
             super().keyPressEvent(e)
 
@@ -241,8 +395,32 @@ class HandSpaceOverlay(QWidget):
         return self._bg
 
     def paintEvent(self, _):
-        sp = self.space
+        if self._cv is not None:                      # the GL canvas covers this widget and paints everything
+            return
         p = QPainter(self)
+        self._draw(p)
+        p.end()
+
+    def _paint_gl(self, cv):
+        p = QPainter(cv)
+        if not p.isActive():
+            return
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        p.fillRect(cv.rect(), Qt.GlobalColor.transparent)
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        try:
+            self._draw(p)
+        finally:
+            p.end()
+
+    def _draw(self, p: QPainter):
+        sp = self.space
+        if self._cv is not None:
+            if not self._gl_tried:
+                self._gl_tried = True
+                self._mesh.init()
+            self._upload_models()
+        self._live = 0
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         W, H = self.width(), self.height()
@@ -319,7 +497,7 @@ class HandSpaceOverlay(QWidget):
         icon_rect = QRectF(r.center().x() - 11 - (22 if b["label"] else 0), r.center().y() - 11, 22, 22)
         if not b["label"]:
             icon_rect = QRectF(r.center().x() - 11, r.center().y() - 11, 22, 22)
-        self._icon(p, {"v_prev": "left", "v_next": "right", "pg_prev": "left", "pg_next": "right", "v_plus": "plus",
+        self._icon(p, {"v_prev": "left", "v_next": "right", "pg_prev": "left", "pg_next": "right", "v_plus": "plus", "v_play": "play" if (sp.opened is not None and sp.opened.paused) else "pause",
                        "v_minus": "minus", "v_open": "ext", "v_close": "close", "close": "close", "home": "home", "up": "up",
                        "explorer": "folder", "sort": "sort", "arrange": "grid"}[b["id"]], icon_rect, col)
         if b["label"]:
@@ -347,6 +525,12 @@ class HandSpaceOverlay(QWidget):
             L(cx, y + 2, cx, y + h - 2)
         elif kind == "minus":
             L(x + 2, cy, x + w - 2, cy)
+        elif kind == "play":
+            p.setBrush(col)
+            p.drawPolygon(QPolygonF([QPointF(x + 4, y + 2), QPointF(x + 4, y + h - 2), QPointF(x + w - 3, cy)]))
+        elif kind == "pause":
+            L(x + 6, y + 2, x + 6, y + h - 2)
+            L(x + w - 6, y + 2, x + w - 6, y + h - 2)
         elif kind == "up":
             L(cx, y + h - 2, cx, y + 3)
             L(cx - 6, y + 9, cx, y + 3)
@@ -383,7 +567,7 @@ class HandSpaceOverlay(QWidget):
         appear = c.a
         sc = (0.82 + 0.18 * appear) * (1.0 + 0.07 * c.lift + 0.04 * c.hov)
         kind = c.data.get("kind", "file")
-        accent = QColor({"drive": C.PRI, "folder": C.AMBER, "image": C.PRI, "text": C.ACC}.get(kind, C.TEXT_MED))
+        accent = QColor({"drive": C.PRI, "folder": C.AMBER, "image": C.PRI, "text": C.ACC, "model": C.ACC, "video": C.PRI}.get(kind, C.TEXT_MED))
         p.save()
         p.setOpacity(appear * (0.35 if faded else 1.0))
         p.translate(c.x, c.y)
@@ -409,6 +593,10 @@ class HandSpaceOverlay(QWidget):
         p.drawPath(hl)
         if kind == "image":
             self._card_image(p, c, rect)
+        elif kind == "model":
+            self._card_model(p, c, rect)
+        elif kind == "video":
+            self._card_video(p, c, rect)
         elif kind == "text":
             self._card_text(p, c, rect)
         elif kind in ("drive", "folder"):
@@ -620,6 +808,124 @@ class HandSpaceOverlay(QWidget):
             p.setFont(QFont("Segoe UI", 11, QFont.Weight.DemiBold))
             p.setPen(QColor(255, 255, 255, 230))
             p.drawText(QRectF(rect.right() - 100, rect.bottom() - 34, 84, 26), _AL.AlignRight | _AL.AlignVCenter, f"{int(c.zoom * 100)}%")
+
+    # 3D models: shaded by the GPU
+    def _card_model(self, p: QPainter, c: Card, rect: QRectF):
+        d = c.data
+        path = d["path"]
+        tr = rect.adjusted(4, 4, -4, -4)
+        g = QLinearGradient(tr.topLeft(), tr.bottomLeft())
+        g.setColorAt(0, QColor(12, 30, 60, 215))
+        g.setColorAt(1, QColor(3, 8, 20, 235))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(g)
+        p.drawRoundedRect(tr, 12, 12)
+        opened = c.k > 0.3
+        drawn = False
+        state = "off"
+        if self._cv is not None and self._mesh.ok:
+            state = self._mesh_state(c, opened)
+            if state == "ready" and (opened or (abs(c.angle) < 0.12 and self._live < 12)):
+                area = tr.adjusted(0, 4, 0, -(54 if opened else 44))
+                box = p.worldTransform().mapRect(area)
+                if opened:
+                    yaw, pitch, zoom = c.yaw, c.pitch, c.zoom
+                else:
+                    yaw, pitch, zoom = time.time() * 0.7 + c.phase, 0.35, 1.0
+                drawn = self._mesh.draw(p, self._cv, path, box, yaw, pitch, zoom, p.opacity(), self._cm, self._ca)
+                if drawn and not opened:
+                    self._live += 1
+                    self._anim = True
+        if not drawn:
+            msg = {"loading": "Loading 3D model…", "failed": self._mfail.get(path, "Can't show this model"),
+                   "off": "3D models need OpenGL (hw_accel on)", "idle": ""}.get(state, "")
+            f = QFont("Segoe UI", 26 if not opened else 40, QFont.Weight.Bold)
+            p.setFont(f)
+            p.setPen(QColor(C.ACC))
+            p.drawText(QRectF(tr.left(), tr.top() + 6, tr.width(), tr.height() - 70), _AL.AlignCenter, "3D")
+            if msg:
+                p.setFont(QFont("Segoe UI", 9))
+                p.setPen(QColor(C.TEXT_DIM))
+                p.drawText(QRectF(tr.left() + 10, tr.bottom() - 62, tr.width() - 20, 22), _AL.AlignCenter,
+                           QFontMetrics(p.font()).elidedText(msg, Qt.TextElideMode.ElideRight, int(tr.width() - 24)))
+        strip = QLinearGradient(0, tr.bottom() - 46, 0, tr.bottom())
+        strip.setColorAt(0, QColor(0, 0, 0, 0))
+        strip.setColorAt(1, QColor(0, 0, 0, 190))
+        p.fillRect(QRectF(tr.left(), tr.bottom() - 46, tr.width(), 46), QBrush(strip))
+        tris = self._tris.get(path)
+        title = d["title"] + (f"   ·   {tris:,} triangles" if opened and tris else "")
+        self._title(p, QRectF(rect.left() + 16, rect.bottom() - 34, rect.width() - 100, 26), title, 10 if not opened else 12, "#ffffff")
+        if c.k > 0.5 and abs(c.zoom - 1.0) > 0.01:
+            p.setFont(QFont("Segoe UI", 11, QFont.Weight.DemiBold))
+            p.setPen(QColor(255, 255, 255, 230))
+            p.drawText(QRectF(rect.right() - 100, rect.bottom() - 34, 84, 26), _AL.AlignRight | _AL.AlignVCenter, f"{int(c.zoom * 100)}%")
+
+    # videos: decoded and rendered by the GPU (mpv)
+    def _card_video(self, p: QPainter, c: Card, rect: QRectF):
+        d = c.data
+        path = d["path"]
+        tr = rect.adjusted(4, 4, -4, -4)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(0, 0, 0, 215))
+        p.drawRoundedRect(tr, 12, 12)
+        playing = False
+        err = self._vfail.get(path, "")
+        if c.open and self._cv is not None and not err:
+            v = self._video
+            if not v.active or v.path != path:
+                if not v.start(path):
+                    self._vfail[path] = v.err or "player error"
+                    err = self._vfail[path]
+            if v.active and not err:
+                box = p.worldTransform().mapRect(tr)
+                playing = v.draw(p, self._cv, box, p.opacity(), (c.ow - 8, c.oh - 8))
+                pos, dur, asp, _ended = v.info()
+                if asp and abs(asp - (d.get("aspect") or 0.0)) > 0.01:
+                    d["aspect"] = asp
+                if not playing and v.err:
+                    self._vfail[path] = v.err
+                    err = v.err
+                if playing:
+                    bar = QRectF(tr.left() + 18, tr.bottom() - 58, tr.width() - 36, 5)
+                    p.setPen(Qt.PenStyle.NoPen)
+                    p.setBrush(QColor(255, 255, 255, 60))
+                    p.drawRoundedRect(bar, 2.5, 2.5)
+                    if dur > 0:
+                        p.setBrush(QColor(C.PRI))
+                        p.drawRoundedRect(QRectF(bar.left(), bar.top(), max(5.0, bar.width() * min(1.0, pos / dur)), 5), 2.5, 2.5)
+                    p.setFont(QFont("Segoe UI", 9))
+                    p.setPen(QColor(255, 255, 255, 230))
+                    fm = lambda s: f"{int(s) // 60}:{int(s) % 60:02d}"         # noqa: E731
+                    p.drawText(QRectF(bar.left(), bar.top() - 22, bar.width(), 20), _AL.AlignRight | _AL.AlignVCenter,
+                               f"{fm(pos)} / {fm(dur)}")
+                    if c.paused:
+                        p.setBrush(QColor(0, 0, 0, 120))
+                        p.drawEllipse(tr.center(), 38, 38)
+                        p.setBrush(QColor(255, 255, 255, 235))
+                        cx, cy = tr.center().x(), tr.center().y()
+                        p.drawPolygon(QPolygonF([QPointF(cx - 11, cy - 18), QPointF(cx - 11, cy + 18), QPointF(cx + 19, cy)]))
+                    self._anim = True
+        if not playing:
+            cx, cy = tr.center().x(), tr.center().y() - 12
+            p.setPen(QPen(QColor(C.PRI), 2))
+            p.setBrush(QColor(110, 231, 255, 36))
+            p.drawEllipse(QPointF(cx, cy), 28, 28)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(C.PRI))
+            p.drawPolygon(QPolygonF([QPointF(cx - 9, cy - 13), QPointF(cx - 9, cy + 13), QPointF(cx + 14, cy)]))
+            msg = err and f"GPU video unavailable: {err}"[:120]
+            if not msg and c.open and self._cv is None:
+                msg = "GPU video needs OpenGL (hw_accel on)"
+            if msg:
+                p.setFont(QFont("Segoe UI", 9))
+                p.setPen(QColor(C.AMBER))
+                p.drawText(QRectF(tr.left() + 14, tr.bottom() - 96, tr.width() - 28, 40), _AL.AlignCenter | Qt.TextFlag.TextWordWrap,
+                           msg + "  ·  ⧉ opens it in your default player")
+        strip = QLinearGradient(0, tr.bottom() - 46, 0, tr.bottom())
+        strip.setColorAt(0, QColor(0, 0, 0, 0))
+        strip.setColorAt(1, QColor(0, 0, 0, 190))
+        p.fillRect(QRectF(tr.left(), tr.bottom() - 46, tr.width(), 46), QBrush(strip))
+        self._title(p, QRectF(rect.left() + 16, rect.bottom() - 34, rect.width() - 100, 26), d["title"], 10 if c.k < 0.5 else 12, "#ffffff")
 
     # ── hands ────────────────────────────────────────────────────────────────────────
     def _skeleton(self) -> bool:

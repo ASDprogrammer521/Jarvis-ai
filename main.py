@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import platform as _platform
 import subprocess as _subprocess
 
@@ -32,10 +34,39 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-import sounddevice as sd
 import numpy as np
-from google import genai
-from google.genai import types
+
+
+class _LazyModule:
+    """Imports the real module on first attribute access (keeps startup fast)."""
+    def __init__(self, name):
+        self.__dict__["_name"] = name
+        self.__dict__["_mod"] = None
+
+    def _load(self):
+        m = self.__dict__["_mod"]
+        if m is None:
+            import importlib
+            m = importlib.import_module(self.__dict__["_name"])
+            self.__dict__["_mod"] = m
+        return m
+
+    def __getattr__(self, item):
+        return getattr(self._load(), item)
+
+
+sd = _LazyModule("sounddevice")
+genai = _LazyModule("google.genai")
+types = _LazyModule("google.genai.types")
+
+
+def _prewarm_heavy_imports():
+    """Load the heavy SDKs in the background while the window is being built."""
+    for m in (genai, types, sd):
+        try:
+            m._load()
+        except Exception:
+            pass
 
 from ui import JarvisUI
 from memory.memory_manager import (
@@ -1956,9 +1987,49 @@ class JarvisLive:
             print(f"[JARVIS] Reconnecting in {delay}s...")
             await asyncio.sleep(delay)
 
+def _install_memory_tuning(app):
+    """Less garbage-collector work, and (Windows) hand unused memory back to the OS while Jarvis is not in front."""
+    def _settle():
+        try:
+            import gc
+            gc.collect()
+            gc.freeze()                                # startup objects never need to be scanned again
+            gc.set_threshold(20000, 20, 20)
+        except Exception:
+            pass
+    try:
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(15000, _settle)
+        if _platform.system() != "Windows":
+            return
+        import ctypes
+        k32, ps = ctypes.windll.kernel32, ctypes.windll.psapi
+        k32.GetCurrentProcess.restype = ctypes.c_void_p
+        ps.EmptyWorkingSet.argtypes = [ctypes.c_void_p]
+
+        def trim():
+            try:
+                ps.EmptyWorkingSet(k32.GetCurrentProcess())
+            except Exception:
+                pass
+
+        def trim_if_idle():
+            if app.activeWindow() is None:             # Jarvis is in the background
+                trim()
+        QTimer.singleShot(20000, trim)
+        tm = QTimer(app)
+        tm.setInterval(60000)
+        tm.timeout.connect(trim_if_idle)
+        tm.start()
+        app._trim_timer = tm
+    except Exception:
+        pass
+
+
 def main():
     from core.console import install_terminal_styling
     install_terminal_styling()
+    threading.Thread(target=_prewarm_heavy_imports, daemon=True, name="prewarm").start()
     ui = JarvisUI()
     shutdown_requested = threading.Event()
     jarvis_ref = {"instance": None}
@@ -1972,6 +2043,7 @@ def main():
     app = getattr(ui.root, "_app", None)
     if app is not None:
         app.aboutToQuit.connect(request_shutdown)
+        _install_memory_tuning(app)
 
     def runner():
         jarvis = None

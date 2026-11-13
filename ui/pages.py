@@ -31,7 +31,7 @@ class LogoMark(QWidget):
         self._tm.start(120)
 
     def _tick(self):
-        if self.isVisible():
+        if self.isVisible() and not self.window().isMinimized():
             self._t += 0.12
             self.update()
 

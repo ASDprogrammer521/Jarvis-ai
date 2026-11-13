@@ -46,6 +46,9 @@ TEXT_EXT = {".md", ".markdown", ".txt", ".log", ".json", ".csv", ".ini", ".cfg",
             ".bat", ".cmd", ".ps1", ".tex", ".srt"}
 PLAIN_EXT = {".md", ".markdown", ".txt", ".log", ".tex", ".srt"}      # shown in the normal font; the rest is code (mono)
 IMG_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".ico"}
+MODEL_EXT = {".obj", ".stl"}                                   # 3D models: drawn on the GPU, turned with the hand
+VIDEO_EXT = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".wmv", ".flv", ".mpg", ".mpeg"}   # played by mpv on the GPU
+SEEK_STEP = 10.0                                               # seconds skipped by the video's − / + buttons
 # never launched from a gesture: a stray pinch must not start a program
 NO_LAUNCH = {".exe", ".bat", ".cmd", ".com", ".msi", ".scr", ".ps1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh",
              ".lnk", ".reg", ".dll", ".jar", ".hta", ".cpl", ".pif", ".msc", ".sh", ".py", ".pyw", ".appx", ".msix"}
@@ -184,6 +187,10 @@ def list_dir(path: str | Path, sort: str = "name") -> list[dict]:
                 label = (ext[1:] or "file").upper()
                 if ext in IMG_EXT:
                     e.update(kind="image", image=de.path, sub=f"{label} · {size}")
+                elif ext in MODEL_EXT:
+                    e.update(kind="model", sub=f"3D · {label} · {size}")
+                elif ext in VIDEO_EXT:
+                    e.update(kind="video", sub=f"Video · {label} · {size}")
                 elif ext in TEXT_EXT:
                     e.update(kind="text", sub=f"{label} · {size}", mono=ext not in PLAIN_EXT)
                 else:
@@ -229,7 +236,7 @@ def load_cards(folder: str | Path | None, limit: int = 40) -> list[dict]:
 
 
 def can_launch(e: dict) -> bool:
-    return e.get("kind") in ("image", "text", "file") and e.get("_ext", "") not in NO_LAUNCH
+    return e.get("kind") in ("image", "text", "file", "model", "video") and e.get("_ext", "") not in NO_LAUNCH
 
 
 def open_external(path: str) -> bool:
@@ -262,6 +269,9 @@ class Card:
         self.ow, self.oh = 560.0, 380.0       # size when opened (depends on the picture's shape / the screen)
         self.zoom, self.vcx, self.vcy = 1.0, 0.5, 0.5        # opened picture: zoom and the centre of the view
         self.scroll = 0.0                    # opened note: how far it is scrolled (px)
+        self.yaw, self.pitch = 0.6, 0.3      # opened 3D model: its turn (radians); self.zoom scales it
+        self.paused = False                  # opened video
+        self.cmds: list = []                 # commands for the player: ("seek", seconds) / ("pause", bool)
         self.ret = (x, y)                    # where it sits in the grid, so it flies back after closing
         self.home = (x, y)
         self.homing = False
@@ -426,6 +436,17 @@ class Space:
             return max(w, CARD_W), max(h, CARD_H)
         if kind == "text":
             return min(self.w * 0.62, 1000.0), ah
+        if kind == "video":
+            asp = c.data.get("aspect") or 16 / 9
+            w = aw
+            h = w / asp
+            if h > ah:
+                h = ah
+                w = h * asp
+            return max(w, CARD_W), max(h, CARD_H)
+        if kind == "model":
+            side = min(self.w * 0.6, ah * 1.25)
+            return max(side, CARD_W), ah
         return min(self.w * 0.42, 640.0), min(ah, 380.0)
 
     # ── navigation ───────────────────────────────────────────────────────────────
@@ -562,6 +583,7 @@ class Space:
                     self._set_open(o, False)
             c.ret = (c.x, c.y)
             c.open, c.zoom, c.vcx, c.vcy, c.scroll = True, 1.0, 0.5, 0.5, 0.0
+            c.yaw, c.pitch, c.paused, c.cmds = 0.6, 0.3, False, []
             c.homing = False
         else:
             c.open = False
@@ -638,10 +660,14 @@ class Space:
         else:
             kind = op.data["kind"]
             same = sum(1 for e in self.entries if e["kind"] == kind)
-            total = 6 * bw + 5 * g
+            specs = [("v_prev", same > 1)]
+            if kind == "video":
+                specs += [("v_minus", True), ("v_play", True), ("v_plus", True)]
+            else:
+                specs += [("v_minus", kind in ("image", "text", "model")), ("v_plus", kind in ("image", "text", "model"))]
+            specs += [("v_open", can_launch(op.data)), ("v_close", True), ("v_next", same > 1)]
+            total = len(specs) * bw + (len(specs) - 1) * g
             x0 = (W - total) / 2
-            specs = [("v_prev", same > 1), ("v_minus", kind in ("image", "text")), ("v_plus", kind in ("image", "text")),
-                     ("v_open", can_launch(op.data)), ("v_close", True), ("v_next", same > 1)]
             for i, (bid, on) in enumerate(specs):
                 add(bid, x0 + i * (bw + g), yb, on=on)
         self.buttons = out
@@ -683,10 +709,18 @@ class Space:
         elif bid == "v_open":
             if can_launch(op.data):
                 self.say("Opened in the default app" if open_external(op.data["path"]) else "Could not open it")
+        elif bid == "v_play":
+            if op.data["kind"] == "video":
+                op.paused = not op.paused
+                op.cmds.append(("pause", op.paused))
         elif bid in ("v_plus", "v_minus"):
             sign = 1 if bid == "v_plus" else -1
             if op.data["kind"] == "image":
                 self._zoom_by(op, 1.4 if sign > 0 else 1 / 1.4)
+            elif op.data["kind"] == "model":
+                op.zoom = max(0.4, min(6.0, op.zoom * (1.25 if sign > 0 else 1 / 1.25)))
+            elif op.data["kind"] == "video":
+                op.cmds.append(("seek", SEEK_STEP * sign))
             elif op.data["kind"] == "text":
                 op.scroll = max(0.0, op.scroll + (-sign) * 180.0)        # + = up, − = down, like a scroll bar's arrows
 
@@ -745,6 +779,10 @@ class Space:
             self._zoom_by(op, 1.18 if dy > 0 else 1 / 1.18)
         elif op.data["kind"] == "text":
             op.scroll = max(0.0, op.scroll - dy * 0.8)
+        elif op.data["kind"] == "model":
+            op.zoom = max(0.4, min(6.0, op.zoom * (1.12 if dy > 0 else 1 / 1.12)))
+        elif op.data["kind"] == "video":
+            op.cmds.append(("seek", 5.0 if dy > 0 else -5.0))
 
     def key_arrow(self, step: int):
         if self._opened() is not None:
@@ -815,7 +853,7 @@ class Space:
         act = [(i, h) for i, h in enumerate(self.hands) if self.visible[i]]
         op = self._opened()
         # two hands pinching while a picture is open: zoom it
-        both = (op is not None and op.data["kind"] == "image" and len(act) == 2 and all(h.pinching for _, h in act))
+        both = (op is not None and op.data["kind"] in ("image", "model") and len(act) == 2 and all(h.pinching for _, h in act))
         if both:
             a, b = act[0][1].pos, act[1][1].pos
             dist = max(40.0, _d(a, b))
@@ -825,8 +863,9 @@ class Space:
                     h.held = "zoom"
                     if isinstance(h.held, Card):
                         h.held.held = False
-            op.zoom = max(1.0, min(8.0, self._two["zoom"] * dist / self._two["dist"]))
-            self._clamp_view(op)
+            op.zoom = max(0.4 if op.data["kind"] == "model" else 1.0, min(8.0, self._two["zoom"] * dist / self._two["dist"]))
+            if op.data["kind"] == "image":
+                self._clamp_view(op)
             return
         if self._two is not None:
             self._two = None
@@ -855,6 +894,11 @@ class Space:
                         self._clamp_view(c)
                     elif c.data["kind"] == "text":
                         c.scroll = max(0.0, c.scroll - dy)
+                    elif c.data["kind"] == "model":                     # drag = turn the model in your hand
+                        c.yaw += dx * 0.008
+                        c.pitch = max(-1.5, min(1.5, c.pitch + dy * 0.008))
+                    elif c.data["kind"] == "video" and dx:              # drag sideways = scrub
+                        c.cmds.append(("seek", dx / max(200.0, c.w) * 90.0))
                 h.last = h.pos
             # fist held for a second: back
             if h.fist_prog >= 1.0 and not h.fist_fired and h.held is None and not mouse:
@@ -970,6 +1014,10 @@ class Space:
                 return "Tap or Close = back · drag = move the picture · two hands = zoom · fist (hold) = back"
             if kind == "text":
                 return "Drag up / down to scroll · tap or Close = back · fist (hold) = back"
+            if kind == "model":
+                return "Drag = turn the model · two hands = zoom · tap or Close = back · fist (hold) = back"
+            if kind == "video":
+                return "Drag sideways = scrub · ▶ = play / pause · tap or Close = back · fist (hold) = back"
             return "Tap or Close = back"
         if self._claw_n:
             return "Claw: open your hand to release the cards"

@@ -48,14 +48,25 @@ def save_api_keys(gemini_api_key: str) -> None:
 
     _secure_write(CONFIG_FILE, json.dumps(data, indent=2))
 
+_CFG_CACHE: dict = {"key": None, "data": {}}
+
+
 def load_api_keys() -> dict:
-    if not CONFIG_FILE.exists():
-        return {}
+    """The config, re-read from disk only when the file changed (it is polled every second by the UI)."""
     try:
-        return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-    except Exception as e:
-        print(f"❌ Failed to load api_keys.json: {e}")
+        st = CONFIG_FILE.stat()
+    except OSError:
         return {}
+    key = (st.st_mtime_ns, st.st_size)
+    if _CFG_CACHE["key"] != key:
+        try:
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        except Exception as e:
+            print(f"❌ Failed to load api_keys.json: {e}")
+            return {}
+        _CFG_CACHE["key"], _CFG_CACHE["data"] = key, data
+    import copy
+    return copy.deepcopy(_CFG_CACHE["data"])          # callers modify what they get, so hand out a copy
 
 def get_gemini_key() -> str | None:
     import os

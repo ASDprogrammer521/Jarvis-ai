@@ -113,9 +113,19 @@ def config_path() -> Path:
     return ROOT / "config" / "api_keys.json"
 
 
+_CFG = {"key": None, "data": {}}
+
+
 def read_cfg() -> dict:
+    """Config file contents; parsed again only when the file changed (called from timers)."""
     try:
-        return json.loads(config_path().read_text(encoding="utf-8"))
+        path = config_path()
+        st = path.stat()
+        key = (st.st_mtime_ns, st.st_size)
+        if _CFG["key"] != key:
+            _CFG["data"] = json.loads(path.read_text(encoding="utf-8"))
+            _CFG["key"] = key
+        return json.loads(json.dumps(_CFG["data"]))
     except Exception:
         return {}
 

@@ -39,7 +39,7 @@ class Hero(QWidget):
 
     def showEvent(self, e):
         super().showEvent(e)
-        self._tm.start(33)
+        self._tm.start(45)
 
     def hideEvent(self, e):
         self._tm.stop()

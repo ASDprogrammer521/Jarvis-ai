@@ -293,7 +293,7 @@ class StatePill(QWidget):
         self._t = 0.0
         self._tm = QTimer(self)
         self._tm.timeout.connect(self._tick)
-        self._tm.start(90)
+        self._tm.start(120)
         self.setMinimumWidth(0)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
@@ -310,8 +310,8 @@ class StatePill(QWidget):
         self.update()
 
     def _tick(self):
-        if self.isVisible():
-            self._t += 0.09
+        if self.isVisible() and not self.window().isMinimized():
+            self._t += 0.12                                   # 120 ms steps at the same animation speed as before
             self.update()
 
     def paintEvent(self, _):

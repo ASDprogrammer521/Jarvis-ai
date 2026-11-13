@@ -80,6 +80,8 @@ class Backdrop(_BackdropBase):
         self._last_t = time.time()
         self._tick_n = 0
         self._small_t = 0.0
+        self._cards: list = []
+        self._cards_t = 0.0
         self._slow = 0
         self._dirty = True
         self._small: QImage | None = None
@@ -135,9 +137,15 @@ class Backdrop(_BackdropBase):
             if not GL_ENABLED:
                 self.update()
             if forced or GL_ENABLED or self._tick_n % 2 == 0:
-                for c in self.findChildren(GlassCard):
-                    if c.isVisible():
-                        c.update()
+                if now - self._cards_t > 2.0:                        # findChildren walks the whole widget tree: cache it
+                    self._cards_t = now
+                    self._cards = self.findChildren(GlassCard)
+                for c in self._cards:
+                    try:
+                        if c.isVisible():
+                            c.update()
+                    except RuntimeError:                             # the card was deleted since the last refresh
+                        self._cards_t = 0.0
 
     def _specs(self):
         return ((C.PRI, .30, .50, .20, .27), (C.ACC, .70, .60, .27, .31),
@@ -165,7 +173,7 @@ class Backdrop(_BackdropBase):
         p = QPainter(self._small)
         p.fillRect(0, 0, W, H, qcol(C.BG))
         if self.aurora:
-            for i, spec in enumerate(self._specs()):
+            for i, spec in enumerate(self._specs()[:3]):
                 col, cx, cy, r = self._blob(i, spec, W, H)
                 g = QRadialGradient(cx, cy, r)
                 g.setColorAt(0.0, qcol(col, 95))
@@ -182,7 +190,7 @@ class Backdrop(_BackdropBase):
         if self.aurora:
             lite = bool(self.stage is not None and self.stage.lite)
             p.setPen(Qt.PenStyle.NoPen)
-            for i, spec in enumerate(self._specs()[:2 if lite else 4]):
+            for i, spec in enumerate(self._specs()[:2 if lite else 3]):          # the 4th (dimmest) glow is barely visible
                 col, cx, cy, r = self._blob(i, spec, W, H)
                 g = QRadialGradient(cx, cy, r)
                 g.setColorAt(0.0, qcol(col, 95))
@@ -198,7 +206,7 @@ class Backdrop(_BackdropBase):
         BW, BH = max(1, self.width()), max(1, self.height())
         t = self._t
         p.setPen(Qt.PenStyle.NoPen)
-        for x, y, d, ph in self._stars:
+        for x, y, d, ph in self._stars[:90]:                    # 90 of the 120 stars: same sky, 25 % fewer draws
             px = (x * BW + t * 6 * (0.3 + d)) % BW - ox
             py = (y * BH - t * 3 * d) % BH - oy
             if w is not None and not (-4 <= px <= w + 4 and -4 <= py <= h + 4):
@@ -767,9 +775,11 @@ class Stage3D(QWidget):
         except Exception:
             focused = True
         if self.lite:
-            want = 40 if active else 80
+            want = 45 if active else 110
         else:
-            want = 33 if active else 62
+            want = 38 if active else 90
+        if not active and self.state == "SLEEPING":                # asleep and silent: a slow idle drift is enough
+            want = max(want, 160)
         if not focused or self.paused or not self.isVisible():
             want = 200
         if self._tm.interval() != want:

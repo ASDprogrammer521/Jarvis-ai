@@ -121,7 +121,7 @@ class DevOverlay(QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
-        self._anim.start(33)
+        self._anim.start(40)
         self._poll.start(1000)
 
     def hide(self):                               # noqa: A003
