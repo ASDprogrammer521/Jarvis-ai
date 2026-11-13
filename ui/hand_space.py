@@ -10,6 +10,7 @@ into a texture (ui/hs_gpu.py). Set "hand_space_gpu": false in the config to fall
 from __future__ import annotations
 
 import math
+import os
 import time
 from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -23,6 +24,7 @@ from core.hand_space import Card, Space, human_size
 from ui import hs_gpu
 from ui.fx import GL_ENABLED, samples_for
 from ui.hand_overlay import BONES
+from ui.mesh_formats import HEAVY_EXT
 from ui.overlay_utils import force_topmost
 from ui.theme import C, read_cfg
 
@@ -33,6 +35,35 @@ except Exception:                                     # pragma: no cover - PyQt 
 
 THUMB_SIDE, LARGE_SIDE = 480, 3200
 _AL = Qt.AlignmentFlag
+PROFILE = bool(os.environ.get("JARVIS_PROFILE"))               # set JARVIS_PROFILE=1 to print timings every 3 s
+
+_FONTS: dict = {}
+_ELIDE: dict = {}
+_FM: dict = {}
+
+
+def _F(size, weight=None, family: str = "Segoe UI") -> QFont:
+    """Shared QFont objects: building a font (and its metrics) for every card on every frame was pure CPU waste."""
+    k = (family, size, weight)
+    f = _FONTS.get(k)
+    if f is None:
+        f = QFont(family, size) if weight is None else QFont(family, size, weight)
+        _FONTS[k] = f
+    return f
+
+
+def _elided(text: str, size: int, width: int) -> str:
+    k = (text, size, width)
+    r = _ELIDE.get(k)
+    if r is None:
+        fm = _FM.get(size)
+        if fm is None:
+            fm = _FM[size] = QFontMetrics(_F(size, QFont.Weight.DemiBold))
+        r = fm.elidedText(text, Qt.TextElideMode.ElideMiddle, width)
+        if len(_ELIDE) > 800:
+            _ELIDE.clear()
+        _ELIDE[k] = r
+    return r
 
 
 def _decode(path: str, side: int):
@@ -89,6 +120,7 @@ class HandSpaceOverlay(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
         self.space = Space(1920, 1080)
+        self.space.on_release = self._release_files
         self._thumbs: OrderedDict[str, QPixmap] = OrderedDict()
         self._large: OrderedDict[str, QPixmap] = OrderedDict()
         self._jobs: dict[tuple, Future] = {}
@@ -107,6 +139,9 @@ class HandSpaceOverlay(QWidget):
         self._tris: dict[str, int] = {}
         self._vfail: dict[str, str] = {}
         self._gl_tried = False
+        self._pre = False
+        self._fn = 0
+        self._pt = [0.0, 0]
         self._live = 0
         self._anim = False
         self._cm = QColor(C.PRI).getRgb()[:3]
@@ -134,7 +169,7 @@ class HandSpaceOverlay(QWidget):
         self.activateWindow()
         self.setFocus()
         self._last = time.time()
-        self._t.start(20)
+        self._t.start(28)
         if self._cv is not None:
             self._cv.setGeometry(self.rect())
             QTimer.singleShot(700, self._check_gl)
@@ -217,11 +252,18 @@ class HandSpaceOverlay(QWidget):
             if op.data.get("kind") == "video":
                 self._video.apply(cmds)
         if self._video.active and (op is None or op.data.get("kind") != "video" or not op.open):
-            self._gpu_stop_video()
+            self._video.park()                               # film closed: keep the player ready for the next one
+        self._fn += 1
+        if not self._pre and self._fn % 15 == 0 and any(e.get("kind") == "video" for e in sp.entries):
+            self._pre = True                                 # this folder has films: build the player in the background now
+            hs_gpu.prewarm_player()
         anim, self._anim = self._anim, False
         busy = (any(sp.visible) or op is not None or sp.toast or self._jobs or self._mjobs or anim
                 or any(c.a < 0.99 or c.homing or c.k > 0.01 or abs(c.vx) + abs(c.vy) > 2.0 for c in sp.cards))
         self._idle += 0 if busy else 1
+        want = 16 if (self._video.active and op is not None and not op.paused) else 28      # film: smooth; otherwise ~36 fps is plenty (camera = 30)
+        if self._t.interval() != want:
+            self._t.setInterval(want)
         if busy or self._idle % 3 == 0:            # nothing is moving: repaint at a third of the rate (cards only float gently)
             self.update()
 
@@ -266,7 +308,8 @@ class HandSpaceOverlay(QWidget):
             return "failed"
         if path in self._mjobs or path in self._mdata:
             return "loading"
-        if (opened or c.data.get("_sz", 0) <= hs_gpu.SMALL_MODEL_BYTES) and len(self._mjobs) < 2:
+        heavy = os.path.splitext(path)[1].lower() in HEAVY_EXT           # STEP / USD are slow to read: only when opened
+        if (opened or (not heavy and c.data.get("_sz", 0) <= hs_gpu.SMALL_MODEL_BYTES)) and len(self._mjobs) < 2:
             self._mjobs[path] = self._mpool.submit(hs_gpu.load_mesh, path)
             return "loading"
         return "idle"
@@ -314,9 +357,41 @@ class HandSpaceOverlay(QWidget):
                 while len(self._large) > 3:
                     self._large.popitem(last=False)
 
+    def _release_files(self, paths):
+        """Space is about to rename / move / delete files: let go of a video that may hold one open."""
+        try:
+            if self._video.active:
+                self._video.park()
+        except Exception:
+            pass
+
     # ── input fallback: mouse / keyboard ─────────────────────────────────────────────
     def keyPressEvent(self, e):
         k, sp = e.key(), self.space
+        mods = e.modifiers()
+        ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
+        if sp.prompt is not None:                                    # the rename box takes all typing
+            names = {Qt.Key.Key_Return: "enter", Qt.Key.Key_Enter: "enter", Qt.Key.Key_Escape: "esc", Qt.Key.Key_Backspace: "backspace",
+                     Qt.Key.Key_Delete: "delete", Qt.Key.Key_Left: "left", Qt.Key.Key_Right: "right", Qt.Key.Key_Home: "home", Qt.Key.Key_End: "end"}
+            if ctrl and k == Qt.Key.Key_A:
+                sp.prompt_key("", "all")
+            elif k in names:
+                sp.prompt_key("", names[k])
+            elif not ctrl:
+                sp.prompt_key(e.text())
+            return
+        if ctrl and k in (Qt.Key.Key_C, Qt.Key.Key_X, Qt.Key.Key_V, Qt.Key.Key_A):
+            if k == Qt.Key.Key_A:
+                sp.select_all()
+            else:
+                sp._press({Qt.Key.Key_C: "a_copy", Qt.Key.Key_X: "a_cut", Qt.Key.Key_V: "a_paste"}[k], time.time())
+            return
+        if k == Qt.Key.Key_F2:
+            sp._press("a_rename", time.time())
+            return
+        if k == Qt.Key.Key_Delete:
+            sp._press("a_delete", time.time())
+            return
         if k == Qt.Key.Key_Escape:
             if sp.opened is not None:
                 sp.back()
@@ -402,6 +477,18 @@ class HandSpaceOverlay(QWidget):
         p.end()
 
     def _paint_gl(self, cv):
+        t0 = time.perf_counter() if PROFILE else 0.0
+        try:
+            self._paint_gl_inner(cv)
+        finally:
+            if PROFILE:
+                self._pt[0] += time.perf_counter() - t0
+                self._pt[1] += 1
+                if self._pt[1] >= 90:
+                    print(f"[hand space] paint {self._pt[0] / self._pt[1] * 1000:.1f} ms/frame · {len(self.space.cards)} cards")
+                    self._pt = [0.0, 0]
+
+    def _paint_gl_inner(self, cv):
         p = QPainter(cv)
         if not p.isActive():
             return
@@ -434,18 +521,19 @@ class HandSpaceOverlay(QWidget):
                 dim = 0.0
             self._draw_card(p, c, faded=op is not None and not c.open and c.k < 0.02)
         if sp.empty:
-            p.setFont(QFont("Segoe UI", 16))
+            p.setFont(_F(16))
             p.setPen(QColor(C.TEXT_DIM))
             p.drawText(QRectF(0, H / 2 - 20, W, 40), _AL.AlignCenter, "This folder is empty")
         self._draw_topbar(p, W)
-        for b in sp.buttons:
-            self._draw_button(p, b)
+        if sp.prompt is None:
+            for b in sp.buttons:
+                self._draw_button(p, b)
         if sp.pages > 1 and op is None:
-            p.setFont(QFont("Segoe UI", 12, QFont.Weight.DemiBold))
+            p.setFont(_F(12, QFont.Weight.DemiBold))
             p.setPen(QColor(C.TEXT_MED))
             p.drawText(QRectF(W / 2 - 70, H - 112, 140, 52), _AL.AlignCenter, f"Page {sp.page + 1} / {sp.pages}")
         t = sp.toast
-        p.setFont(QFont("Segoe UI", 11))
+        p.setFont(_F(11))
         if t:
             fm = QFontMetrics(p.font())
             tw = fm.horizontalAdvance(t) + 44
@@ -455,24 +543,60 @@ class HandSpaceOverlay(QWidget):
             p.drawRoundedRect(r, 19, 19)
             p.setPen(QColor(C.TEXT))
             p.drawText(r, _AL.AlignCenter, t)
-        p.setFont(QFont("Segoe UI", 10))
+        p.setFont(_F(10))
         p.setPen(QColor(C.TEXT_DIM))
         p.drawText(QRectF(0, H - 50, W, 30), _AL.AlignHCenter | _AL.AlignVCenter, sp.hint + "      ·      Esc / ✕ to leave")
+        if sp.prompt is not None:
+            self._draw_prompt(p, W, H)
+            for b in sp.buttons:
+                self._draw_button(p, b)
         for i, h in enumerate(sp.hands):
             if sp.visible[i] and h.pts:
                 self._draw_hand(p, h)
 
+    def _draw_prompt(self, p: QPainter, W: int, H: int):
+        pr = self.space.prompt
+        p.fillRect(QRectF(0, 0, W, H), QColor(0, 4, 12, 200))
+        box = QRectF(W / 2 - 330, H / 2 - 90, 660, 200)
+        p.setBrush(QColor(12, 28, 52, 245))
+        p.setPen(QPen(QColor(C.PRI), 1.4))
+        p.drawRoundedRect(box, 20, 20)
+        p.setFont(_F(14, QFont.Weight.DemiBold))
+        p.setPen(QColor(C.TEXT))
+        p.drawText(QRectF(box.x() + 28, box.y() + 14, box.width() - 56, 32), _AL.AlignLeft | _AL.AlignVCenter, pr["title"])
+        fld = QRectF(box.x() + 28, box.y() + 54, box.width() - 56, 44)
+        p.setBrush(QColor(0, 0, 0, 120))
+        p.setPen(QPen(QColor(255, 120, 120) if pr["error"] else QColor(C.PRI), 1.2))
+        p.drawRoundedRect(fld, 10, 10)
+        p.setFont(_F(15))
+        fm = QFontMetrics(p.font())
+        txt, cur, s0 = pr["text"], pr["cur"], pr["sel0"]
+        x0 = fld.x() + 14
+        lo, hi = min(cur, s0), max(cur, s0)
+        if lo != hi:
+            p.fillRect(QRectF(x0 + fm.horizontalAdvance(txt[:lo]), fld.y() + 8, fm.horizontalAdvance(txt[lo:hi]), fld.height() - 16), QColor(60, 140, 255, 130))
+        p.setPen(QColor(C.TEXT))
+        p.drawText(QRectF(x0, fld.y(), fld.width() - 28, fld.height()), _AL.AlignLeft | _AL.AlignVCenter, txt)
+        if int(time.time() * 2) % 2 == 0:
+            cx = x0 + fm.horizontalAdvance(txt[:cur])
+            p.setPen(QPen(QColor(C.TEXT), 1.6))
+            p.drawLine(QPointF(cx, fld.y() + 9), QPointF(cx, fld.bottom() - 9))
+        if pr["error"]:
+            p.setFont(_F(10))
+            p.setPen(QColor(255, 140, 140))
+            p.drawText(QRectF(fld.x(), fld.bottom() + 4, fld.width(), 20), _AL.AlignLeft | _AL.AlignVCenter, pr["error"])
+
     # ── top bar ──────────────────────────────────────────────────────────────────────
     def _draw_topbar(self, p: QPainter, W: int):
         sp = self.space
-        left = 40 + 3 * (76 + 12) + 14
-        right = min(b["x"] for b in sp.buttons if b["id"] in ("arrange", "sort", "close")) - 18
+        left = 40 + 3 * (76 + 12) + 108 + 26
+        right = min((b["x"] for b in sp.buttons if b["id"] in ("arrange", "sort", "close")), default=W - 40) - 18
         r = QRectF(left, 30, max(100, right - left), 34)
-        p.setFont(QFont("Segoe UI", 15, QFont.Weight.DemiBold))
+        p.setFont(_F(15, QFont.Weight.DemiBold))
         p.setPen(QColor(C.TEXT))
         fm = QFontMetrics(p.font())
         p.drawText(r, _AL.AlignLeft | _AL.AlignVCenter, fm.elidedText(sp.crumb, Qt.TextElideMode.ElideLeft, int(r.width())))
-        p.setFont(QFont("Segoe UI", 10))
+        p.setFont(_F(10))
         p.setPen(QColor(C.TEXT_DIM))
         p.drawText(QRectF(left, 64, r.width(), 24), _AL.AlignLeft | _AL.AlignVCenter, sp.summary)
 
@@ -492,18 +616,29 @@ class HandSpaceOverlay(QWidget):
         p.setPen(QPen(edge, 1.6 if hot else 1.1))
         rr = QRectF(r).adjusted(-3 * pulse, -3 * pulse, 3 * pulse, 3 * pulse)
         p.drawRoundedRect(rr, 14, 14)
+        if b.get("active") or b.get("danger"):
+            tint = QColor(255, 90, 90, 70) if b.get("danger") else QColor(60, 220, 150, 60)
+            p.setBrush(tint)
+            p.setPen(QPen(QColor(255, 110, 110) if b.get("danger") else QColor(C.GREEN), 1.6))
+            p.drawRoundedRect(r, 14, 14)
         col = QColor(C.TEXT if b["on"] else C.TEXT_DIM)
         col.setAlpha(int(255 * a))
         icon_rect = QRectF(r.center().x() - 11 - (22 if b["label"] else 0), r.center().y() - 11, 22, 22)
         if not b["label"]:
             icon_rect = QRectF(r.center().x() - 11, r.center().y() - 11, 22, 22)
-        self._icon(p, {"v_prev": "left", "v_next": "right", "pg_prev": "left", "pg_next": "right", "v_plus": "plus", "v_play": "play" if (sp.opened is not None and sp.opened.paused) else "pause",
+        ico = {"v_prev": "left", "v_next": "right", "pg_prev": "left", "pg_next": "right", "v_plus": "plus", "v_play": "play" if (sp.opened is not None and sp.opened.paused) else "pause",
                        "v_minus": "minus", "v_open": "ext", "v_close": "close", "close": "close", "home": "home", "up": "up",
-                       "explorer": "folder", "sort": "sort", "arrange": "grid"}[b["id"]], icon_rect, col)
+                       "explorer": "folder", "sort": "sort", "arrange": "grid"}.get(b["id"])
+        textonly = ico is None
+        if ico:
+            self._icon(p, ico, icon_rect, col)
         if b["label"]:
-            p.setFont(QFont("Segoe UI", 11, QFont.Weight.DemiBold))
+            p.setFont(_F(11, QFont.Weight.DemiBold))
             p.setPen(col)
-            p.drawText(QRectF(r.left() + 46, r.top(), r.width() - 52, r.height()), _AL.AlignLeft | _AL.AlignVCenter, b["label"])
+            if textonly:
+                p.drawText(r, _AL.AlignCenter, b["label"])
+            else:
+                p.drawText(QRectF(r.left() + 46, r.top(), r.width() - 52, r.height()), _AL.AlignLeft | _AL.AlignVCenter, b["label"])
 
     @staticmethod
     def _icon(p: QPainter, kind: str, r: QRectF, col: QColor):
@@ -586,6 +721,24 @@ class HandSpaceOverlay(QWidget):
         edge.setAlpha(240 if c.held else int(130 + 110 * c.hov))
         p.setPen(QPen(edge, 1.8 if (c.held or c.hov > 0.5) else 1.2))
         p.drawRoundedRect(rect, 16, 16)
+        cpath = c.data.get("path")
+        if cpath and cpath in self.space.sel:
+            p.setBrush(QColor(60, 220, 150, 40))
+            p.setPen(QPen(QColor(C.GREEN), 2.6))
+            p.drawRoundedRect(rect, 16, 16)
+            cr = QRectF(rect.right() - 34, rect.top() + 8, 26, 26)
+            p.setBrush(QColor(C.GREEN))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawEllipse(cr)
+            p.setPen(QPen(QColor(4, 20, 14), 2.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            p.drawLine(QPointF(cr.x() + 7, cr.center().y()), QPointF(cr.center().x() - 1, cr.bottom() - 8))
+            p.drawLine(QPointF(cr.center().x() - 1, cr.bottom() - 8), QPointF(cr.right() - 6, cr.y() + 8))
+        elif self.space.select and kind != "drive":
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(QColor(255, 255, 255, 70), 1.2, Qt.PenStyle.DashLine))
+            p.drawRoundedRect(rect.adjusted(5, 5, -5, -5), 13, 13)
+        if cpath and cpath in self.space.clip_paths:
+            p.setOpacity(appear * 0.55)                                   # cut items look faded until pasted
         hl = QPainterPath()
         hl.addRoundedRect(rect.adjusted(2, 2, -2, -h * 0.55), 14, 14)
         p.setPen(Qt.PenStyle.NoPen)
@@ -607,11 +760,9 @@ class HandSpaceOverlay(QWidget):
 
     @staticmethod
     def _title(p: QPainter, rect: QRectF, text: str, size: int = 11, color: str | None = None, align=_AL.AlignLeft):
-        f = QFont("Segoe UI", size, QFont.Weight.DemiBold)
-        p.setFont(f)
+        p.setFont(_F(size, QFont.Weight.DemiBold))
         p.setPen(QColor(color or C.TEXT))
-        el = QFontMetrics(f).elidedText(text, Qt.TextElideMode.ElideMiddle, int(rect.width()))
-        p.drawText(rect, align | _AL.AlignVCenter, el)
+        p.drawText(rect, align | _AL.AlignVCenter, _elided(text, size, int(rect.width())))
 
     # drives and folders
     def _card_place(self, p: QPainter, c: Card, rect: QRectF, accent: QColor):
@@ -654,7 +805,7 @@ class HandSpaceOverlay(QWidget):
             self._title(p, QRectF(tx - 10, inner.top() + 14, inner.right() - tx + 10, 24), d["title"], 11)
         else:
             self._title(p, QRectF(inner.left(), inner.bottom() - 52, inner.width(), 26), d["title"], 12)
-        p.setFont(QFont("Segoe UI", 9))
+        p.setFont(_F(9))
         p.setPen(QColor(C.TEXT_DIM))
         if d["kind"] == "drive":
             bar = QRectF(inner.left(), inner.bottom() - 34, inner.width(), 8)
@@ -688,11 +839,11 @@ class HandSpaceOverlay(QWidget):
         p.setBrush(QColor(255, 255, 255, 26))
         p.drawPath(path)
         ext = (d.get("_ext") or "").lstrip(".").upper()[:4] or "FILE"
-        p.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        p.setFont(_F(8, QFont.Weight.Bold))
         p.setPen(QColor(C.PRI))
         p.drawText(QRectF(pg.left(), pg.top() + 22, pg.width(), 20), _AL.AlignCenter, ext)
         self._title(p, QRectF(inner.left(), inner.bottom() - 52, inner.width(), 26), d["title"], 11)
-        p.setFont(QFont("Segoe UI", 9))
+        p.setFont(_F(9))
         p.setPen(QColor(C.TEXT_DIM))
         p.drawText(QRectF(inner.left(), inner.bottom() - 26, inner.width(), 20), _AL.AlignLeft | _AL.AlignVCenter, d.get("sub", ""))
 
@@ -704,7 +855,7 @@ class HandSpaceOverlay(QWidget):
         p.drawLine(QPointF(inner.left(), inner.top() + 50), QPointF(inner.left() + 50, inner.top() + 50))
         rows = [("Type", (d.get("_ext") or "").lstrip(".").upper() or "File"), ("Size", human_size(d.get("_sz", 0))),
                 ("Modified", d.get("date", "")), ("Location", d.get("path", ""))]
-        p.setFont(QFont("Segoe UI", 12))
+        p.setFont(_F(12))
         for i, (k, v) in enumerate(rows):
             y = inner.top() + 66 + i * 34
             p.setPen(QColor(C.TEXT_DIM))
@@ -715,7 +866,7 @@ class HandSpaceOverlay(QWidget):
                        fm.elidedText(v, Qt.TextElideMode.ElideMiddle, int(inner.width() - 100)))
         from core.hand_space import can_launch
         if not can_launch(d):
-            p.setFont(QFont("Segoe UI", 10))
+            p.setFont(_F(10))
             p.setPen(QColor(C.AMBER))
             p.drawText(QRectF(inner.left(), inner.bottom() - 30, inner.width(), 26), _AL.AlignLeft | _AL.AlignVCenter,
                        "Programs and scripts are never started from a gesture.")
@@ -783,7 +934,7 @@ class HandSpaceOverlay(QWidget):
             p.drawRect(tr)
             if path in self._failed:
                 p.setPen(QColor(C.TEXT_DIM))
-                p.setFont(QFont("Segoe UI", 10))
+                p.setFont(_F(10))
                 p.drawText(tr, _AL.AlignCenter, "Can't show this picture")
         else:
             iw, ih = px.width(), px.height()
@@ -805,7 +956,7 @@ class HandSpaceOverlay(QWidget):
         title = d["title"] if c.k < 0.5 else d["title"] + (f"   ·   {d['dims'][0]}×{d['dims'][1]}" if d.get("dims") else "")
         self._title(p, QRectF(rect.left() + 16, rect.bottom() - 34, rect.width() - 100, 26), title, 10 if c.k < 0.5 else 12, "#ffffff")
         if c.k > 0.5 and c.zoom > 1.01:
-            p.setFont(QFont("Segoe UI", 11, QFont.Weight.DemiBold))
+            p.setFont(_F(11, QFont.Weight.DemiBold))
             p.setPen(QColor(255, 255, 255, 230))
             p.drawText(QRectF(rect.right() - 100, rect.bottom() - 34, 84, 26), _AL.AlignRight | _AL.AlignVCenter, f"{int(c.zoom * 100)}%")
 
@@ -839,12 +990,12 @@ class HandSpaceOverlay(QWidget):
         if not drawn:
             msg = {"loading": "Loading 3D model…", "failed": self._mfail.get(path, "Can't show this model"),
                    "off": "3D models need OpenGL (hw_accel on)", "idle": ""}.get(state, "")
-            f = QFont("Segoe UI", 26 if not opened else 40, QFont.Weight.Bold)
+            f = _F(26 if not opened else 40, QFont.Weight.Bold)
             p.setFont(f)
             p.setPen(QColor(C.ACC))
             p.drawText(QRectF(tr.left(), tr.top() + 6, tr.width(), tr.height() - 70), _AL.AlignCenter, "3D")
             if msg:
-                p.setFont(QFont("Segoe UI", 9))
+                p.setFont(_F(9))
                 p.setPen(QColor(C.TEXT_DIM))
                 p.drawText(QRectF(tr.left() + 10, tr.bottom() - 62, tr.width() - 20, 22), _AL.AlignCenter,
                            QFontMetrics(p.font()).elidedText(msg, Qt.TextElideMode.ElideRight, int(tr.width() - 24)))
@@ -856,7 +1007,7 @@ class HandSpaceOverlay(QWidget):
         title = d["title"] + (f"   ·   {tris:,} triangles" if opened and tris else "")
         self._title(p, QRectF(rect.left() + 16, rect.bottom() - 34, rect.width() - 100, 26), title, 10 if not opened else 12, "#ffffff")
         if c.k > 0.5 and abs(c.zoom - 1.0) > 0.01:
-            p.setFont(QFont("Segoe UI", 11, QFont.Weight.DemiBold))
+            p.setFont(_F(11, QFont.Weight.DemiBold))
             p.setPen(QColor(255, 255, 255, 230))
             p.drawText(QRectF(rect.right() - 100, rect.bottom() - 34, 84, 26), _AL.AlignRight | _AL.AlignVCenter, f"{int(c.zoom * 100)}%")
 
@@ -893,7 +1044,7 @@ class HandSpaceOverlay(QWidget):
                     if dur > 0:
                         p.setBrush(QColor(C.PRI))
                         p.drawRoundedRect(QRectF(bar.left(), bar.top(), max(5.0, bar.width() * min(1.0, pos / dur)), 5), 2.5, 2.5)
-                    p.setFont(QFont("Segoe UI", 9))
+                    p.setFont(_F(9))
                     p.setPen(QColor(255, 255, 255, 230))
                     fm = lambda s: f"{int(s) // 60}:{int(s) % 60:02d}"         # noqa: E731
                     p.drawText(QRectF(bar.left(), bar.top() - 22, bar.width(), 20), _AL.AlignRight | _AL.AlignVCenter,
@@ -916,11 +1067,13 @@ class HandSpaceOverlay(QWidget):
             msg = err and f"GPU video unavailable: {err}"[:120]
             if not msg and c.open and self._cv is None:
                 msg = "GPU video needs OpenGL (hw_accel on)"
+            elif not msg and c.open:
+                msg = "Loading video…"
             if msg:
-                p.setFont(QFont("Segoe UI", 9))
+                p.setFont(_F(9))
                 p.setPen(QColor(C.AMBER))
                 p.drawText(QRectF(tr.left() + 14, tr.bottom() - 96, tr.width() - 28, 40), _AL.AlignCenter | Qt.TextFlag.TextWordWrap,
-                           msg + "  ·  ⧉ opens it in your default player")
+                           msg + ("  ·  ⧉ opens it in your default player" if err or self._cv is None else ""))
         strip = QLinearGradient(0, tr.bottom() - 46, 0, tr.bottom())
         strip.setColorAt(0, QColor(0, 0, 0, 0))
         strip.setColorAt(1, QColor(0, 0, 0, 190))
@@ -963,6 +1116,6 @@ class HandSpaceOverlay(QWidget):
             pc = QPointF(*h.palm)
             p.setPen(QPen(QColor(C.AMBER), 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             p.drawArc(QRectF(pc.x() - 46, pc.y() - 46, 92, 92), 90 * 16, int(-360 * 16 * h.fist_prog))
-            p.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+            p.setFont(_F(10, QFont.Weight.DemiBold))
             p.setPen(QColor(C.AMBER))
             p.drawText(QRectF(pc.x() - 50, pc.y() + 52, 100, 22), _AL.AlignCenter, "Back")

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import math
 import os
-import struct
 from collections import OrderedDict
 
 import numpy as np
@@ -29,65 +28,17 @@ MAX_BYTES = 200 * 1024 * 1024
 SMALL_MODEL_BYTES = 8 * 1024 * 1024       # only models up to this size are drawn live on the small cards
 
 
-# ── loading (worker thread) ──────────────────────────────────────────────────────────
-def _read_obj(path: str) -> np.ndarray:
-    verts: list = []
-    faces: list = []
-    n_lines = 0
-    with open(path, "rb") as f:
-        for raw in f:
-            n_lines += 1
-            if n_lines % 50000 == 0:
-                import time
-                time.sleep(0)                                  # let the UI thread breathe while a big file parses
-            if raw[:2] == b"v ":
-                t = raw.split()
-                verts.append((float(t[1]), float(t[2]), float(t[3])))
-            elif raw[:2] == b"f ":
-                t = raw.split()[1:]
-                n = len(verts)
-                idx = []
-                for x in t:
-                    i = int(x.split(b"/")[0])
-                    idx.append(i - 1 if i > 0 else n + i)
-                for k in range(1, len(idx) - 1):
-                    faces.append((idx[0], idx[k], idx[k + 1]))
-    if not verts or not faces:
-        raise ValueError("this OBJ has no faces to draw")
-    v = np.asarray(verts, dtype=np.float32)
-    fa = np.asarray(faces, dtype=np.int64)
-    if fa.min() < 0 or fa.max() >= len(v):
-        raise ValueError("broken face indices")
-    return v[fa]                                               # (n, 3, 3)
-
-
-def _read_stl(path: str) -> np.ndarray:
-    with open(path, "rb") as f:
-        raw = f.read()
-    if len(raw) >= 84:
-        n = struct.unpack_from("<I", raw, 80)[0]
-        if 84 + 50 * n == len(raw) and n > 0:                  # binary STL
-            dt = np.dtype([("n", "<f4", (3,)), ("v", "<f4", (3, 3)), ("a", "<u2")])
-            return np.frombuffer(raw, dtype=dt, count=n, offset=84)["v"].astype(np.float32)
-    vs = []                                                    # ASCII STL
-    for line in raw.decode("utf-8", errors="replace").splitlines():
-        line = line.strip()
-        if line.startswith("vertex"):
-            t = line.split()
-            vs.append((float(t[1]), float(t[2]), float(t[3])))
-    if len(vs) < 3:
-        raise ValueError("this STL has no triangles")
-    a = np.asarray(vs, dtype=np.float32)
-    return a[: len(a) // 3 * 3].reshape(-1, 3, 3)
+# ── loading (worker thread): the readers live in ui/mesh_formats.py ───────────────────
+from ui.mesh_formats import read_triangles  # noqa: E402
 
 
 def load_mesh(path: str):
     """→ (float32 array (n_vertices, 6): position + face normal, triangle count). Centred and scaled to a unit sphere."""
     if os.path.getsize(path) > MAX_BYTES:
         raise ValueError("file is too large (200 MB max)")
-    ext = os.path.splitext(path)[1].lower()
-    tri = _read_stl(path) if ext == ".stl" else _read_obj(path)
-    tri = np.ascontiguousarray(tri, dtype=np.float32)
+    tri = np.ascontiguousarray(read_triangles(path), dtype=np.float32)
+    if len(tri) == 0:
+        raise ValueError("no triangles to draw")
     if len(tri) > MAX_TRIS:
         tri = tri[:: math.ceil(len(tri) / MAX_TRIS)]
     flat = tri.reshape(-1, 3)
@@ -304,6 +255,53 @@ void main() {
 """
 
 
+_PRE: dict = {"fut": None}
+
+
+def _make_player():
+    """Load libmpv and create the player — slow (DLL load, hwdec probing), so it runs in a worker thread, ahead of time."""
+    from actions.hud_video import _import_mpv
+    mpv = _import_mpv()
+    try:
+        import locale
+        locale.setlocale(locale.LC_NUMERIC, "C")                # libmpv requires the C numeric locale
+    except Exception:
+        pass
+    player = mpv.MPV(vo="libmpv", hwdec="auto-safe", keep_open="yes", osc=False, ytdl=False, idle="yes",
+                     input_default_bindings=False, input_vo_keyboard=False, cache="yes", volume=100)
+    return mpv, player
+
+
+def prewarm_player():
+    """Start building the player in the background (call when a video is about to be opened)."""
+    if _PRE["fut"] is None:
+        from concurrent.futures import ThreadPoolExecutor
+        ex = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mpv-prewarm")
+        _PRE["fut"] = ex.submit(_make_player)
+        ex.shutdown(wait=False)
+
+
+def _take_player():
+    fut, _PRE["fut"] = _PRE["fut"], None
+    if fut is not None:
+        try:
+            return fut.result(timeout=8)
+        except Exception:
+            pass
+    return _make_player()
+
+
+def discard_prewarm():
+    fut, _PRE["fut"] = _PRE["fut"], None
+    if fut is not None:
+        def _kill(f):
+            try:
+                f.result()[1].terminate()
+            except Exception:
+                pass
+        fut.add_done_callback(_kill)
+
+
 class GlVideo:
     MAX_SIDE = 3840
 
@@ -321,11 +319,22 @@ class GlVideo:
 
     @property
     def active(self) -> bool:
-        return self.player is not None
+        """A film is loaded (the player itself stays alive between films so the next one opens at once)."""
+        return self.player is not None and self.path is not None
+
+    def park(self):
+        """Stop the film but keep the player, its render context and the shaders for the next one."""
+        pl = self.player
+        self.path = None
+        if pl is not None:
+            try:
+                pl.command("stop")
+            except Exception:
+                pass
 
     # context must be current for start() / draw() / stop()
     def start(self, path: str) -> bool:
-        if self.player is not None:
+        if self.player is not None and self.rc is not None:
             if self.path != path:
                 self.path = path
                 try:
@@ -348,15 +357,7 @@ class GlVideo:
             self._quad.allocate(quad, len(quad))
             self._quad.release()
 
-            from actions.hud_video import _import_mpv
-            mpv = _import_mpv()
-            try:
-                import locale
-                locale.setlocale(locale.LC_NUMERIC, "C")        # libmpv requires the C numeric locale
-            except Exception:
-                pass
-            player = mpv.MPV(vo="libmpv", hwdec="auto-safe", keep_open="yes", osc=False, ytdl=False, idle="yes",
-                             input_default_bindings=False, input_vo_keyboard=False, cache="yes", volume=100)
+            mpv, player = _take_player()                        # usually already built in the background
             ctx = self._ctx
 
             def get_proc(_c, name):

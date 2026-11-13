@@ -27,6 +27,7 @@ import subprocess
 import sys
 import time
 from collections import deque
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
 CARD_W, CARD_H = 220, 150
@@ -46,7 +47,7 @@ TEXT_EXT = {".md", ".markdown", ".txt", ".log", ".json", ".csv", ".ini", ".cfg",
             ".bat", ".cmd", ".ps1", ".tex", ".srt"}
 PLAIN_EXT = {".md", ".markdown", ".txt", ".log", ".tex", ".srt"}      # shown in the normal font; the rest is code (mono)
 IMG_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".ico"}
-MODEL_EXT = {".obj", ".stl"}                                   # 3D models: drawn on the GPU, turned with the hand
+MODEL_EXT = {".obj", ".stl", ".fbx", ".glb", ".gltf", ".usd", ".usda", ".usdc", ".usdz", ".step", ".stp"}   # 3D models: drawn on the GPU, turned with the hand
 VIDEO_EXT = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".wmv", ".flv", ".mpg", ".mpeg"}   # played by mpv on the GPU
 SEEK_STEP = 10.0                                               # seconds skipped by the video's − / + buttons
 # never launched from a gesture: a stray pinch must not start a program
@@ -251,6 +252,191 @@ def open_external(path: str) -> bool:
 
 
 # ── physics objects ──────────────────────────────────────────────────────────────────
+
+# ── file operations (pure functions: copy, move, delete, rename, extract) ────────────────
+ARCHIVE_SUFFIXES = (".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".tbz2", ".txz", ".tar", ".zip", ".7z", ".rar")
+_BAD_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
+
+
+def _err(e: BaseException) -> str:
+    return (getattr(e, "strerror", None) or str(e) or e.__class__.__name__)[:90]
+
+
+def is_archive(path) -> bool:
+    return str(path).lower().endswith(ARCHIVE_SUFFIXES)
+
+
+def archive_stem(name: str) -> str:
+    low = name.lower()
+    for suf in ARCHIVE_SUFFIXES:
+        if low.endswith(suf):
+            return name[:-len(suf)] or name
+    return name
+
+
+def unique_path(folder, name: str) -> Path:
+    """folder/name, or folder/name (2), (3)… when that already exists."""
+    folder = Path(folder)
+    cand = folder / name
+    if not cand.exists():
+        return cand
+    base = Path(name)
+    n = 2
+    while True:
+        cand = folder / f"{base.stem} ({n}){base.suffix}"
+        if not cand.exists():
+            return cand
+        n += 1
+
+
+def check_name(name: str) -> str:
+    """'' when the name is fine, otherwise what is wrong with it."""
+    n = name.strip()
+    if not n or n in (".", ".."):
+        return "The name can't be empty"
+    if _BAD_NAME.search(n):
+        return 'A name can\'t contain  \\ / : * ? " < > |'
+    if n != n.rstrip(". "):
+        return "A name can't end with a dot or a space"
+    if n.split(".")[0].lower() in _RESERVED:
+        return "Windows reserves that name"
+    if len(n) > 200:
+        return "That name is too long"
+    return ""
+
+
+def _inside(child: Path, parent: Path) -> bool:
+    try:
+        c, p = child.resolve(), parent.resolve()
+    except OSError:
+        return False
+    return c == p or p in c.parents
+
+
+def copy_item(src, dst_dir) -> Path:
+    src, dst_dir = Path(src), Path(dst_dir)
+    if src.is_dir() and _inside(dst_dir, src):
+        raise OSError("Can't copy a folder into itself")
+    target = unique_path(dst_dir, src.name)
+    if src.is_dir():
+        shutil.copytree(src, target)
+    else:
+        shutil.copy2(src, target)
+    return target
+
+
+def move_item(src, dst_dir) -> Path:
+    src, dst_dir = Path(src), Path(dst_dir)
+    if src.parent.resolve() == dst_dir.resolve():
+        return src                                              # already there
+    if src.is_dir() and _inside(dst_dir, src):
+        raise OSError("Can't move a folder into itself")
+    target = unique_path(dst_dir, src.name)
+    shutil.move(str(src), str(target))
+    return target
+
+
+def protected(path) -> bool:
+    p = Path(path)
+    try:
+        r = p.resolve()
+    except OSError:
+        return True
+    if r.parent == r or len(r.parts) <= 1:                      # a drive root
+        return True
+    home = Path.home().resolve()
+    sysdirs = [os.environ.get(k) for k in ("SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData")]
+    return r == home or home in r.parents and len(r.parts) - len(home.parts) < 1 or any(d and r == Path(d).resolve() for d in sysdirs)
+
+
+def recycle(path) -> None:
+    """Move to the Recycle Bin (never a permanent delete)."""
+    p = Path(path)
+    if protected(p):
+        raise OSError("This is a protected folder")
+    if not p.exists():
+        raise OSError("It no longer exists")
+    try:
+        from send2trash import send2trash                       # optional: pip install send2trash
+        send2trash(str(p))
+        return
+    except ImportError:
+        pass
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        class SHFILEOPSTRUCTW(ctypes.Structure):
+            _fields_ = [("hwnd", wintypes.HWND), ("wFunc", wintypes.UINT), ("pFrom", wintypes.LPCWSTR), ("pTo", wintypes.LPCWSTR),
+                        ("fFlags", ctypes.c_ushort), ("fAnyOperationsAborted", wintypes.BOOL), ("hNameMappings", ctypes.c_void_p),
+                        ("lpszProgressTitle", wintypes.LPCWSTR)]
+        op = SHFILEOPSTRUCTW()
+        op.wFunc = 3                                            # FO_DELETE
+        op.pFrom = str(p.resolve()) + "\0\0"
+        op.fFlags = 0x40 | 0x10 | 0x4 | 0x400                   # ALLOWUNDO | NOCONFIRMATION | SILENT | NOERRORUI
+        rc = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+        if rc or op.fAnyOperationsAborted:
+            raise OSError(f"Could not move it to the Recycle Bin (is it open in another program?) [{rc}]")
+        return
+    trash = Path.home() / ".jarvis_trash"
+    trash.mkdir(exist_ok=True)
+    shutil.move(str(p), str(unique_path(trash, p.name)))
+
+
+def extract_archive(path) -> Path:
+    """Unpack next to the archive, into a new folder named like it. Refuses entries that would escape that folder."""
+    p = Path(path)
+    dest = unique_path(p.parent, archive_stem(p.name))
+    dest.mkdir()
+    base = dest.resolve()
+
+    def ok(name: str) -> bool:
+        return _inside(base / name, base)
+    low = p.name.lower()
+    try:
+        if low.endswith(".zip"):
+            import zipfile
+            with zipfile.ZipFile(p) as z:
+                if not all(ok(m.filename) for m in z.infolist()):
+                    raise OSError("The archive tries to write outside its folder")
+                z.extractall(dest)
+        elif low.endswith((".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")):
+            import tarfile
+            with tarfile.open(p) as t:
+                for m in t.getmembers():
+                    if not ok(m.name) or m.issym() or m.islnk() or m.isdev():
+                        raise OSError("The archive has unsafe entries")
+                try:
+                    t.extractall(dest, filter="data")
+                except TypeError:                               # Python < 3.12
+                    t.extractall(dest)
+        elif low.endswith(".7z"):
+            try:
+                import py7zr
+            except ImportError:
+                raise OSError("7z needs:  pip install py7zr") from None
+            with py7zr.SevenZipFile(p) as z:
+                if not all(ok(n) for n in z.getnames()):
+                    raise OSError("The archive tries to write outside its folder")
+                z.extractall(dest)
+        elif low.endswith(".rar"):
+            try:
+                import rarfile
+            except ImportError:
+                raise OSError("RAR needs:  pip install rarfile  (and UnRAR)") from None
+            with rarfile.RarFile(p) as z:
+                if not all(ok(n) for n in z.namelist()):
+                    raise OSError("The archive tries to write outside its folder")
+                z.extractall(dest)
+        else:
+            raise OSError("This isn't an archive")
+    except BaseException:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
+    return dest
+
+
 class Card:
     def __init__(self, idx: int, data: dict, x: float, y: float):
         self.idx, self.data = idx, data
@@ -393,6 +579,15 @@ class Space:
         self._claw_n = 0
         self._last_press = 0.0
         self._last_wheel = 0.0
+        # file operations
+        self.select = False                      # select mode: a tap marks a card instead of opening it
+        self.sel: set[str] = set()
+        self.clip: dict | None = None            # {"paths": [...], "cut": bool}
+        self.confirm: tuple | None = None        # ("a_delete", until) — the second press within 4 s does it
+        self.prompt: dict | None = None          # the rename box
+        self.on_release = None                   # callable(paths): the UI lets go of files it holds open (a playing video)
+        self._job: Future | None = None
+        self._pool: ThreadPoolExecutor | None = None
 
     # ── small helpers ────────────────────────────────────────────────────────────
     def say(self, text: str, secs: float = 2.4):
@@ -421,11 +616,11 @@ class Space:
         return self._opened()
 
     def _open_center(self) -> tuple[float, float]:
-        return self.w / 2, 100 + (self.h - 130 - 100) / 2
+        return self.w / 2, 100 + (self.h - 130 - 100 - 64) / 2
 
     def _open_dims(self, c: Card) -> tuple[float, float]:
         kind = c.data.get("kind")
-        aw, ah = self.w * 0.90, self.h - 240
+        aw, ah = self.w * 0.90, self.h - 304
         if kind == "image":
             asp = c.data.get("aspect") or 1.6
             w = aw
@@ -460,9 +655,10 @@ class Space:
         self.path = None
         self.entries = list_roots(self.pinned)
         self.page = 0
+        self.select, self.sel, self.confirm = False, set(), None
         self._build_page()
 
-    def open_path(self, p: str | Path) -> bool:
+    def open_path(self, p: str | Path, keep_page: bool = False) -> bool:
         p = Path(p)
         try:
             entries = list_dir(p, self.sort)
@@ -472,7 +668,8 @@ class Space:
         except OSError:
             self.say("Can't open this folder")
             return False
-        self.path, self.entries, self.page = p, entries, 0
+        self.path, self.entries = p, entries
+        self.page = self.page if keep_page else 0
         self._build_page()
         if not entries:
             self.say("This folder is empty")
@@ -490,9 +687,14 @@ class Space:
 
     def back(self):
         """Fist / Backspace / right-click: close the open card, otherwise go up a folder."""
+        if self.prompt is not None:
+            self.prompt = None
+            return
         op = self._opened()
         if op is not None:
             self._set_open(op, False)
+        elif self.select:
+            self._set_select(False)
         else:
             self.go_up()
 
@@ -593,7 +795,12 @@ class Space:
         self._layout_buttons()
 
     def _activate(self, c: Card):
+        if self.prompt is not None:
+            return
         kind = c.data.get("kind")
+        if self.select and kind != "drive":
+            self._toggle_sel(c)
+            return
         if kind in ("drive", "folder"):
             self.open_path(c.data["path"])
         else:
@@ -641,23 +848,54 @@ class Space:
         op = self._opened()
         out: list[dict] = []
 
-        def add(bid, x, y, w=bw, h=bh, on=True, label=""):
-            out.append({"id": bid, "x": x, "y": y, "w": w, "h": h, "on": on, "label": label})
+        def add(bid, x, y, w=bw, h=bh, on=True, label="", active=False, danger=False):
+            out.append({"id": bid, "x": x, "y": y, "w": w, "h": h, "on": on, "label": label, "active": active, "danger": danger})
+
+        if self.prompt is not None:                                     # the rename box owns the screen
+            by = H / 2 + 78
+            add("p_cancel", W / 2 - 12 - 130, by, 130, bh, label="Cancel")
+            add("p_ok", W / 2 + 12, by, 130, bh, label="OK", active=True)
+            self.buttons = out
+            return
 
         y = 34
         away = self.path is not None
         add("home", 40, y, on=away)
         add("up", 40 + bw + g, y, on=away)
         add("explorer", 40 + 2 * (bw + g), y, on=away)
+        add("select", 40 + 3 * (bw + g), y, 108, bh, on=away and bool(self.cards) and op is None,
+            label="Done" if self.select else "Select", active=self.select)
         add("close", W - 40 - 56, y - 2, 56, 56)
         add("sort", W - 96 - g - 130, y, 130, bh, label=SORT_LABEL[self.sort])
         add("arrange", W - 96 - g - 130 - g - bw, y, on=bool(self.cards) and op is None)
         yb = H - 112
+        AW = 96
+        deleting = self.confirm_active
         if op is None:
+            acts: list = []
+            if away and self.select:
+                n = len(self.sel)
+                acts = [("a_copy", "Copy", n > 0), ("a_cut", "Cut", n > 0), ("a_paste", "Paste", bool(self.clip)),
+                        ("a_rename", "Rename", n == 1), ("a_extract", "Extract", any(is_archive(x) for x in self.sel)),
+                        ("a_delete", "Sure?" if deleting else "Delete", n > 0), ("a_new", "New folder", True)]
+            elif away and self.clip:
+                acts = [("a_paste", "Paste", True), ("a_clipx", "Clear", True)]
+            half = (len(acts) * (AW + g) - g) / 2 if acts else 0
+            for i, (bid, label, on) in enumerate(acts):
+                wide = AW + 30 if bid == "a_new" else AW
+                add(bid, W / 2 - half + i * (AW + g), yb, wide, bh, on=on, label=label, danger=(bid == "a_delete" and deleting))
             if self.pages > 1:
-                add("pg_prev", W / 2 - bw - 78, yb, on=self.page > 0)
-                add("pg_next", W / 2 + 78, yb, on=self.page < self.pages - 1)
+                add("pg_prev", W / 2 - half - g - bw - (0 if acts else 78), yb, on=self.page > 0)
+                add("pg_next", W / 2 + half + g + (0 if acts else 78), yb, on=self.page < self.pages - 1)
         else:
+            if op.data["kind"] != "drive":                                # the file-operations row above the viewer's buttons
+                fa = [("a_copy", "Copy"), ("a_cut", "Cut"), ("a_rename", "Rename")]
+                if is_archive(op.data["path"]):
+                    fa.append(("a_extract", "Extract"))
+                fa.append(("a_delete", "Sure?" if deleting else "Delete"))
+                half2 = (len(fa) * (AW + g) - g) / 2
+                for i, (bid, label) in enumerate(fa):
+                    add(bid, W / 2 - half2 + i * (AW + g), yb - bh - 12, AW, bh, label=label, danger=(bid == "a_delete" and deleting))
             kind = op.data["kind"]
             same = sum(1 for e in self.entries if e["kind"] == kind)
             specs = [("v_prev", same > 1)]
@@ -694,6 +932,14 @@ class Space:
             self.set_sort(SORTS[(SORTS.index(self.sort) + 1) % len(SORTS)])
         elif bid == "arrange":
             self.arrange()
+        elif bid == "select":
+            self._set_select(not self.select)
+        elif bid == "p_ok":
+            self.prompt_submit()
+        elif bid == "p_cancel":
+            self.prompt = None
+        elif bid.startswith("a_"):
+            self._file_action(bid)
         elif bid == "pg_prev":
             self.change_page(-1)
         elif bid == "pg_next":
@@ -723,6 +969,251 @@ class Space:
                 op.cmds.append(("seek", SEEK_STEP * sign))
             elif op.data["kind"] == "text":
                 op.scroll = max(0.0, op.scroll + (-sign) * 180.0)        # + = up, − = down, like a scroll bar's arrows
+
+    # ── file operations ──────────────────────────────────────────────────────────
+    @property
+    def confirm_active(self) -> bool:
+        return self.confirm is not None and time.time() < self.confirm[1]
+
+    @property
+    def clip_paths(self) -> set:
+        return set(self.clip["paths"]) if self.clip and self.clip.get("cut") else set()
+
+    def _set_select(self, on: bool):
+        self.select = on
+        self.sel.clear()
+        self.confirm = None
+        self._layout_buttons()
+
+    def _toggle_sel(self, c: Card):
+        path = c.data.get("path")
+        if not path or c.data.get("kind") == "drive":
+            return
+        self.sel.symmetric_difference_update({path})
+        self.confirm = None
+
+    def select_all(self):
+        if self.path is None:
+            return
+        self.select = True
+        self.sel = {e["path"] for e in self.entries if e.get("kind") != "drive"}
+        self.confirm = None
+
+    def targets(self) -> list[str]:
+        """What the file buttons act on: the open card, else the marked cards, else the one under the pointer."""
+        op = self._opened()
+        if op is not None:
+            return [op.data["path"]]
+        if self.select:
+            return [e["path"] for e in self.entries if e["path"] in self.sel]
+        hc = self.hover_card
+        if hc is not None and self.path is not None and hc.data.get("kind") != "drive":
+            return [hc.data["path"]]
+        return []
+
+    def _reload(self):
+        if self.path is None:
+            self.go_root()
+            return
+        if not self.open_path(self.path, keep_page=True):
+            self.go_root()
+        self.sel &= {e["path"] for e in self.entries}
+        if self.clip:
+            self.clip["paths"] = [x for x in self.clip["paths"] if os.path.exists(x)] or []
+            if not self.clip["paths"]:
+                self.clip = None
+
+    def _let_go(self, paths):
+        """Tell the UI to release these files first (a video that is playing keeps its file locked)."""
+        if self.on_release is not None:
+            try:
+                self.on_release(list(paths))
+            except Exception:
+                pass
+
+    def _run(self, label: str, fn, *args):
+        if self._job is not None:
+            self.say("Still busy with the last operation…")
+            return
+        if self._pool is None:
+            self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hs-files")
+        self.say(label + "…", 600.0)
+        self._job = self._pool.submit(fn, *args)
+
+    @staticmethod
+    def _job_paste(paths, dst, cut) -> str:
+        done, errs = 0, []
+        for p in paths:
+            try:
+                (move_item if cut else copy_item)(p, dst)
+                done += 1
+            except Exception as e:                               # noqa: BLE001
+                errs.append(f"{Path(p).name}: {_err(e)}")
+        msg = f"{'Moved' if cut else 'Copied'} {done} item{'s' if done != 1 else ''}"
+        return msg + (f" · {len(errs)} failed — {errs[0]}" if errs else "")
+
+    @staticmethod
+    def _job_delete(paths) -> str:
+        done, errs = 0, []
+        for p in paths:
+            try:
+                recycle(p)
+                done += 1
+            except Exception as e:                               # noqa: BLE001
+                errs.append(f"{Path(p).name}: {_err(e)}")
+        msg = f"{done} item{'s' if done != 1 else ''} moved to the Recycle Bin"
+        return msg + (f" · {len(errs)} failed — {errs[0]}" if errs else "")
+
+    @staticmethod
+    def _job_extract(paths) -> str:
+        done, errs, last = 0, [], ""
+        for p in paths:
+            try:
+                last = extract_archive(p).name
+                done += 1
+            except Exception as e:                               # noqa: BLE001
+                errs.append(f"{Path(p).name}: {_err(e)}")
+        msg = f"Extracted to “{last}”" if done == 1 and not errs else f"Extracted {done} archive{'s' if done != 1 else ''}"
+        return msg + (f" · {len(errs)} failed — {errs[0]}" if errs else "")
+
+    def _file_action(self, bid: str):
+        now = time.time()
+        if self.prompt is not None:
+            return
+        if bid == "a_clipx":
+            self.clip = None
+            self.say("Clipboard cleared")
+            return
+        if bid == "a_new":
+            if self.path is None:
+                return
+            try:
+                d = unique_path(self.path, "New folder")
+                d.mkdir()
+            except OSError as e:
+                self.say(f"Could not create the folder: {_err(e)}")
+                return
+            self._reload()
+            self._start_rename(str(d), new=True)
+            return
+        if bid == "a_paste":
+            if not self.clip:
+                self.say("Nothing to paste — Copy or Cut something first")
+            elif self.path is None:
+                self.say("Open a folder to paste into")
+            else:
+                clip, self.clip = self.clip, None
+                if clip["cut"]:
+                    self._let_go(clip["paths"])
+                self._run("Moving" if clip["cut"] else "Copying", self._job_paste, list(clip["paths"]), str(self.path), clip["cut"])
+            return
+        t = self.targets()
+        if not t:
+            self.say("Select something first — press Select, then tap cards")
+            return
+        n = len(t)
+        if bid in ("a_copy", "a_cut"):
+            cut = bid == "a_cut"
+            self.clip = {"paths": t, "cut": cut}
+            self.say(f"{n} item{'s' if n != 1 else ''} {'cut' if cut else 'copied'} — open a folder and press Paste", 3.2)
+            self.sel.clear()
+        elif bid == "a_rename":
+            if n != 1:
+                self.say("Rename works on one item at a time")
+            else:
+                self._start_rename(t[0])
+        elif bid == "a_extract":
+            arcs = [x for x in t if is_archive(x)]
+            if not arcs:
+                self.say("That isn't an archive (zip, tar, 7z, rar)")
+            else:
+                self._run("Extracting", self._job_extract, arcs)
+                self.sel.clear()
+        elif bid == "a_delete":
+            if not self.confirm_active:
+                self.confirm = (bid, now + 4.0)
+                self.say(f"Press Delete again to move {n} item{'s' if n != 1 else ''} to the Recycle Bin", 4.0)
+                return
+            self.confirm = None
+            op = self._opened()
+            if op is not None and op.data.get("path") in t:
+                self._set_open(op, False)
+            self._let_go(t)
+            self._run("Moving to the Recycle Bin", self._job_delete, t)
+            self.sel.clear()
+
+    def _start_rename(self, path: str, new: bool = False):
+        name = Path(path).name
+        stem = name if (Path(path).is_dir() or "." not in name.lstrip(".")) else name[:name.rfind(".")]
+        self._let_go([path])
+        self.prompt = {"title": "Name the new folder" if new else "Rename", "path": path, "text": name,
+                       "cur": len(stem), "sel0": 0, "error": ""}
+
+    def prompt_key(self, text: str, key: str = "") -> bool:
+        """Keyboard input for the rename box. key: enter / esc / backspace / delete / left / right / home / end / all."""
+        pr = self.prompt
+        if pr is None:
+            return False
+        t, cur, s0 = pr["text"], pr["cur"], pr["sel0"]
+        lo, hi = min(cur, s0), max(cur, s0)
+        pr["error"] = ""
+        if key == "enter":
+            self.prompt_submit()
+        elif key == "esc":
+            self.prompt = None
+        elif key == "all":
+            pr["sel0"], pr["cur"] = 0, len(t)
+        elif key == "backspace":
+            if lo != hi:
+                pr["text"], pr["cur"], pr["sel0"] = t[:lo] + t[hi:], lo, lo
+            elif cur > 0:
+                pr["text"], pr["cur"], pr["sel0"] = t[:cur - 1] + t[cur:], cur - 1, cur - 1
+        elif key == "delete":
+            if lo != hi:
+                pr["text"], pr["cur"], pr["sel0"] = t[:lo] + t[hi:], lo, lo
+            elif cur < len(t):
+                pr["text"] = t[:cur] + t[cur + 1:]
+        elif key in ("left", "right", "home", "end"):
+            if key == "left":
+                c = lo if lo != hi else max(0, cur - 1)
+            elif key == "right":
+                c = hi if lo != hi else min(len(t), cur + 1)
+            else:
+                c = 0 if key == "home" else len(t)
+            pr["cur"] = pr["sel0"] = c
+        else:
+            text = "".join(ch for ch in text if ch.isprintable())
+            if text:
+                pr["text"] = (t[:lo] + text + t[hi:])[:200]
+                pr["cur"] = pr["sel0"] = min(200, lo + len(text))
+        return True
+
+    def prompt_submit(self):
+        pr = self.prompt
+        if pr is None:
+            return
+        new = pr["text"].strip()
+        path = Path(pr["path"])
+        if new == path.name:
+            self.prompt = None
+            return
+        err = check_name(new)
+        target = path.with_name(new)
+        if not err and target.exists() and target.name.lower() != path.name.lower():
+            err = "Something with that name already exists here"
+        if err:
+            pr["error"] = err
+            return
+        self._let_go([str(path)])
+        try:
+            path.rename(target)
+        except OSError as e:
+            pr["error"] = _err(e)
+            return
+        self.prompt = None
+        self.sel.clear()
+        self._reload()
+        self.say(f"Renamed to {new}")
 
     # ── input ────────────────────────────────────────────────────────────────────
     def to_screen(self, p) -> tuple[float, float]:
@@ -819,6 +1310,8 @@ class Space:
             if b["on"] and now - self._last_press > 0.3:
                 self._last_press = now
                 self._press(b["id"], now)
+            return
+        if self.prompt is not None:
             return
         op = self._opened()
         c = self._card_at(x, y, 14.0 if op is None else 0.0)
@@ -946,6 +1439,15 @@ class Space:
     def step(self, dt: float, now: float | None = None):
         now = time.time() if now is None else now
         dt = min(dt, 0.05)
+        job = self._job
+        if job is not None and job.done():                       # a copy / delete / extract finished in the background
+            self._job = None
+            try:
+                msg = job.result()
+            except Exception as e:                               # noqa: BLE001
+                msg = f"Failed: {_err(e)}"
+            self._reload()
+            self.say(msg, 4.0)
         self._layout_buttons()
         self._update_hover()
         ocx, ocy = self._open_center()
@@ -1019,6 +1521,10 @@ class Space:
             if kind == "video":
                 return "Drag sideways = scrub · ▶ = play / pause · tap or Close = back · fist (hold) = back"
             return "Tap or Close = back"
+        if self.prompt is not None:
+            return "Type the new name · Enter = OK · Esc = cancel"
+        if self.select:
+            return "Tap cards to select them · Copy / Cut / Delete / Rename / Extract · Paste goes into this folder · Done = leave select mode"
         if self._claw_n:
             return "Claw: open your hand to release the cards"
         return "Pinch = grab · tap a folder to go in · tap a picture to enlarge · claw = pull cards · fist (hold) = up one folder"

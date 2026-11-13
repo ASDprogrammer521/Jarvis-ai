@@ -14,6 +14,8 @@ from core import face_id, gesture, hand_cursor
 
 HAND_GAP_GESTURES = 1 / 15    # one-shot gestures only need ~15 fps; the hand mouse and Hand Space still use every frame
 FACE_EVERY = 0.4          # seconds between face checks (gestures are checked on every frame)
+FACE_EVERY_SPACE = 2.0    # …but while Hand Space is open the CPU belongs to the hand tracking (the face lock only needs a sighting now and then)
+PROFILE = bool(os.environ.get("JARVIS_PROFILE"))
 KNOWN_COOLDOWN = 45.0     # don't greet the same person again within this many seconds
 UNKNOWN_COOLDOWN = 60.0
 ENROLL_SAMPLES = 6
@@ -118,6 +120,7 @@ class CameraHub:
         last_unknown = 0.0
         unknown_streak = 0
         last_hand = 0.0
+        _prof = [0.0, 0]
         try:
             self._set("starting…")
             import cv2
@@ -131,7 +134,8 @@ class CameraHub:
                 hands_on = self._g or self._c or self.space
                 hand_gap = 0.0 if (self._c or self.space) else HAND_GAP_GESTURES
                 hand_due = hands_on and t_now - last_hand >= hand_gap
-                face_due = (self._f or self._enroll is not None) and t_now - last_face >= FACE_EVERY
+                face_gap = FACE_EVERY if (self._enroll is not None or not self.space) else FACE_EVERY_SPACE
+                face_due = (self._f or self._enroll is not None) and t_now - last_face >= face_gap
                 cleanup = (not hands_on and (hands is not None or cursor is not None)) or (not self._f and engine is not None and self._enroll is None)
                 if not (hand_due or face_due or cleanup):
                     cap.grab()
@@ -158,8 +162,15 @@ class CameraHub:
                         cursor = None
                         (self.on_hand(None, 0.0), self.on_cursor(0, 0, "lost"))
                     if self.space:
+                        t_d = time.perf_counter() if PROFILE else 0.0
                         self.on_space(hands.detect_all(rgb))
                         self.current_gesture = None
+                        if PROFILE:
+                            _prof[0] += time.perf_counter() - t_d
+                            _prof[1] += 1
+                            if _prof[1] >= 90:
+                                print(f"[camera] hand detection {_prof[0] / _prof[1] * 1000:.1f} ms/frame")
+                                _prof[0], _prof[1] = 0.0, 0
                     else:
                         lm = hands.detect(rgb)
                         if self._c:
@@ -184,7 +195,7 @@ class CameraHub:
 
                 # ── faces ──
                 enroll = self._enroll
-                if (self._f or enroll) and now - last_face >= FACE_EVERY:
+                if (self._f or enroll) and now - last_face >= face_gap:
                     last_face = now
                     if engine is None:
                         self._set("loading face model…")
