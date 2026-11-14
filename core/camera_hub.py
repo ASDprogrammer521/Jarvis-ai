@@ -22,6 +22,65 @@ ENROLL_SAMPLES = 6
 ENROLL_TIMEOUT = 20.0
 
 
+class _HandWorker(threading.Thread):
+    """Runs Hand Space's hand detection off the camera thread.
+
+    Before, the camera loop did `read frame → run the model → read the next frame`, so the camera sat idle while the model
+    worked (and the other way round) — about half the possible frame rate, in visible steps. Now the camera keeps reading
+    while the model works on the previous frame. Only the newest frame ever waits; if the model is still busy the camera
+    thread simply skips that frame, so the picture on screen never falls behind the hand."""
+
+    def __init__(self, reader, on_result):
+        super().__init__(daemon=True, name="jarvis-hands")
+        self.reader = reader
+        self.on_result = on_result
+        self.error: Exception | None = None
+        self.ms = 0.0
+        self.frames = 0
+        self._frame = None
+        self._busy = False
+        self._quit = False
+        self._cv = threading.Condition()
+
+    def ready(self) -> bool:
+        return not self._busy and self._frame is None and not self._quit
+
+    def submit(self, rgb) -> None:
+        with self._cv:
+            self._frame = rgb
+            self._cv.notify()
+
+    def stop(self) -> None:
+        with self._cv:
+            self._quit = True
+            self._frame = None
+            self._cv.notify()
+        if threading.current_thread() is not self:
+            self.join(timeout=3)
+
+    def run(self):
+        while True:
+            with self._cv:
+                while self._frame is None and not self._quit:
+                    self._cv.wait(0.25)
+                if self._quit:
+                    return
+                rgb, self._frame = self._frame, None
+                self._busy = True
+            try:
+                t0 = time.perf_counter()
+                hands = self.reader.detect_all(rgb)
+                self.ms = self.ms * 0.9 + (time.perf_counter() - t0) * 1000 * 0.1 if self.frames else (time.perf_counter() - t0) * 1000
+                self.frames += 1
+                if not self._quit:
+                    self.on_result(hands)
+            except Exception as e:                # surfaced by the camera loop as the camera status
+                self.error = e
+                return
+            finally:
+                self._busy = False
+
+
 class CameraHub:
     """Callbacks run on the camera thread — the UI must hand them over to the Qt thread.
 
@@ -112,7 +171,7 @@ class CameraHub:
         return cap
 
     def _run(self):
-        cap = hands = engine = None
+        cap = hands = engine = worker = None
         tracker = gesture.GestureTracker()
         cursor = None
         last_face = 0.0
@@ -152,26 +211,39 @@ class CameraHub:
                     last_hand = now
                     need = 2 if self.space else 1
                     if hands is not None and getattr(hands, "num_hands", 1) != need:
+                        if worker is not None:
+                            worker.stop()
+                            worker = None
                         hands.close()
                         hands = None
                     if hands is None:
                         hands = gesture.HandReader(need)
-                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    if worker is not None and not self.space:
+                        worker.stop()                  # left Hand Space: the reader is used directly again
+                        worker = None
                     if cursor is not None and (self.space or not self._c):
                         cursor.release()
                         cursor = None
                         (self.on_hand(None, 0.0), self.on_cursor(0, 0, "lost"))
                     if self.space:
-                        t_d = time.perf_counter() if PROFILE else 0.0
-                        self.on_space(hands.detect_all(rgb))
+                        if worker is None or worker.reader is not hands:
+                            if worker is not None:
+                                worker.stop()
+                            worker = _HandWorker(hands, self.on_space)
+                            worker.start()
+                        if worker.error is not None:
+                            raise worker.error
+                        if worker.ready():
+                            worker.submit(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                         self.current_gesture = None
                         if PROFILE:
-                            _prof[0] += time.perf_counter() - t_d
                             _prof[1] += 1
                             if _prof[1] >= 90:
-                                print(f"[camera] hand detection {_prof[0] / _prof[1] * 1000:.1f} ms/frame")
-                                _prof[0], _prof[1] = 0.0, 0
+                                print(f"[camera] hand detection {worker.ms:.1f} ms/frame on {hands.backend} "
+                                      f"({worker.frames} processed)")
+                                _prof[1] = 0
                     else:
+                        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                         lm = hands.detect(rgb)
                         if self._c:
                             if cursor is None:
@@ -188,6 +260,9 @@ class CameraHub:
                         cursor.release()
                         cursor = None
                         (self.on_hand(None, 0.0), self.on_cursor(0, 0, "lost"))
+                    if worker is not None:
+                        worker.stop()
+                        worker = None
                     if hands is not None:
                         hands.close()
                         hands = None
@@ -243,6 +318,8 @@ class CameraHub:
             if cursor is not None:
                 cursor.release()
                 (self.on_hand(None, 0.0), self.on_cursor(0, 0, "lost"))
+            if worker is not None:
+                worker.stop()
             if hands is not None:
                 hands.close()
             self.current_gesture = None

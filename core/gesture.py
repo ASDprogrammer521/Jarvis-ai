@@ -5,8 +5,16 @@ config/api_keys.json (`gesture_map`). Actions are executed by the UI through the
 """
 from __future__ import annotations
 
+import contextlib
 import math
+import os
+import sys
 import time
+
+# Set before MediaPipe is imported anywhere: silences the C++ "inference_feedback_manager" warnings.
+os.environ.setdefault("GLOG_minloglevel", "2")
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "2")
 
 from core.common_utils import project_root
 
@@ -92,6 +100,11 @@ def hold_seconds() -> float:
     return SPEEDS[get_speed()]
 
 
+def gpu_wanted() -> bool:
+    """Try the GPU for hand tracking (falls back to the CPU by itself when MediaPipe can't use it). Config: hand_gpu."""
+    return bool(_cfg().get("hand_gpu", True))
+
+
 def get_camera() -> int:
     try:
         return int(_cfg().get("gesture_camera", 0))
@@ -140,29 +153,91 @@ def classify(lm) -> str | None:
     return None
 
 
+@contextlib.contextmanager
+def _quiet_stderr():
+    """Mute the C++ side of stderr for a moment: MediaPipe prints its warnings there, not through Python logging."""
+    saved = None
+    try:
+        sys.stderr.flush()
+    except Exception:
+        pass
+    try:
+        saved = os.dup(2)
+        null = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(null, 2)
+        os.close(null)
+    except Exception:
+        saved = None
+    try:
+        yield
+    finally:
+        if saved is not None:
+            try:
+                os.dup2(saved, 2)
+                os.close(saved)
+            except Exception:
+                pass
+
+
+_GPU_FAILED = False        # once MediaPipe has refused the GPU in this process, don't ask again
+
+
 class HandReader:
-    """MediaPipe wrapper that works with both the legacy `solutions` API and the newer Tasks API."""
+    """MediaPipe wrapper that works with both the legacy `solutions` API and the newer Tasks API.
+
+    `backend` is "GPU" or "CPU". The GPU delegate is tried first (MediaPipe supports it on Linux / macOS; its Windows
+    Python build has none), and the reader silently falls back to the CPU when the GPU can't be used."""
 
     def __init__(self, num_hands: int = 1):
-        import mediapipe as mp
-        self.mp = mp
-        self.num_hands = num_hands
-        self.mode = None
-        self._t0 = time.time()
-        if hasattr(mp, "solutions") and hasattr(mp.solutions, "hands"):
-            self._h = mp.solutions.hands.Hands(max_num_hands=num_hands, model_complexity=0,
-                                               min_detection_confidence=0.6, min_tracking_confidence=0.5)
-            self.mode = "legacy"
-            return
+        global _GPU_FAILED
+        with _quiet_stderr():
+            import mediapipe as mp
+            self.mp = mp
+            self.num_hands = num_hands
+            self.mode = None
+            self.backend = "CPU"
+            self._warm = 3                     # the first few frames may still print model-init warnings
+            self._t0 = time.time()
+            if hasattr(mp, "solutions") and hasattr(mp.solutions, "hands"):
+                self._h = mp.solutions.hands.Hands(max_num_hands=num_hands, model_complexity=0,
+                                                   min_detection_confidence=0.6, min_tracking_confidence=0.5)
+                self.mode = "legacy"
+                return
+            self._ensure_model()
+            self._h = None
+            if gpu_wanted() and not _GPU_FAILED:
+                try:
+                    self._h = self._build(gpu=True)
+                    self.backend = "GPU"
+                except Exception:
+                    _GPU_FAILED = True
+                    self._h = None
+            if self._h is None:
+                self._h = self._build(gpu=False)
+            self.mode = "tasks"
+
+    def _build(self, gpu: bool):
         from mediapipe.tasks import python as mpp
         from mediapipe.tasks.python import vision
-        self._ensure_model()
+        base = mpp.BaseOptions(
+            model_asset_path=str(MODEL_PATH),
+            delegate=mpp.BaseOptions.Delegate.GPU if gpu else mpp.BaseOptions.Delegate.CPU)
         opts = vision.HandLandmarkerOptions(
-            base_options=mpp.BaseOptions(model_asset_path=str(MODEL_PATH)),
-            running_mode=vision.RunningMode.VIDEO, num_hands=num_hands,
+            base_options=base, running_mode=vision.RunningMode.VIDEO, num_hands=self.num_hands,
             min_hand_detection_confidence=0.6, min_tracking_confidence=0.5)
-        self._h = vision.HandLandmarker.create_from_options(opts)
-        self.mode = "tasks"
+        return vision.HandLandmarker.create_from_options(opts)
+
+    def _to_cpu(self):
+        """The GPU delegate failed while running: rebuild on the CPU and carry on."""
+        global _GPU_FAILED
+        _GPU_FAILED = True
+        try:
+            self._h.close()
+        except Exception:
+            pass
+        with _quiet_stderr():
+            self._h = self._build(gpu=False)
+        self.backend = "CPU"
 
     @staticmethod
     def _ensure_model():
@@ -180,11 +255,25 @@ class HandReader:
 
     def detect_all(self, rgb) -> list:
         """Landmarks (21 × (x, y)) of every hand in view, up to `num_hands`."""
+        if self._warm > 0:                     # first frames: keep MediaPipe's init warnings off the console
+            self._warm -= 1
+            with _quiet_stderr():
+                return self._detect(rgb)
+        return self._detect(rgb)
+
+    def _detect(self, rgb) -> list:
         if self.mode == "legacy":
             res = self._h.process(rgb)
             return [[(p.x, p.y) for p in h.landmark] for h in (res.multi_hand_landmarks or [])]
         img = self.mp.Image(image_format=self.mp.ImageFormat.SRGB, data=rgb)
-        res = self._h.detect_for_video(img, int((time.time() - self._t0) * 1000))
+        ts = int((time.time() - self._t0) * 1000)
+        try:
+            res = self._h.detect_for_video(img, ts)
+        except Exception:
+            if self.backend != "GPU":
+                raise
+            self._to_cpu()
+            res = self._h.detect_for_video(img, int((time.time() - self._t0) * 1000))
         return [[(p.x, p.y) for p in h] for h in (res.hand_landmarks or [])]
 
     def detect(self, rgb):

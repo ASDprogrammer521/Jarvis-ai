@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import os as _os
+
+# MediaPipe / TFLite print C++ warnings ("W0000 … inference_feedback_manager.cc …") straight to stderr — keep the console clean.
+_os.environ.setdefault("GLOG_minloglevel", "2")
+_os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+_os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "2")
+
 import platform as _platform
 import subprocess as _subprocess
 
