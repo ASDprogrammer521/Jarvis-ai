@@ -13,6 +13,7 @@ import logging
 import os
 import base64
 import hashlib
+import html
 import json
 import re
 import secrets
@@ -824,6 +825,7 @@ class DashboardServer:
 <p>Press <strong style="color:#dde3ed">Remote Control</strong> in JARVIS to get a new QR code.</p>
 </div></body></html>""")
 
+            safe_key = next((k for k in self._pending_keys if k == key), "")
             del self._pending_keys[key]
             tok     = secrets.token_urlsafe(32)
             dev_tok = secrets.token_urlsafe(32)
@@ -838,12 +840,6 @@ class DashboardServer:
                 {"type": "sys", "text": "Remote connection established via QR code."}
             ))
 
-            def _js(v: str) -> str:
-                # JSON literal, safe inside an inline <script> block
-                return (json.dumps(str(v))
-                        .replace("<", "\\u003c").replace(">", "\\u003e")
-                        .replace("&", "\\u0026"))
-
             return HTMLResponse(f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width">
 <style>
@@ -851,11 +847,12 @@ class DashboardServer:
        display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center}}
   p{{color:#5e6a7e;font-size:14px}}
 </style></head>
-<body>
+<body data-tok="{html.escape(tok, quote=True)}" data-key="{html.escape(safe_key, quote=True)}" data-dev="{html.escape(dev_tok, quote=True)}">
 <script>
-  sessionStorage.setItem('jarvis_token',{_js(tok)});
-  sessionStorage.setItem('jarvis_key',{_js(key)});
-  localStorage.setItem('jarvis_device_token',{_js(dev_tok)});
+  var d = document.body.dataset;
+  sessionStorage.setItem('jarvis_token', d.tok);
+  sessionStorage.setItem('jarvis_key', d.key);
+  localStorage.setItem('jarvis_device_token', d.dev);
   setTimeout(function(){{location.replace('/')}},400);
 </script>
 <p>Connecting to JARVIS…</p>
@@ -1033,12 +1030,12 @@ class DashboardServer:
             tok = token.strip()
             if not tok or tok not in self._tokens:
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
-            safe = _safe_filename(filename)
-            base = self._uploads_dir.resolve()
-            path = (base / safe).resolve()
-            if path.parent != base or not path.is_file():
+            # Never build a path from the request: look the name up in the uploads folder listing.
+            match = next((p for p in self._uploads_dir.iterdir()
+                          if p.is_file() and p.name == filename), None)
+            if match is None:
                 return JSONResponse({"error": "Not found"}, status_code=404)
-            return FileResponse(str(path), filename=path.name)
+            return FileResponse(str(match), filename=match.name)
 
         @app.websocket("/ws")
         async def ws_ep(websocket: WebSocket, token: str = ""):
