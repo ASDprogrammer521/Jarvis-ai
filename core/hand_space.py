@@ -457,6 +457,9 @@ class Card:
         self.zoom, self.vcx, self.vcy = 1.0, 0.5, 0.5        # opened picture: zoom and the centre of the view
         self.scroll = 0.0                    # opened note: how far it is scrolled (px)
         self.yaw, self.pitch = 0.6, 0.3      # opened 3D model: its turn (radians); self.zoom scales it
+        self.yaw_t, self.pitch_t = 0.6, 0.3  # where the hand is turning it to; yaw / pitch ease toward this at the screen's frame rate
+        self._rt, self._rin = 0.0, 0.04      # when the turn target last moved, and the usual gap between two inputs (s)
+        self._htx = self._hty = None         # while a hand drags this card: where it is being dragged to (step() eases x / y to it)
         self.paused = False                  # opened video
         self.cmds: list = []                 # commands for the player: ("seek", seconds) / ("pause", bool)
         self.ret = (x, y)                    # where it sits in the grid, so it flies back after closing
@@ -484,6 +487,19 @@ def _d(a, b) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
+def _learn(o, now: float) -> None:
+    """Learn how often input reaches `o` (seconds between two inputs → o._rin): mouse ≈ 8 ms, camera 33-100 ms."""
+    gap = now - o._rt
+    if 0.003 < gap < 0.25:
+        o._rin += (gap - o._rin) * 0.3
+    o._rt = now
+
+
+def _tau(rin: float) -> float:
+    """Easing time constant that fills the gap between two inputs: slower input → longer ease, so nothing visibly steps."""
+    return min(0.12, max(0.012, 0.6 * rin))
+
+
 class Hand:
     """One tracked hand: screen-space points plus pinch / claw / fist / open classification."""
 
@@ -505,6 +521,9 @@ class Hand:
         self.fist_fired = False
         self.speed = 0.0
         self._edge = (False, False)       # (pinch started, pinch ended) this frame
+        self.dpos = (0.0, 0.0)            # what is DRAWN: pos / palm eased every screen frame (hand data arrives at the camera's 10-30 Hz)
+        self.dpalm = (0.0, 0.0)
+        self._rt, self._rin = 0.0, 0.04
 
     def update(self, pts, ratio: float, tips: list[float], now: float):
         self.pts = pts
@@ -514,6 +533,9 @@ class Hand:
         a = 0.55
         self.pos = mid if not self.hist else (self.pos[0] + (mid[0] - self.pos[0]) * a, self.pos[1] + (mid[1] - self.pos[1]) * a)
         self.palm = palm if self.palm == (0.0, 0.0) else (self.palm[0] + (palm[0] - self.palm[0]) * 0.6, self.palm[1] + (palm[1] - self.palm[1]) * 0.6)
+        _learn(self, now)
+        if not self.hist:                                         # first frame after the hand appeared: no easing from the old spot
+            self.dpos, self.dpalm = self.pos, self.palm
         ext = sum(1 for r in tips if r > 1.7)
         bent = sum(1 for r in tips if 1.15 < r <= 1.7)
         self.fist = all(r <= 1.15 for r in tips)
@@ -809,6 +831,7 @@ class Space:
             c.ret = (c.x, c.y)
             c.open, c.zoom, c.vcx, c.vcy, c.scroll = True, 1.0, 0.5, 0.5, 0.0
             c.yaw, c.pitch, c.paused, c.cmds = 0.6, 0.3, False, []
+            c.yaw_t, c.pitch_t = 0.6, 0.3
             c.homing = False
         else:
             c.open = False
@@ -1425,6 +1448,7 @@ class Space:
         c = self._card_at(x, y, 14.0 if op is None else 0.0)
         if c is not None:
             hand.held, hand.grab_off = c, (c.x - x, c.y - y)
+            c._htx = c._hty = None
             hand.down_t, hand.down_pos, hand.last = now, hand.palm, hand.pos
             c.held = not c.open
         elif op is not None and not self.full:                # a pinch on the dark background closes the open card
@@ -1436,6 +1460,7 @@ class Space:
         if not isinstance(h, Card):
             return
         h.held = False
+        h._htx = h._hty = None
         moved = _d(hand.palm, hand.down_pos)
         if now - hand.down_t < TAP_SECONDS and moved < TAP_PIXELS:           # a tap: go in / open / close
             if h.open:
@@ -1496,9 +1521,8 @@ class Space:
                 c = h.held
                 c.vx = c.vy = 0.0
                 if not c.open:
-                    tx, ty = h.pos[0] + h.grab_off[0], h.pos[1] + h.grab_off[1]
-                    c.x += (tx - c.x) * 0.45
-                    c.y += (ty - c.y) * 0.45
+                    _learn(c, now)
+                    c._htx, c._hty = h.pos[0] + h.grab_off[0], h.pos[1] + h.grab_off[1]      # step() glides the card there every screen frame
                 else:                                          # drag the open picture / scroll the open note
                     dx, dy = h.pos[0] - h.last[0], h.pos[1] - h.last[1]
                     if c.data["kind"] == "image" and c.zoom > 1.001:
@@ -1508,8 +1532,9 @@ class Space:
                     elif c.data["kind"] == "text":
                         c.scroll = max(0.0, c.scroll - dy)
                     elif c.data["kind"] == "model":                     # drag = turn the model in your hand
-                        c.yaw += dx * 0.008
-                        c.pitch = max(-1.5, min(1.5, c.pitch + dy * 0.008))
+                        _learn(c, now)
+                        c.yaw_t += dx * 0.008                           # a target: step() eases the model to it every screen frame,
+                        c.pitch_t = max(-1.5, min(1.5, c.pitch_t + dy * 0.008))   # so 10-30 Hz hand input still turns it smoothly
                     elif c.data["kind"] == "video" and dx:              # drag sideways = scrub
                         c.cmds.append(("seek", dx / max(200.0, c.w) * 90.0))
                 h.last = h.pos
@@ -1586,6 +1611,11 @@ class Space:
         fk = self.fk
         ocx, ocy = n_cx + (f_cx - n_cx) * fk, n_cy + (f_cy - n_cy) * fk
         hands_on = any(self.visible)
+        for i, h in enumerate(self.hands):                       # the ring / skeleton glide between camera frames
+            if self.visible[i] and h.pts:
+                ea = 1.0 - math.exp(-dt / _tau(h._rin))
+                h.dpos = (h.dpos[0] + (h.pos[0] - h.dpos[0]) * ea, h.dpos[1] + (h.pos[1] - h.dpos[1]) * ea)
+                h.dpalm = (h.dpalm[0] + (h.palm[0] - h.dpalm[0]) * ea, h.dpalm[1] + (h.palm[1] - h.dpalm[1]) * ea)
         for c in self.cards:
             c.ow, c.oh = self._open_dims(c)
             if fk > 0.001 and c.open:
@@ -1594,6 +1624,14 @@ class Space:
             c.k += ((1.0 if c.open else 0.0) - c.k) * min(1.0, 9 * dt)
             c.lift += ((1.0 if c.held else 0.0) - c.lift) * min(1.0, 12 * dt)
             c.hov += ((1.0 if c is self.hover_card and not c.open else 0.0) - c.hov) * min(1.0, 14 * dt)
+            if c.yaw != c.yaw_t or c.pitch != c.pitch_t:         # hand input comes at the camera's rate; the turn is drawn at the screen's
+                ea = 1.0 - math.exp(-dt / _tau(c._rin))
+                c.yaw += (c.yaw_t - c.yaw) * ea
+                c.pitch += (c.pitch_t - c.pitch) * ea
+                if abs(c.yaw_t - c.yaw) < 1e-4:
+                    c.yaw = c.yaw_t
+                if abs(c.pitch_t - c.pitch) < 1e-4:
+                    c.pitch = c.pitch_t
             if now >= c.born:
                 c.a += (1.0 - c.a) * min(1.0, 8 * dt)
             if c.open:                                           # glide to the middle of the screen
@@ -1604,6 +1642,10 @@ class Space:
                 continue
             if c.held:
                 c.angle += (0.0 - c.angle) * min(1.0, 8 * dt)
+                if c._htx is not None:
+                    ea = 1.0 - math.exp(-dt / _tau(c._rin))
+                    c.x += (c._htx - c.x) * ea
+                    c.y += (c._hty - c.y) * ea
                 continue
             tgt = c._target
             if tgt is not None:                                  # claw orbit: critically-damped spring

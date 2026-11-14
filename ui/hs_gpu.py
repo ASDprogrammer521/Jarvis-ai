@@ -1,11 +1,12 @@
 """GPU helpers for Hand Space: shaded 3D models and hardware-decoded video, drawn straight into the overlay's OpenGL canvas.
 
-* GlMesh  — uploads a triangle mesh (.obj / .stl) once, then draws it every frame with a vertex+fragment shader (lit, depth-tested).
+* GlMesh  — uploads a triangle mesh once (positions only), then draws it with a vertex+fragment shader (lit, depth-tested);
+            centring / scaling and the normals are computed by the GPU.
 * GlVideo — mpv decodes with the GPU (hwdec) and renders into an OpenGL texture (mpv render API); the texture is then drawn
             as a quad. No frame ever goes through the CPU.
 
 Every draw call needs the canvas' OpenGL context to be current (they are called from the canvas' paintGL).
-Loading (`load_mesh`) is pure numpy and runs in a worker thread.
+Loading (`load_mesh`) only parses the file (numpy) and runs in a worker thread.
 """
 from __future__ import annotations
 
@@ -25,6 +26,8 @@ GL_CULL_FACE = 0x0B44
 
 MAX_TRIS = 1_500_000                      # more than this is thinned out (the GPU could take more; the RAM to parse it is the limit)
 MAX_BYTES = 200 * 1024 * 1024
+MESH_BUDGET = 256 * 1024 * 1024                  # vertex bytes kept on the GPU; models are evicted oldest-first only beyond this
+MESH_MAX_COUNT = 40
 SMALL_MODEL_BYTES = 8 * 1024 * 1024       # only models up to this size are drawn live on the small cards
 
 
@@ -33,7 +36,11 @@ from ui.mesh_formats import read_triangles  # noqa: E402
 
 
 def load_mesh(path: str):
-    """→ (float32 array (n_vertices, 6): position + face normal, triangle count). Centred and scaled to a unit sphere."""
+    """→ (float32 array (n_vertices, 3) of raw positions, triangle count, (cx, cy, cz, 1/radius)).
+
+    The CPU only reads the file. Centring, scaling and the face normals used to be built here as big temporary arrays;
+    now the GPU does them (vertex shader: (p - centre) * 1/radius, fragment shader: normals from screen derivatives),
+    so the upload is half the size and there is almost nothing left to compute after parsing."""
     if os.path.getsize(path) > MAX_BYTES:
         raise ValueError("file is too large (200 MB max)")
     tri = np.ascontiguousarray(read_triangles(path), dtype=np.float32)
@@ -41,16 +48,15 @@ def load_mesh(path: str):
         raise ValueError("no triangles to draw")
     if len(tri) > MAX_TRIS:
         tri = tri[:: math.ceil(len(tri) / MAX_TRIS)]
-    flat = tri.reshape(-1, 3)
+    flat = np.ascontiguousarray(tri.reshape(-1, 3))
     lo, hi = flat.min(axis=0), flat.max(axis=0)
     c = (lo + hi) / 2.0
-    r = float(np.linalg.norm(flat - c, axis=1).max()) or 1.0
-    tri = (tri - c) / r
-    n = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
-    n /= np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
-    nn = np.repeat(n[:, None, :], 3, axis=1)
-    data = np.concatenate([tri, nn], axis=2).reshape(-1, 6).astype(np.float32)
-    return data, int(len(tri))
+    r2 = 0.0
+    for i in range(0, len(flat), 262144):                  # exact radius, in chunks (no 3× model-sized temporaries)
+        d = flat[i:i + 262144] - c
+        r2 = max(r2, float(np.einsum("ij,ij->i", d, d).max()))
+    r = math.sqrt(r2) or 1.0
+    return flat, int(len(tri)), (float(c[0]), float(c[1]), float(c[2]), 1.0 / r)
 
 
 # ── shared GL setup ──────────────────────────────────────────────────────────────────
@@ -85,19 +91,21 @@ def _program(vs: str, fs: str):
 MESH_VS = """
 #version 120
 attribute vec3 aP;
-attribute vec3 aN;
 uniform vec3 uR0;
 uniform vec3 uR1;
 uniform vec3 uR2;
+uniform vec3 uC;
+uniform float uInv;
 uniform float uScale;
 uniform float uRad;
 uniform float uDist;
 uniform vec2 uCen;
 uniform vec2 uRes;
-varying vec3 vN;
+varying vec3 vP;
 void main() {
-    vec3 p = vec3(dot(uR0, aP), dot(uR1, aP), dot(uR2, aP)) * uScale;
-    vN = vec3(dot(uR0, aN), dot(uR1, aN), dot(uR2, aN));
+    vec3 q = (aP - uC) * uInv;                 // centre + fit to a unit sphere: done here, on the GPU
+    vec3 p = vec3(dot(uR0, q), dot(uR1, q), dot(uR2, q)) * uScale;
+    vP = p;
     float f = uDist / (uDist - p.z);
     vec2 s = vec2(uCen.x + p.x * uRad * f, uCen.y - p.y * uRad * f);
     float z = clamp(-p.z / (uScale * 1.02 + 0.001), -1.0, 1.0);
@@ -110,9 +118,11 @@ MESH_FS = """
 uniform vec3 uMain;
 uniform vec3 uAcc;
 uniform float uAlpha;
-varying vec3 vN;
+varying vec3 vP;
 void main() {
-    vec3 n = normalize(vN);
+    vec3 c = cross(dFdx(vP), dFdy(vP));        // flat face normal from the screen-space derivatives (no normals in the buffer)
+    float l = length(c);
+    vec3 n = l > 1e-12 ? c / l : vec3(0.0, 0.0, 1.0);
     vec3 L = normalize(vec3(-0.45, 0.6, 0.75));
     float d = max(dot(n, L), 0.0) + 0.35 * max(dot(-n, L), 0.0);
     float rim = pow(1.0 - clamp(abs(n.z), 0.0, 1.0), 2.2);
@@ -131,6 +141,8 @@ class GlMesh:
         self.prog = None
         self._Buffer = None
         self._bufs: OrderedDict = OrderedDict()                # path → (QOpenGLBuffer, vertex count)
+        self._sizes: dict = {}                                 # path → bytes on the GPU
+        self._meta: dict = {}                                  # path → (cx, cy, cz, 1/radius) for the vertex shader
 
     def init(self) -> bool:
         try:
@@ -147,7 +159,9 @@ class GlMesh:
     def has(self, key: str) -> bool:
         return key in self._bufs
 
-    def upload(self, key: str, data: np.ndarray, keep: int = 3) -> bool:
+    def upload(self, key: str, data: np.ndarray, meta: tuple, keep: int = 0) -> bool:
+        """Keeps models until the GPU budget is used up. (Before, only 3 were kept, so a folder with more models
+        evicted them in a loop: every frame some model was parsed and uploaded again.)"""
         try:
             vbo = self._Buffer(self._Buffer.Type.VertexBuffer)
             vbo.create()
@@ -156,8 +170,13 @@ class GlMesh:
             vbo.allocate(raw, len(raw))
             vbo.release()
             self._bufs[key] = (vbo, len(data))
-            while len(self._bufs) > keep:
-                _, (old, _n) = self._bufs.popitem(last=False)
+            self._sizes[key] = len(raw)
+            self._meta[key] = meta
+            self._bufs.move_to_end(key)
+            while len(self._bufs) > 1 and (sum(self._sizes.values()) > MESH_BUDGET or len(self._bufs) > MESH_MAX_COUNT):
+                old_key, (old, _n) = self._bufs.popitem(last=False)
+                self._sizes.pop(old_key, None)
+                self._meta.pop(old_key, None)
                 old.destroy()
             return True
         except Exception as e:
@@ -171,6 +190,8 @@ class GlMesh:
             except Exception:
                 pass
         self._bufs.clear()
+        self._sizes.clear()
+        self._meta.clear()
 
     def draw(self, p, host, key: str, rect, yaw: float, pitch: float, zoom: float, alpha: float, cm, ca) -> bool:
         """rect: QRectF in the widget's pixels (the model is centred in it and clipped to it)."""
@@ -178,6 +199,8 @@ class GlMesh:
         if not self.ok or ent is None or rect.width() < 4 or rect.height() < 4:
             return False
         vbo, count = ent
+        cx, cy, cz, inv = self._meta.get(key, (0.0, 0.0, 0.0, 1.0))
+        self._bufs.move_to_end(key)                          # in use → last to be evicted
         f, prog = self.f, self.prog
         dpr = float(host.devicePixelRatioF())
         W, H = float(host.width()), float(host.height())
@@ -198,6 +221,8 @@ class GlMesh:
             prog.setUniformValue("uRes", W, H)
             prog.setUniformValue("uCen", float(rect.center().x()), float(rect.center().y()))
             prog.setUniformValue("uDist", 3.4)
+            prog.setUniformValue("uC", float(cx), float(cy), float(cz))
+            prog.setUniformValue("uInv", float(inv))
             prog.setUniformValue("uScale", float(zoom))
             prog.setUniformValue("uRad", float(rad))
             prog.setUniformValue("uAlpha", float(max(0.0, min(1.0, alpha))))
@@ -206,15 +231,12 @@ class GlMesh:
             prog.setUniformValue("uR0", *rows[0])
             prog.setUniformValue("uR1", *rows[1])
             prog.setUniformValue("uR2", *rows[2])
-            lp, ln = prog.attributeLocation("aP"), prog.attributeLocation("aN")
+            lp = prog.attributeLocation("aP")
             vbo.bind()
             prog.enableAttributeArray(lp)
-            prog.setAttributeBuffer(lp, GL_FLOAT, 0, 3, 24)
-            prog.enableAttributeArray(ln)
-            prog.setAttributeBuffer(ln, GL_FLOAT, 12, 3, 24)
+            prog.setAttributeBuffer(lp, GL_FLOAT, 0, 3, 12)
             f.glDrawArrays(GL_TRIANGLES, 0, count)
             prog.disableAttributeArray(lp)
-            prog.disableAttributeArray(ln)
             vbo.release()
             prog.release()
             f.glClear(GL_DEPTH_BUFFER_BIT)                     # leave the depth buffer clean for the 2D painter

@@ -150,6 +150,8 @@ class HandSpaceOverlay(QWidget):
         self._cm = QColor(C.PRI).getRgb()[:3]
         self._ca = QColor(C.ACC).getRgb()[:3]
         self._cv = None
+        self._pms = 0.0                        # recent paint time (ms): decides whether ~60 fps is affordable
+        self._why = ""                        # cached reason the OpenGL features are off (see _gl_why)
         if _GLW is not None and GL_ENABLED and read_cfg().get("hand_space_gpu", True):
             try:
                 self._cv = _Canvas(self)
@@ -167,6 +169,7 @@ class HandSpaceOverlay(QWidget):
         self.space.start(pinned)                       # always begins on "This PC": the drives, C: first
         self.space.close_requested = False
         self._bg = None
+        self._why = ""
         self.show()
         force_topmost(self, click_through=False)
         self.activateWindow()
@@ -177,6 +180,21 @@ class HandSpaceOverlay(QWidget):
             self._cv.setGeometry(self.rect())
             QTimer.singleShot(700, self._check_gl)
 
+    def _gl_why(self) -> str:
+        """The real reason the 3D models / GPU video are off, instead of a one-size-fits-all guess."""
+        if not self._why:
+            if _GLW is None:
+                self._why = "PyQt6 OpenGL widgets are missing (pip install PyQt6)"
+            elif not GL_ENABLED:
+                self._why = "GPU acceleration was off when Jarvis started (turn it on in Settings, then restart Jarvis)"
+            elif not read_cfg().get("hand_space_gpu", True):
+                self._why = '"hand_space_gpu" is false in config/api_keys.json (set it to true or delete it)'
+            elif self._cv is None:
+                self._why = "the OpenGL canvas could not start on this GPU / driver"
+            else:
+                self._why = "3D shader failed: " + (self._mesh.err or "unknown error")[:100]
+        return self._why
+
     def _check_gl(self):
         """If the OpenGL canvas could not start on this machine, drop it and paint on the CPU as before."""
         cv = self._cv
@@ -185,6 +203,7 @@ class HandSpaceOverlay(QWidget):
             cv.hide()
             cv.deleteLater()
             self._bg = None
+            self._why = ""
             QWidget.update(self)
 
     def update(self, *a):                      # noqa: A003 - repaint the GL canvas when there is one
@@ -238,6 +257,14 @@ class HandSpaceOverlay(QWidget):
     def set_hands(self, all_lm):
         if not self.isVisible():
             return
+        if PROFILE:                                                      # how often does the hand data really arrive?
+            self._hn = getattr(self, "_hn", 0) + 1
+            t = time.time()
+            t0 = getattr(self, "_hn_t", t)
+            self._hn_t = t0
+            if t - t0 >= 3.0:
+                print(f"[hand space] hand input {self._hn / (t - t0):.1f} Hz")
+                self._hn, self._hn_t = 0, t
         self.space.update_hands(all_lm)
         if self.space.close_requested:
             self.hide()
@@ -267,7 +294,8 @@ class HandSpaceOverlay(QWidget):
         busy = (changed or any(sp.visible) or op is not None or sp.prompt is not None or self._jobs or self._mjobs or anim
                 or any(c.a < 0.99 or c.homing or c.k > 0.01 or c.hov > 0.01 or abs(c.vx) + abs(c.vy) > 2.0 for c in sp.cards))
         self._idle += 0 if busy else 1
-        want = 16 if (self._video.active and op is not None and not op.paused) else 28      # film: smooth; otherwise ~36 fps is plenty (camera = 30)
+        fast = self._cv is not None and 0.0 < self._pms < 9.0 and any(sp.visible)             # a hand in view and cheap frames: 60 fps ring
+        want = 16 if ((self._video.active and op is not None and not op.paused) or fast) else 28
         if self._t.interval() != want:
             self._t.setInterval(want)
         if busy:                                   # an idle screen (nothing moving, nobody there) is not repainted at all
@@ -299,8 +327,8 @@ class HandSpaceOverlay(QWidget):
     def _upload_models(self):
         """Runs inside paintGL (the context is current): one upload per frame so a big model never freezes the screen."""
         for path in list(self._mdata):
-            data, tris = self._mdata.pop(path)
-            if self._mesh.ok and self._mesh.upload(path, data):
+            data, tris, meta = self._mdata.pop(path)
+            if self._mesh.ok and self._mesh.upload(path, data, meta):
                 self._tris[path] = tris
             else:
                 self._mfail[path] = self._mesh.err or "GPU upload failed"
@@ -314,8 +342,7 @@ class HandSpaceOverlay(QWidget):
             return "failed"
         if path in self._mjobs or path in self._mdata:
             return "loading"
-        heavy = os.path.splitext(path)[1].lower() in HEAVY_EXT           # STEP / USD are slow to read: only when opened
-        if (opened or (not heavy and c.data.get("_sz", 0) <= hs_gpu.SMALL_MODEL_BYTES)) and len(self._mjobs) < 2:
+        if opened and len(self._mjobs) < 2:                              # models are read only when opened; cards just show "3D"
             self._mjobs[path] = self._mpool.submit(hs_gpu.load_mesh, path)
             return "loading"
         return "idle"
@@ -485,12 +512,14 @@ class HandSpaceOverlay(QWidget):
         p.end()
 
     def _paint_gl(self, cv):
-        t0 = time.perf_counter() if PROFILE else 0.0
+        t0 = time.perf_counter()
         try:
             self._paint_gl_inner(cv)
         finally:
+            ms = (time.perf_counter() - t0) * 1000
+            self._pms = self._pms * 0.9 + ms * 0.1 if self._pms else ms
             if PROFILE:
-                self._pt[0] += time.perf_counter() - t0
+                self._pt[0] += ms / 1000
                 self._pt[1] += 1
                 if self._pt[1] >= 90:
                     print(f"[hand space] paint {self._pt[0] / self._pt[1] * 1000:.1f} ms/frame · {len(self.space.cards)} cards")
@@ -1127,20 +1156,13 @@ class HandSpaceOverlay(QWidget):
         state = "off"
         if self._cv is not None and self._mesh.ok:
             state = self._mesh_state(c, opened)
-            if state == "ready" and (opened or (abs(c.angle) < 0.12 and self._live < 12)):
-                area = tr if fs else tr.adjusted(0, 4, 0, -(54 if opened else 44))
+            if state == "ready" and opened:                      # the card only says "3D"; the model itself is drawn once opened
+                area = tr if fs else tr.adjusted(0, 4, 0, -54)
                 box = p.worldTransform().mapRect(area)
-                if opened:
-                    yaw, pitch, zoom = c.yaw, c.pitch, c.zoom
-                else:
-                    yaw, pitch, zoom = time.time() * 0.7 + c.phase, 0.35, 1.0
-                drawn = self._mesh.draw(p, self._cv, path, box, yaw, pitch, zoom, p.opacity(), self._cm, self._ca)
-                if drawn and not opened:
-                    self._live += 1
-                    self._anim = True
+                drawn = self._mesh.draw(p, self._cv, path, box, c.yaw, c.pitch, c.zoom, p.opacity(), self._cm, self._ca)
         if not drawn:
             msg = {"loading": "Loading 3D model…", "failed": self._mfail.get(path, "Can't show this model"),
-                   "off": "3D models need OpenGL (hw_accel on)", "idle": ""}.get(state, "")
+                   "off": self._gl_why(), "idle": ""}.get(state, "")
             f = _F(26 if not opened else 40, QFont.Weight.Bold)
             p.setFont(f)
             p.setPen(QColor(C.ACC))
@@ -1222,7 +1244,7 @@ class HandSpaceOverlay(QWidget):
             p.drawPolygon(QPolygonF([QPointF(cx - 9, cy - 13), QPointF(cx - 9, cy + 13), QPointF(cx + 14, cy)]))
             msg = err and f"GPU video unavailable: {err}"[:120]
             if not msg and c.open and self._cv is None:
-                msg = "GPU video needs OpenGL (hw_accel on)"
+                msg = "GPU video: " + self._gl_why()
             elif not msg and c.open:
                 msg = "Loading video…"
             if msg:
@@ -1250,7 +1272,8 @@ class HandSpaceOverlay(QWidget):
         return getattr(self, "_skel", False)
 
     def _draw_hand(self, p: QPainter, h):
-        pts = [QPointF(x, y) for x, y in h.pts]
+        ox, oy = h.dpos[0] - h.pos[0], h.dpos[1] - h.pos[1]          # drawn position glides; logic keeps using h.pos
+        pts = [QPointF(x + ox, y + oy) for x, y in h.pts]
         col = QColor(C.GREEN if h.pinching else C.AMBER if h.claw else C.RED if h.fist else C.PRI)
         if self._skeleton():                                   # optional thin outline, never joint dots
             path = QPainterPath()
@@ -1262,16 +1285,16 @@ class HandSpaceOverlay(QWidget):
             p.setPen(QPen(c, 1.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawPath(path)
-        mid = QPointF(h.pos[0], h.pos[1])
+        mid = QPointF(h.dpos[0], h.dpos[1])
         ring = QColor(col)
         ring.setAlpha(230)
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.setPen(QPen(ring, 2))
         p.drawEllipse(mid, 10 if h.pinching else 20, 10 if h.pinching else 20)
         if h.claw:
-            p.drawEllipse(QPointF(*h.palm), 120, 120)
+            p.drawEllipse(QPointF(*h.dpalm), 120, 120)
         if h.fist_prog > 0.05:                                 # fist held: a ring fills up, then "back"
-            pc = QPointF(*h.palm)
+            pc = QPointF(*h.dpalm)
             p.setPen(QPen(QColor(C.AMBER), 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             p.drawArc(QRectF(pc.x() - 46, pc.y() - 46, 92, 92), 90 * 16, int(-360 * 16 * h.fist_prog))
             p.setFont(_F(10, QFont.Weight.DemiBold))
