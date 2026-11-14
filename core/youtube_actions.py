@@ -10,6 +10,13 @@ from __future__ import annotations
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlparse
+
+def _is_youtube(url: str) -> bool:
+    """True only when the URL's hostname is youtube.com or a subdomain of it."""
+    host = (urlparse(url).hostname or "").lower()
+    return host == "youtube.com" or host.endswith(".youtube.com")
+
 
 PROFILE = Path.home() / ".jarvis_profiles" / "youtube"
 _LOCK = threading.Lock()
@@ -72,7 +79,7 @@ def _signin(p) -> bool:
             if not ctx.pages:                         # the user closed the window
                 return False
             try:
-                if "youtube.com" in page.url and page.query_selector("button#avatar-btn"):
+                if _is_youtube(page.url) and page.query_selector("button#avatar-btn"):
                     time.sleep(1.5)                   # let the cookies settle
                     return True
             except Exception:

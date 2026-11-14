@@ -13,6 +13,7 @@ import logging
 import os
 import base64
 import hashlib
+import json
 import re
 import secrets
 import socket
@@ -837,6 +838,12 @@ class DashboardServer:
                 {"type": "sys", "text": "Remote connection established via QR code."}
             ))
 
+            def _js(v: str) -> str:
+                # JSON literal, safe inside an inline <script> block
+                return (json.dumps(str(v))
+                        .replace("<", "\\u003c").replace(">", "\\u003e")
+                        .replace("&", "\\u0026"))
+
             return HTMLResponse(f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width">
 <style>
@@ -846,9 +853,9 @@ class DashboardServer:
 </style></head>
 <body>
 <script>
-  sessionStorage.setItem('jarvis_token','{tok}');
-  sessionStorage.setItem('jarvis_key','{key}');
-  localStorage.setItem('jarvis_device_token','{dev_tok}');
+  sessionStorage.setItem('jarvis_token',{_js(tok)});
+  sessionStorage.setItem('jarvis_key',{_js(key)});
+  localStorage.setItem('jarvis_device_token',{_js(dev_tok)});
   setTimeout(function(){{location.replace('/')}},400);
 </script>
 <p>Connecting to JARVIS…</p>
@@ -956,6 +963,8 @@ class DashboardServer:
                 while dest.exists():
                     dest = self._uploads_dir / f"{stem}_{counter}{suffix}"
                     counter += 1
+                if dest.resolve().parent != self._uploads_dir.resolve():
+                    return JSONResponse({"error": "Invalid filename"}, status_code=400)
 
                 size = 0
                 max_bytes = MAX_UPLOAD_MB * 1024 * 1024
@@ -979,7 +988,7 @@ class DashboardServer:
                         dest.unlink(missing_ok=True)
                     except Exception:
                         pass
-                    return JSONResponse({"error": str(exc)}, status_code=500)
+                    return JSONResponse({"error": "Upload failed"}, status_code=500)
 
                 asyncio.create_task(self.broadcast({
                     "type": "file_received",
@@ -1024,11 +1033,12 @@ class DashboardServer:
             tok = token.strip()
             if not tok or tok not in self._tokens:
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
-            safe = re.sub(r'[/\\]', '', filename)
-            path = self._uploads_dir / safe
-            if not path.exists() or not path.is_file():
+            safe = _safe_filename(filename)
+            base = self._uploads_dir.resolve()
+            path = (base / safe).resolve()
+            if path.parent != base or not path.is_file():
                 return JSONResponse({"error": "Not found"}, status_code=404)
-            return FileResponse(str(path), filename=safe)
+            return FileResponse(str(path), filename=path.name)
 
         @app.websocket("/ws")
         async def ws_ep(websocket: WebSocket, token: str = ""):
@@ -1042,11 +1052,6 @@ class DashboardServer:
                     self._tokens.add(session)
                     self._token_keys[session] = pin
                     tok = session
-                    if self._connect_callback:
-                        try:
-                            self._connect_callback()
-                        except Exception:
-                            pass
                     asyncio.create_task(self.broadcast(
                         {"type": "sys", "text": "Phone connected via Jarvis App."}
                     ))
@@ -1064,6 +1069,24 @@ class DashboardServer:
                     client_ip = websocket.client.host
             except Exception:
                 client_ip = None
+            # Show every authenticated client (phone app OR web page) as connected in Jarvis,
+            # even before/without a "phone_status" message.
+            try:
+                ua = (websocket.headers.get("user-agent") or "").lower()
+            except Exception:
+                ua = ""
+            if "jarvis" in ua or "okhttp" in ua or "dart" in ua:
+                kind = "Jarvis App"
+            elif "mobile" in ua or "android" in ua or "iphone" in ua:
+                kind = "Phone browser"
+            else:
+                kind = "Web browser"
+            label = f"{kind} ({client_ip})" if client_ip else kind
+            self._phone_devices[websocket] = {
+                "type": "phone_status", "device_name": label[:80],
+                "battery_percent": None, "charging": False, "placeholder": True,
+            }
+            self._emit_phone_devices()
             if self._connect_callback:
                 try:
                     self._connect_callback(client_ip)
@@ -1120,13 +1143,15 @@ class DashboardServer:
                         status = _sanitize_phone_status(data)
                         if status:
                             self._phone_devices.pop(websocket, None)
-                            self._phone_devices[websocket] = status
+                            self._phone_devices[websocket] = status   # real status replaces placeholder
                             self._emit_phone_devices()
                     elif data.get("type") == "phone_event":
                         event = _sanitize_phone_event(data)
                         if event:
                             await self._handle_phone_event(event)
-                    elif data.get("type") == "phone_notification" and websocket in self._phone_devices:
+                    elif (data.get("type") == "phone_notification"
+                          and websocket in self._phone_devices
+                          and not self._phone_devices[websocket].get("placeholder")):
                         notification = _sanitize_phone_notification(data)
                         if notification and self._phone_event_callback:
                             try:
@@ -1158,7 +1183,7 @@ class DashboardServer:
                 from core.plugin_store import list_plugins
                 return JSONResponse({"plugins": list_plugins()})
             except Exception as e:
-                return JSONResponse({"plugins": [], "error": str(e)})
+                return JSONResponse({"plugins": [], "error": "Could not list plugins"})
 
         @app.post("/api/plugins/enable")
         async def api_plugins_enable(req: Request):
@@ -1171,7 +1196,7 @@ class DashboardServer:
                 msg = ps_run(action="enable", value=name)
                 return JSONResponse({"ok": True, "message": msg})
             except Exception as e:
-                return JSONResponse({"ok": False, "error": str(e)})
+                return JSONResponse({"ok": False, "error": "Plugin operation failed"})
 
         @app.post("/api/plugins/disable")
         async def api_plugins_disable(req: Request):
@@ -1184,7 +1209,7 @@ class DashboardServer:
                 msg = ps_run(action="disable", value=name)
                 return JSONResponse({"ok": True, "message": msg})
             except Exception as e:
-                return JSONResponse({"ok": False, "error": str(e)})
+                return JSONResponse({"ok": False, "error": "Plugin operation failed"})
 
         @app.post("/api/plugins/install")
         async def api_plugins_install(req: Request):
@@ -1199,7 +1224,7 @@ class DashboardServer:
                 name = msg.split(":")[-1].strip() if ok else ""
                 return JSONResponse({"ok": ok, "name": name, "error": None if ok else msg, "message": msg})
             except Exception as e:
-                return JSONResponse({"ok": False, "error": str(e)})
+                return JSONResponse({"ok": False, "error": "Plugin operation failed"})
 
         @app.get("/api/phone_screen")
         async def api_phone_screen(req: Request):

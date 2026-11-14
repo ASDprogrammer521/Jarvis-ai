@@ -170,7 +170,7 @@ _SIMPLE = {
     "hangup": ("Hang-up requested", "hangup"),
     "call_state": ("Asked the phone for its call state — the reply shows in the log", "call_status"),
     "lock": ("Lock requested", "lock"),
-    "unlock": ("Wake / unlock requested (a PIN or fingerprint is still needed)", "unlock"),
+    "unlock": ("Unlock requested — the phone draws your pattern / types your PIN or password if you set it up in Jarvis App → Unlock setup", "unlock"),
     "home": ("Phone sent to the home screen", "home"),
     "flashlight": ("Flashlight on", "flashlight"),
     "flashlight_off": ("Flashlight off", "flashlight_off"),

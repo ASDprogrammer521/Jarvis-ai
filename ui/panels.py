@@ -706,13 +706,13 @@ class SettingsPanel(GlassCard):
 
         def ask_pin() -> bool:
             from PyQt6.QtWidgets import QInputDialog
-            pin, ok = QInputDialog.getText(self, "Face lock PIN", "Choose a PIN (fallback if the camera can't see you):",
+            pin, ok = QInputDialog.getText(self, "Face lock password", "Choose a password — any length, letters, digits or symbols (fallback if the camera can't see you):",
                                            QLineEdit.EchoMode.Password)
             if not ok:
                 return False
-            again, ok = QInputDialog.getText(self, "Face lock PIN", "Repeat the PIN:", QLineEdit.EchoMode.Password)
+            again, ok = QInputDialog.getText(self, "Face lock password", "Repeat the password:", QLineEdit.EchoMode.Password)
             if not ok or again != pin:
-                w._toast("PINs didn't match")
+                w._toast("Passwords didn't match")
                 return False
             err = face_lock.set_pin(pin)
             if err:

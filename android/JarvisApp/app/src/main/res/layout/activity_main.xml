@@ -8,11 +8,11 @@
     <!-- Header -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="64dp"
+        android:layout_height="68dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:paddingHorizontal="20dp"
-        android:background="@color/bar">
+        android:background="@drawable/bg_header">
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
@@ -23,16 +23,17 @@
                 android:layout_height="wrap_content"
                 android:text="J A R V I S"
                 android:textColor="@color/text"
-                android:textSize="17sp"
+                android:textSize="18sp"
                 android:textStyle="bold"
-                android:letterSpacing="0.16" />
+                android:letterSpacing="0.2" />
             <TextView
                 android:id="@+id/subtitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Phone link"
-                android:textColor="@color/muted"
-                android:textSize="11sp" />
+                android:textColor="@color/accent"
+                android:textSize="11sp"
+                android:letterSpacing="0.08" />
         </LinearLayout>
         <TextView
             android:id="@+id/statusText"
@@ -47,18 +48,33 @@
             android:paddingVertical="7dp" />
     </LinearLayout>
 
-    <ScrollView
+
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
+        android:layout_weight="1">
+
+    <ScrollView
+        android:id="@+id/pageHome"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
         android:fillViewport="true"
         android:clipToPadding="false"
-        android:padding="14dp">
+        android:scrollbars="none"
+        android:padding="16dp">
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical">
-
+            <TextView style="@style/PageTitle" android:text="Home" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="14dp"
+                android:text="Connect and watch what Jarvis is doing"
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
             <!-- Connect (shown while offline) -->
             <LinearLayout
                 android:id="@+id/connectCard"
@@ -66,13 +82,13 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:background="@drawable/bg_card"
-                android:padding="18dp">
+                android:padding="20dp">
                 <TextView style="@style/Label" android:text="CONNECT TO PC" />
                 <EditText
                     android:id="@+id/hostInput"
                     android:layout_width="match_parent"
-                    android:layout_height="50dp"
-                    android:layout_marginTop="12dp"
+                    android:layout_height="52dp"
+                    android:layout_marginTop="14dp"
                     android:hint="PC IP (e.g. 192.168.1.20)"
                     android:inputType="textUri"
                     android:paddingHorizontal="16dp"
@@ -84,7 +100,7 @@
                 <EditText
                     android:id="@+id/keyInput"
                     android:layout_width="match_parent"
-                    android:layout_height="50dp"
+                    android:layout_height="52dp"
                     android:layout_marginTop="10dp"
                     android:hint="Pairing key from Jarvis"
                     android:inputType="textCapCharacters"
@@ -97,13 +113,14 @@
                 <TextView
                     android:id="@+id/connectBtn"
                     android:layout_width="match_parent"
-                    android:layout_height="50dp"
-                    android:layout_marginTop="14dp"
+                    android:layout_height="54dp"
+                    android:layout_marginTop="16dp"
                     android:gravity="center"
                     android:text="CONNECT"
                     android:textColor="#FFFFFF"
+                    android:textSize="14sp"
                     android:textStyle="bold"
-                    android:letterSpacing="0.1"
+                    android:letterSpacing="0.14"
                     android:background="@drawable/bg_btn_primary"
                     android:clickable="true"
                     android:focusable="true" />
@@ -114,29 +131,6 @@
                     android:text="Same Wi-Fi required. Get a fresh key from Jarvis → Remote Control."
                     android:textColor="@color/muted"
                     android:textSize="11sp" />
-                <TextView
-                    android:id="@+id/adminBtn"
-                    android:layout_width="match_parent"
-                    android:layout_height="42dp"
-                    android:layout_marginTop="10dp"
-                    android:gravity="center"
-                    android:text="Enable lock permission"
-                    android:textColor="@color/text_dim"
-                    android:textSize="12sp"
-                    android:background="@drawable/bg_btn_ghost"
-                    android:clickable="true"
-                    android:focusable="true" />
-                <TextView
-                    android:id="@+id/forgetBtn"
-                    android:layout_width="match_parent"
-                    android:layout_height="36dp"
-                    android:layout_marginTop="6dp"
-                    android:gravity="center"
-                    android:text="Forget PC certificate"
-                    android:textColor="@color/muted"
-                    android:textSize="11sp"
-                    android:clickable="true"
-                    android:focusable="true" />
             </LinearLayout>
 
             <!-- Connected bar (shown while online) -->
@@ -186,6 +180,67 @@
                     android:focusable="true" />
             </LinearLayout>
 
+            <!-- Log -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:padding="16dp"
+                android:minHeight="180dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+                    <TextView style="@style/Label" android:layout_width="0dp" android:layout_weight="1" android:text="ACTIVITY" />
+                    <TextView
+                        android:id="@+id/clearLog"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Clear"
+                        android:textColor="@color/muted"
+                        android:textSize="12sp"
+                        android:padding="4dp"
+                        android:clickable="true"
+                        android:focusable="true" />
+                </LinearLayout>
+                <TextView
+                    android:id="@+id/logView"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:textColor="@color/text_dim"
+                    android:fontFamily="monospace"
+                    android:textSize="12sp"
+                    android:lineSpacingExtra="4dp"
+                    android:textIsSelectable="true" />
+            </LinearLayout>
+
+        </LinearLayout>
+    </ScrollView>
+    <ScrollView
+        android:id="@+id/pagePhone"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:clipToPadding="false"
+        android:scrollbars="none"
+        android:padding="16dp" android:visibility="gone">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+            <TextView style="@style/PageTitle" android:text="Phone" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="14dp"
+                android:text="Calls and quick actions on this phone"
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
             <!-- Phone / calls -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -257,7 +312,7 @@
             </LinearLayout>
 
             <!-- Quick actions -->
-            <TextView style="@style/Label" android:layout_marginTop="18dp" android:layout_marginStart="6dp" android:text="QUICK ACTIONS" />
+            <TextView style="@style/Label" android:layout_marginTop="18dp" android:layout_marginStart="4dp" android:text="PHONE ACTIONS" />
             <GridLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -277,8 +332,32 @@
             <TextView android:id="@+id/qFiles" style="@style/Tile" android:text="📁  Send file" android:textColor="@color/text" />
             </GridLayout>
 
+
+        </LinearLayout>
+    </ScrollView>
+    <ScrollView
+        android:id="@+id/pagePc"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:clipToPadding="false"
+        android:scrollbars="none"
+        android:padding="16dp" android:visibility="gone">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+            <TextView style="@style/PageTitle" android:text="PC control" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="14dp"
+                android:text="Remote controls for the linked computer"
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
             <!-- PC control -->
-            <TextView style="@style/Label" android:layout_marginTop="14dp" android:layout_marginStart="6dp" android:text="CONTROL THE PC" />
+            <TextView style="@style/Label" android:layout_marginTop="4dp" android:layout_marginStart="4dp" android:text="CONTROL THE PC" />
             <GridLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -295,44 +374,74 @@
                 <TextView android:id="@+id/qPcApp" style="@style/Tile" android:text="🪟  App…" />
             </GridLayout>
 
-            <!-- Log -->
+
+        </LinearLayout>
+    </ScrollView>
+    <ScrollView
+        android:id="@+id/pageSettings"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:clipToPadding="false"
+        android:scrollbars="none"
+        android:padding="16dp" android:visibility="gone">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+            <TextView style="@style/PageTitle" android:text="Settings" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="14dp"
+                android:text="Permissions, security and the PC link"
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
+
+            <TextView style="@style/Label" android:layout_marginStart="4dp" android:text="SECURITY" />
+            <TextView android:id="@+id/qUnlockSetup" style="@style/Row" android:text="🔓   Phone unlock (PIN · password · pattern)" />
+            <TextView android:id="@+id/adminBtn" style="@style/Row" android:text="🔒   Enable lock permission" />
+
+            <TextView style="@style/Label" android:layout_marginTop="22dp" android:layout_marginStart="4dp" android:text="PC LINK" />
+            <TextView android:id="@+id/forgetBtn" style="@style/Row" android:text="🧾   Forget PC certificate" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:layout_marginHorizontal="4dp"
+                android:text="Forgetting the certificate lets you pair with a new or reinstalled PC. You will need a fresh key from Jarvis → Remote Control."
+                android:textColor="@color/muted"
+                android:textSize="11sp" />
+
+            <TextView style="@style/Label" android:layout_marginTop="22dp" android:layout_marginStart="4dp" android:text="ABOUT" />
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="18dp"
+                android:layout_marginTop="8dp"
                 android:orientation="vertical"
                 android:background="@drawable/bg_card"
-                android:padding="16dp"
-                android:minHeight="180dp">
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
-                    <TextView style="@style/Label" android:layout_width="0dp" android:layout_weight="1" android:text="ACTIVITY" />
-                    <TextView
-                        android:id="@+id/clearLog"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Clear"
-                        android:textColor="@color/muted"
-                        android:textSize="12sp"
-                        android:padding="4dp"
-                        android:clickable="true"
-                        android:focusable="true" />
-                </LinearLayout>
+                android:padding="16dp">
                 <TextView
-                    android:id="@+id/logView"
-                    android:layout_width="match_parent"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:textColor="@color/text_dim"
-                    android:textSize="13sp"
-                    android:lineSpacingExtra="4dp"
-                    android:textIsSelectable="true" />
+                    android:text="Jarvis App"
+                    android:textColor="@color/text"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+                <TextView
+                    android:id="@+id/aboutVersion"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Version 1.0.0"
+                    android:textColor="@color/muted"
+                    android:textSize="12sp" />
             </LinearLayout>
+
         </LinearLayout>
     </ScrollView>
+    </FrameLayout>
 
     <!-- Chat bar -->
     <LinearLayout
@@ -341,7 +450,8 @@
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:padding="12dp"
-        android:background="@color/bar">
+        android:background="@drawable/bg_chatbar"
+        android:id="@+id/chatBar">
         <ImageButton
             android:id="@+id/attachBtn"
             android:layout_width="46dp"
@@ -361,8 +471,8 @@
             android:hint="Ask Jarvis anything…"
             android:inputType="textCapSentences|textMultiLine"
             android:maxLines="3"
-            android:paddingHorizontal="16dp"
-            android:background="@drawable/bg_input"
+            android:paddingHorizontal="18dp"
+            android:background="@drawable/bg_input_pill"
             android:textColor="@color/text"
             android:textColorHint="@color/muted"
             android:textSize="14sp" />
@@ -375,6 +485,32 @@
             android:contentDescription="Send"
             android:scaleType="centerInside"
             android:padding="13dp" />
+    </LinearLayout>
+    <!-- Bottom navigation -->
+    <LinearLayout
+        android:id="@+id/bottomNav"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:orientation="horizontal"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="6dp"
+        android:background="@drawable/bg_navbar">
+        <LinearLayout android:id="@+id/navHome" style="@style/NavTab">
+            <ImageView android:id="@+id/navHomeIcon" style="@style/NavIcon" android:src="@drawable/ic_nav_home" />
+            <TextView android:id="@+id/navHomeLabel" style="@style/NavLabel" android:text="Home" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/navPhone" style="@style/NavTab">
+            <ImageView android:id="@+id/navPhoneIcon" style="@style/NavIcon" android:src="@drawable/ic_nav_phone" />
+            <TextView android:id="@+id/navPhoneLabel" style="@style/NavLabel" android:text="Phone" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/navPc" style="@style/NavTab">
+            <ImageView android:id="@+id/navPcIcon" style="@style/NavIcon" android:src="@drawable/ic_nav_pc" />
+            <TextView android:id="@+id/navPcLabel" style="@style/NavLabel" android:text="PC" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/navSettings" style="@style/NavTab">
+            <ImageView android:id="@+id/navSettingsIcon" style="@style/NavIcon" android:src="@drawable/ic_nav_settings" />
+            <TextView android:id="@+id/navSettingsLabel" style="@style/NavLabel" android:text="Settings" />
+        </LinearLayout>
     </LinearLayout>
 </LinearLayout>
 <!--by ASDcuber521-->

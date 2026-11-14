@@ -2,5 +2,6 @@
 <resources>
     <string name="app_name">Jarvis App</string>
     <string name="device_admin_description">Allows Jarvis to lock the screen when requested.</string>
+    <string name="accessibility_description">Lets Jarvis unlock this phone when you ask it to: it draws your saved pattern, taps your saved PIN or types your saved password on the lock screen. It only acts on the lock screen and only when your paired PC sends an unlock command.</string>
 </resources>
 <!-- by ASDcuber521 -->

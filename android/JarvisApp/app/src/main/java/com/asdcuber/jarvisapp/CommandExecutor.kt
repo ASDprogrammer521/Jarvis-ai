@@ -67,16 +67,25 @@ object CommandExecutor {
             )
             "lock" -> lockScreen(context)
             "unlock", "wake" -> {
-                val trampoline = Intent(context, MainActivity::class.java).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    putExtra("jarvis_action", "unlock")
-                }
-                try {
-                    context.startActivity(trampoline)
-                    unlockOrWake(context)
-                } catch (_: Exception) {
-                    postNotice(context, "Jarvis Unlock", "Tap to wake / unlock phone", trampoline)
-                    "Tap notification to unlock/wake"
+                val svc = JarvisAccessibilityService.instance
+                if (svc != null && UnlockVault.isConfigured(context)) {
+                    // pattern is drawn / PIN is tapped / password is typed on the lock screen
+                    svc.startUnlock()
+                } else {
+                    val hint = if (UnlockVault.isConfigured(context))
+                        " — turn on Accessibility → Jarvis phone unlock to let Jarvis enter your unlock code"
+                    else " — set your unlock code in Jarvis App → Unlock setup so Jarvis can enter it"
+                    val trampoline = Intent(context, MainActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                        putExtra("jarvis_action", "unlock")
+                    }
+                    try {
+                        context.startActivity(trampoline)
+                        unlockOrWake(context) + hint
+                    } catch (_: Exception) {
+                        postNotice(context, "Jarvis Unlock", "Tap to wake / unlock phone", trampoline)
+                        "Tap notification to unlock/wake$hint"
+                    }
                 }
             }
             "call", "phone", "dial" -> placeCall(context, value)

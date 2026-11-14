@@ -1,7 +1,7 @@
-"""Lock screen: Jarvis' window goes completely black with a padlock, and only a saved face or the PIN brings it back.
+"""Lock screen: Jarvis' window goes completely black with a padlock, and only a saved face or the password brings it back.
 
 It is its own top-level window laid exactly over the Jarvis window (a child widget can be hidden behind the GPU-rendered 3D
-stage, a top-level one cannot). The on-screen keypad makes the PIN usable with the hand cursor or a touch screen too.
+stage, a top-level one cannot). The on-screen keypad (123) and keyboard (ABC) make the password — any length, letters, digits, symbols — usable with the hand cursor or a touch screen too.
 """
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import math
 
 from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QRadialGradient
-from PyQt6.QtWidgets import QGridLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QGridLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
 from ui.theme import C, rgba
 
@@ -78,7 +78,9 @@ class LockIcon(QWidget):
 
 
 class Dots(QWidget):
-    """Shows how many characters of the PIN have been entered (never the characters)."""
+    """Always four dots, whatever the password length: they fill as you type but never reveal how long it is."""
+
+    SLOTS = 4
 
     def __init__(self):
         super().__init__()
@@ -97,7 +99,7 @@ class Dots(QWidget):
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        shown = max(4, self.n)
+        shown = self.SLOTS
         gap = 24
         x0 = self.width() / 2 - (shown - 1) * gap / 2
         if self._shake > 0:
@@ -110,6 +112,9 @@ class Dots(QWidget):
             p.setBrush(col if filled else Qt.BrushStyle.NoBrush)
             p.setPen(QPen(col, 1.6))
             p.drawEllipse(QPointF(x0 + i * gap, 15), 6, 6)
+
+
+MAX_LEN = 128
 
 
 class LockScreen(QWidget):
@@ -135,7 +140,7 @@ class LockScreen(QWidget):
         self.title.setFont(QFont("Segoe UI", 17, QFont.Weight.Bold))
         self.title.setStyleSheet(f"color:{C.TEXT};letter-spacing:5px;background:transparent;")
         lay.addWidget(self.title)
-        self.status = QLabel("Look at the camera — or enter your PIN")
+        self.status = QLabel("Look at the camera — or enter your password")
         self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status.setStyleSheet(f"color:{C.PRI};background:transparent;font-size:12px;")
         lay.addWidget(self.status)
@@ -149,28 +154,101 @@ class LockScreen(QWidget):
         self.error.setStyleSheet(f"color:{C.RED};background:transparent;font-size:11px;")
         lay.addWidget(self.error)
 
-        grid = QGridLayout()
-        grid.setSpacing(12)
-        grid.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "✔"]
-        for i, k in enumerate(keys):
-            b = QPushButton(k)
-            b.setFixedSize(64, 64)
-            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
-            accent = k == "✔"
-            b.setStyleSheet(
-                f"QPushButton{{background:{rgba(C.PRI, .2 if accent else .06)};color:{C.TEXT};border:1px solid "
-                f"{C.PRI if accent else rgba(C.PRI, .35)};border-radius:32px;font-size:20px;font-weight:600;}}"
-                f"QPushButton:hover{{background:{rgba(C.PRI, .3)};border-color:{C.PRI};}}"
-                f"QPushButton:pressed{{background:{rgba(C.GREEN, .4)};}}")
-            b.clicked.connect(lambda _=False, key=k: self._key(key))
-            grid.addWidget(b, i // 3, i % 3)
-        lay.addLayout(grid)
+        self._shift = False
+        self._letter_btns: list[tuple[QPushButton, str]] = []
+        self._stack = QStackedWidget()
+        self._stack.setStyleSheet("background:transparent;")
+        self._stack.addWidget(self._build_numpad())
+        self._stack.addWidget(self._build_keyboard())
+        lay.addWidget(self._stack, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.mode_btn = QPushButton("ABC  keyboard")
+        self.mode_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.mode_btn.setStyleSheet(
+            f"QPushButton{{background:transparent;color:{C.PRI};border:none;font-size:12px;padding:6px 14px;}}"
+            f"QPushButton:hover{{color:{C.TEXT};}}")
+        self.mode_btn.clicked.connect(self._toggle_mode)
+        lay.addWidget(self.mode_btn, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self._t = QTimer(self)
         self._t.timeout.connect(self._tick)
         self._t.start(33)
+
+    # ── on-screen input ──────────────────────────────────────────────────────────────
+    def _key_btn(self, label: str, size: tuple[int, int], radius: int, accent: bool = False, font: int = 20) -> QPushButton:
+        b = QPushButton(label)
+        b.setFixedSize(*size)
+        b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        b.setCursor(Qt.CursorShape.PointingHandCursor)
+        b.setStyleSheet(
+            f"QPushButton{{background:{rgba(C.PRI, .2 if accent else .06)};color:{C.TEXT};border:1px solid "
+            f"{C.PRI if accent else rgba(C.PRI, .35)};border-radius:{radius}px;font-size:{font}px;font-weight:600;}}"
+            f"QPushButton:hover{{background:{rgba(C.PRI, .3)};border-color:{C.PRI};}}"
+            f"QPushButton:pressed{{background:{rgba(C.GREEN, .4)};}}")
+        return b
+
+    def _build_numpad(self) -> QWidget:
+        w = QWidget()
+        grid = QGridLayout(w)
+        grid.setSpacing(12)
+        grid.setContentsMargins(0, 0, 0, 0)
+        keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "✔"]
+        for i, k in enumerate(keys):
+            b = self._key_btn(k, (64, 64), 32, accent=(k == "✔"))
+            b.clicked.connect(lambda _=False, key=k: self._key(key))
+            grid.addWidget(b, i // 3, i % 3)
+        return w
+
+    def _build_keyboard(self) -> QWidget:
+        w = QWidget()
+        col = QVBoxLayout(w)
+        col.setSpacing(6)
+        col.setContentsMargins(0, 0, 0, 0)
+        rows = ["1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm", "!@#$%^&*()-_=+.,?"]
+        for r, chars in enumerate(rows):
+            row = QWidget()
+            hl = QGridLayout(row)
+            hl.setSpacing(6)
+            hl.setContentsMargins(0, 0, 0, 0)
+            c0 = 0
+            if r == 3:                                                  # shift sits at the start of the last letter row
+                sh = self._key_btn("⇧", (44, 40), 8, font=16)
+                sh.clicked.connect(self._toggle_shift)
+                hl.addWidget(sh, 0, 0)
+                c0 = 1
+            for i, ch in enumerate(chars):
+                b = self._key_btn(ch, (34 if r == 4 else 40, 40), 8, font=15 if r == 4 else 16)
+                b.clicked.connect(lambda _=False, b=b: self._key(b.text()))
+                if ch.isalpha():
+                    self._letter_btns.append((b, ch))
+                hl.addWidget(b, 0, c0 + i)
+            if r == 3:
+                bs = self._key_btn("⌫", (56, 40), 8, font=16)
+                bs.clicked.connect(lambda _=False: self._key("⌫"))
+                hl.addWidget(bs, 0, c0 + len(chars))
+            col.addWidget(row, 0, Qt.AlignmentFlag.AlignHCenter)
+        bottom = QWidget()
+        bl = QGridLayout(bottom)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.setSpacing(6)
+        space = self._key_btn("space", (230, 40), 8, font=13)
+        space.clicked.connect(lambda _=False: self._key(" "))
+        ok = self._key_btn("✔  Unlock", (110, 40), 8, accent=True, font=14)
+        ok.clicked.connect(lambda _=False: self._key("✔"))
+        bl.addWidget(space, 0, 0)
+        bl.addWidget(ok, 0, 1)
+        col.addWidget(bottom, 0, Qt.AlignmentFlag.AlignHCenter)
+        return w
+
+    def _toggle_mode(self):
+        on_numpad = self._stack.currentIndex() == 0
+        self._stack.setCurrentIndex(1 if on_numpad else 0)
+        self.mode_btn.setText("123  keypad" if on_numpad else "ABC  keyboard")
+
+    def _toggle_shift(self):
+        self._shift = not self._shift
+        for b, ch in self._letter_btns:
+            b.setText(ch.upper() if self._shift else ch)
 
     # ── geometry: exactly over the Jarvis window ─────────────────────────────────────
     def cover(self):
@@ -198,7 +276,10 @@ class LockScreen(QWidget):
             self._submit()
             return
         else:
-            self._buf += k
+            if len(self._buf) < MAX_LEN:
+                self._buf += k
+            if self._shift:                                   # one-shot shift, like a phone keyboard
+                self._toggle_shift()
         self.error.setText("")
         self.dots.set_count(len(self._buf))
 
@@ -232,7 +313,7 @@ class LockScreen(QWidget):
     def set_progress(self, frac: float, seeing_face: bool):
         self.icon.progress = max(0.0, min(1.0, frac))
         self.icon.found = seeing_face and frac > 0
-        self.status.setText("Face recognised…" if frac > 0 else "Look at the camera — or enter your PIN")
+        self.status.setText("Face recognised…" if frac > 0 else "Look at the camera — or enter your password")
 
     def set_camera_note(self, note: str):
         if note:

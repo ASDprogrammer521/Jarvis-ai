@@ -63,8 +63,10 @@ def _hash(pin: str, salt: bytes) -> bytes:
 
 def set_pin(pin: str) -> str:
     pin = (pin or "").strip()
+    if len(pin) > 128:
+        return "The password can be at most 128 characters."
     if len(pin) < PIN_MIN:
-        return f"The PIN needs at least {PIN_MIN} characters."
+        return f"The password needs at least {PIN_MIN} characters."
     salt = os.urandom(16)
     _set(face_lock_pin=salt.hex() + "$" + _hash(pin, salt).hex())
     return ""
@@ -117,5 +119,5 @@ class LockLogic:
         self.fails += 1
         if self.fails >= MAX_FAILS:
             self.fails, self.blocked_until = 0, now + COOLDOWN
-            return False, f"Wrong PIN. Locked out for {int(COOLDOWN)} s."
-        return False, f"Wrong PIN ({MAX_FAILS - self.fails} tries left)."
+            return False, f"Wrong password. Locked out for {int(COOLDOWN)} s."
+        return False, f"Wrong password ({MAX_FAILS - self.fails} tries left)."

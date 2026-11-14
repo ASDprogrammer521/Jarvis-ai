@@ -1729,7 +1729,7 @@ class MainWindow(QMainWindow):
                 self._lock_screen.cover()
                 st = getattr(self, "gesture_status", "off")
                 if st.startswith(("error", "missing")):
-                    self._lock_screen.set_camera_note("Camera unavailable — use the PIN")
+                    self._lock_screen.set_camera_note("Camera unavailable — use the password")
             return
         if face_lock.is_enabled() and self._lock_logic.should_autolock(face_lock.timeout_minutes()):
             self.lock_jarvis("no saved face for a while")

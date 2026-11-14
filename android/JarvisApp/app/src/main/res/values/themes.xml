@@ -2,7 +2,7 @@
 <resources>
     <style name="Theme.JarvisApp" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="colorPrimary">@color/accent</item>
-        <item name="colorPrimaryVariant">#4A58E0</item>
+        <item name="colorPrimaryVariant">#0284C7</item>
         <item name="colorSecondary">@color/green</item>
         <item name="android:statusBarColor">@color/bg</item>
         <item name="android:navigationBarColor">@color/bar</item>
@@ -23,17 +23,20 @@
         <item name="android:textSize">11sp</item>
         <item name="android:textStyle">bold</item>
         <item name="android:letterSpacing">0.14</item>
+        <item name="android:drawableStart">@drawable/ic_label_dot</item>
+        <item name="android:drawablePadding">8dp</item>
     </style>
 
     <style name="Tile">
         <item name="android:layout_width">0dp</item>
-        <item name="android:layout_height">52dp</item>
+        <item name="android:layout_height">60dp</item>
         <item name="android:layout_columnWeight">1</item>
-        <item name="android:layout_margin">4dp</item>
+        <item name="android:layout_margin">5dp</item>
+        <item name="android:paddingHorizontal">6dp</item>
         <item name="android:gravity">center</item>
         <item name="android:background">@drawable/bg_tile</item>
         <item name="android:textColor">@color/text</item>
-        <item name="android:textSize">13sp</item>
+        <item name="android:textSize">12.5sp</item>
         <item name="android:textStyle">bold</item>
         <item name="android:clickable">true</item>
         <item name="android:focusable">true</item>
@@ -41,7 +44,7 @@
 
     <style name="CallBtn">
         <item name="android:layout_width">0dp</item>
-        <item name="android:layout_height">48dp</item>
+        <item name="android:layout_height">50dp</item>
         <item name="android:layout_weight">1</item>
         <item name="android:layout_marginHorizontal">4dp</item>
         <item name="android:gravity">center</item>
@@ -60,6 +63,53 @@
         <item name="android:background">@drawable/bg_key</item>
         <item name="android:textColor">@color/text</item>
         <item name="android:textSize">26sp</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+
+    <style name="NavTab">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:gravity">center</item>
+        <item name="android:background">@drawable/bg_nav_item</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+
+    <style name="NavIcon">
+        <item name="android:layout_width">24dp</item>
+        <item name="android:layout_height">24dp</item>
+        <item name="android:contentDescription">@null</item>
+    </style>
+
+    <style name="NavLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">3dp</item>
+        <item name="android:textSize">11sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="PageTitle">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/text</item>
+        <item name="android:textSize">22sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="Row">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">56dp</item>
+        <item name="android:layout_marginTop">8dp</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:paddingHorizontal">16dp</item>
+        <item name="android:background">@drawable/bg_btn_ghost</item>
+        <item name="android:drawableEnd">@drawable/ic_chevron</item>
+        <item name="android:textColor">@color/text</item>
+        <item name="android:textSize">14sp</item>
         <item name="android:clickable">true</item>
         <item name="android:focusable">true</item>
     </style>

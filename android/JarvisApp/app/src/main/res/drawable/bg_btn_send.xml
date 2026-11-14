@@ -2,8 +2,7 @@
 <ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="@color/ripple">
     <item>
         <shape android:shape="oval">
-            <solid android:color="@color/accent" />
+            <gradient android:angle="315" android:startColor="@color/accent_deep" android:endColor="@color/accent2" />
         </shape>
     </item>
 </ripple>
-<!-- by ASDcuber521 -->

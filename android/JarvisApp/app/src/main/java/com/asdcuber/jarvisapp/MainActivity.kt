@@ -15,11 +15,14 @@ import android.os.Looper
 import android.provider.OpenableColumns
 import android.provider.Settings
 import android.speech.RecognizerIntent
+import android.content.res.ColorStateList
 import android.view.View
+import android.widget.ImageView
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -43,6 +46,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var callStateLabel: TextView
     private var torchOn = false
     private var lastSeenLog: String = ""
+    private var currentTab = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,6 +66,13 @@ class MainActivity : AppCompatActivity() {
         val prefs = getSharedPreferences("jarvis", Context.MODE_PRIVATE)
         hostInput.setText(prefs.getString("host", ""))
         keyInput.setText(prefs.getString("key", ""))
+
+        setupNavigation(savedInstanceState?.getInt("tab", 0) ?: 0)
+        try {
+            findViewById<TextView>(R.id.aboutVersion).text =
+                "Version " + packageManager.getPackageInfo(packageName, 0).versionName
+        } catch (_: Exception) {
+        }
 
         requestStartupPermissions()
         handleJarvisAction(intent)
@@ -115,6 +126,9 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<View>(R.id.qYoutube).setOnClickListener { appendLog(exec("open_app", "youtube")) }
         findViewById<View>(R.id.qLock).setOnClickListener { appendLog(exec("lock")) }
+        findViewById<View>(R.id.qUnlockSetup).setOnClickListener {
+            startActivity(Intent(this, UnlockSetupActivity::class.java))
+        }
         findViewById<View>(R.id.qHome).setOnClickListener { appendLog(exec("home")) }
         findViewById<View>(R.id.qNotif).setOnClickListener {
             try {
@@ -584,7 +598,48 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ── Bottom navigation: Home · Phone · PC · Settings ─────────────────────
+    private fun setupNavigation(start: Int) {
+        val pages = intArrayOf(R.id.pageHome, R.id.pagePhone, R.id.pagePc, R.id.pageSettings)
+        val tabs = intArrayOf(R.id.navHome, R.id.navPhone, R.id.navPc, R.id.navSettings)
+        val icons = intArrayOf(R.id.navHomeIcon, R.id.navPhoneIcon, R.id.navPcIcon, R.id.navSettingsIcon)
+        val labels = intArrayOf(R.id.navHomeLabel, R.id.navPhoneLabel, R.id.navPcLabel, R.id.navSettingsLabel)
+        val on = ContextCompat.getColor(this, R.color.accent)
+        val off = ContextCompat.getColor(this, R.color.muted)
+
+        fun select(i: Int) {
+            currentTab = i
+            for (k in pages.indices) {
+                findViewById<View>(pages[k]).visibility = if (k == i) View.VISIBLE else View.GONE
+                val c = if (k == i) on else off
+                findViewById<ImageView>(icons[k]).imageTintList = ColorStateList.valueOf(c)
+                findViewById<TextView>(labels[k]).setTextColor(c)
+            }
+            // the "Ask Jarvis" bar belongs to Home only
+            findViewById<View>(R.id.chatBar).visibility = if (i == 0) View.VISIBLE else View.GONE
+        }
+        for (k in tabs.indices) findViewById<View>(tabs[k]).setOnClickListener { select(k) }
+        select(start.coerceIn(0, pages.size - 1))
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (currentTab != 0) select(0)
+                else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt("tab", currentTab)
+    }
+
     private fun appendLog(line: String) {
+        // the Activity log lives on Home — on the other pages show the result as a short toast instead
+        if (currentTab != 0 && line.isNotBlank()) Toast.makeText(this, line.trim().take(140), Toast.LENGTH_SHORT).show()
         logView.append(line + "\n")
         // keep the log light: drop the oldest lines past 200
         val lines = logView.text.lines()
