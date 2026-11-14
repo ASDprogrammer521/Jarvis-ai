@@ -21,7 +21,7 @@ from PyQt6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QGuiApplication, Q
 from PyQt6.QtWidgets import QWidget
 
 from core.hand_space import Card, Space, human_size
-from ui import hs_gpu
+from ui import hs_gpu, mesh_thumb
 from ui.fx import GL_ENABLED, samples_for
 from ui.hand_overlay import BONES
 from ui.mesh_formats import HEAVY_EXT
@@ -136,6 +136,10 @@ class HandSpaceOverlay(QWidget):
         self._mesh = hs_gpu.GlMesh()
         self._video = hs_gpu.GlVideo()
         self._mpool = ThreadPoolExecutor(max_workers=1)
+        self._tpool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hs-thumb")    # card pictures of 3D models, one at a time
+        self._mthumbs: OrderedDict = OrderedDict()                     # path → QPixmap (the picture a model card shows)
+        self._mthumb_jobs: dict[str, Future] = {}
+        self._mthumb_failed: set[str] = set()
         self._mjobs: dict[str, Future] = {}
         self._mdata: dict[str, tuple] = {}
         self._mfail: dict[str, str] = {}
@@ -323,6 +327,22 @@ class HandSpaceOverlay(QWidget):
                 self._mdata[path] = fut.result()
             except Exception as e:
                 self._mfail[path] = str(e) or "unreadable"
+        for path, fut in list(self._mthumb_jobs.items()):                # finished card pictures → pixmaps (GUI thread)
+            if not fut.done():
+                continue
+            del self._mthumb_jobs[path]
+            try:
+                arr = fut.result()
+            except Exception:
+                arr = None
+            if arr is None or arr.ndim != 3 or arr.shape[2] != 4:
+                self._mthumb_failed.add(path)
+                continue
+            h, w = arr.shape[:2]
+            img = QImage(arr.tobytes(), w, h, w * 4, QImage.Format.Format_RGBA8888).copy()
+            self._mthumbs[path] = QPixmap.fromImage(img)
+            while len(self._mthumbs) > 200:
+                self._mthumbs.popitem(last=False)
 
     def _upload_models(self):
         """Runs inside paintGL (the context is current): one upload per frame so a big model never freezes the screen."""
@@ -330,6 +350,8 @@ class HandSpaceOverlay(QWidget):
             data, tris, meta = self._mdata.pop(path)
             if self._mesh.ok and self._mesh.upload(path, data, meta):
                 self._tris[path] = tris
+                if path not in self._mthumbs and path not in self._mthumb_jobs and path not in self._mthumb_failed:
+                    self._mthumb_jobs[path] = self._tpool.submit(mesh_thumb.store_thumb, path, data, meta)   # opened once → card picture for next time
             else:
                 self._mfail[path] = self._mesh.err or "GPU upload failed"
             break
@@ -346,6 +368,20 @@ class HandSpaceOverlay(QWidget):
             self._mjobs[path] = self._mpool.submit(hs_gpu.load_mesh, path)
             return "loading"
         return "idle"
+
+    def _model_thumb(self, c: Card):
+        """The picture of a model card (QPixmap) or None: it is made once, in a worker thread, and cached on disk, so the card
+        shows it at once from then on. Big / slow formats (STEP, USD …) get theirs the first time they are opened."""
+        path = c.data["path"]
+        px = self._mthumbs.get(path)
+        if px is not None:
+            self._mthumbs.move_to_end(path)
+            return px
+        if (path in self._mthumb_failed or path in self._mthumb_jobs or len(self._mthumb_jobs) >= 3
+                or c.data.get("_sz", 0) > hs_gpu.SMALL_MODEL_BYTES or os.path.splitext(path)[1].lower() in HEAVY_EXT):
+            return None
+        self._mthumb_jobs[path] = self._tpool.submit(mesh_thumb.thumb_for, path, hs_gpu.load_mesh)
+        return None
 
     # ── pictures (background decode) ────────────────────────────────────────────────
     def _want(self, path: str, side: int, cache: OrderedDict, limit: int):
@@ -1163,11 +1199,25 @@ class HandSpaceOverlay(QWidget):
         if not drawn:
             msg = {"loading": "Loading 3D model…", "failed": self._mfail.get(path, "Can't show this model"),
                    "off": self._gl_why(), "idle": ""}.get(state, "")
-            f = _F(26 if not opened else 40, QFont.Weight.Bold)
-            p.setFont(f)
-            p.setPen(QColor(C.ACC))
-            p.drawText(QRectF(tr.left(), tr.top() + 6, tr.width(), tr.height() - 70), _AL.AlignCenter, "3D")
-            if msg:
+            px = self._model_thumb(c)
+            if px is not None:                                           # the model's picture instead of a bare "3D"
+                area = tr if fs else tr.adjusted(8, 8, -8, -52)
+                side = max(8.0, min(area.width(), area.height()))
+                p.save()
+                p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+                p.setOpacity(p.opacity() * (0.55 if opened and state == "loading" else 1.0))
+                p.drawPixmap(QRectF(area.center().x() - side / 2, area.center().y() - side / 2, side, side), px,
+                             QRectF(0, 0, px.width(), px.height()))
+                p.restore()
+                p.setFont(_F(9, QFont.Weight.Bold))                      # small "3D" tag in the corner
+                p.setPen(QColor(C.ACC))
+                p.drawText(QRectF(tr.left() + 12, tr.top() + 8, 40, 16), _AL.AlignLeft | _AL.AlignVCenter, "3D")
+            else:
+                f = _F(26 if not opened else 40, QFont.Weight.Bold)
+                p.setFont(f)
+                p.setPen(QColor(C.ACC))
+                p.drawText(QRectF(tr.left(), tr.top() + 6, tr.width(), tr.height() - 70), _AL.AlignCenter, "3D")
+            if msg and (px is None or opened):
                 p.setFont(_F(9))
                 p.setPen(QColor(C.TEXT_DIM))
                 p.drawText(QRectF(tr.left() + 10, tr.bottom() - 62, tr.width() - 20, 22), _AL.AlignCenter,

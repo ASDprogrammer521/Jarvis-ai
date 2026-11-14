@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from collections import OrderedDict
 
 import numpy as np
 
+from ui import mesh_cache
 from ui.glholo import rot_rows
 
 GL_FLOAT, GL_TRIANGLES, GL_BLEND, GL_SCISSOR_TEST, GL_DEPTH_TEST = 0x1406, 0x0004, 0x0BE2, 0x0C11, 0x0B71
@@ -28,7 +30,10 @@ MAX_TRIS = 1_500_000                      # more than this is thinned out (the G
 MAX_BYTES = 200 * 1024 * 1024
 MESH_BUDGET = 256 * 1024 * 1024                  # vertex bytes kept on the GPU; models are evicted oldest-first only beyond this
 MESH_MAX_COUNT = 40
-SMALL_MODEL_BYTES = 8 * 1024 * 1024       # only models up to this size are drawn live on the small cards
+SMALL_MODEL_BYTES = 8 * 1024 * 1024       # only models up to this size get a card picture made without opening them
+CACHE_MIN_BYTES = 256 * 1024              # smaller files parse so fast that a disk cache would not pay off
+CACHE_MIN_SECONDS = 0.06
+assert MAX_TRIS * 3 <= mesh_cache.MAX_MESH_VERTS
 
 
 # ── loading (worker thread): the readers live in ui/mesh_formats.py ───────────────────
@@ -36,6 +41,25 @@ from ui.mesh_formats import read_triangles  # noqa: E402
 
 
 def load_mesh(path: str):
+    """Cached version of `_parse_mesh`: the first time a model is read it is parsed and a prepared copy is written to the
+    disk cache in the background (ui/mesh_cache.py); every later time it is read straight from there, which skips the
+    slow parsing. The cache key holds the file's size and modification time, so an edited model is parsed again."""
+    key = mesh_cache.key_for(path, "mesh")                 # taken BEFORE reading: a file that changes meanwhile is never mis-cached
+    hit = mesh_cache.get_mesh(key)
+    if hit is not None:
+        return hit
+    t0 = time.perf_counter()
+    res = _parse_mesh(path)
+    try:
+        slow = os.path.getsize(path) >= CACHE_MIN_BYTES or time.perf_counter() - t0 >= CACHE_MIN_SECONDS
+    except OSError:
+        slow = False
+    if key and slow:
+        mesh_cache.put_mesh_async(key, res[0], res[2])
+    return res
+
+
+def _parse_mesh(path: str):
     """→ (float32 array (n_vertices, 3) of raw positions, triangle count, (cx, cy, cz, 1/radius)).
 
     The CPU only reads the file. Centring, scaling and the face normals used to be built here as big temporary arrays;
